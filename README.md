@@ -155,3 +155,7 @@ go-crud scaffold Post title:string body:text published:bool
 - [Prisma schema documentation](https://www.prisma.io/docs/orm/prisma-schema/overview)
 - [OpenAPI code generation in Go with oapi-codegen](https://dev.to/nikita_rykhlov/go-tools-code-generation-from-openapi-specs-in-go-with-oapi-codegen-3jc1)
 - [Generate a Go CRUD HTTP API with Ent + elk](https://entgo.io/blog/2021/07/29/generate-a-fully-working-go-crud-http-api-with-ent/)
+
+## License
+
+[MIT](LICENSE) © Pavel Sizikov
