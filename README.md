@@ -1,4 +1,4 @@
-# go-crud
+# go-crudgen
 
 A code generator that turns a declarative **entity model specification** into a
 fully-working, RESTful Go HTTP service — handlers, routing, data models,
@@ -13,13 +13,19 @@ of CRUD boilerplate.
 Every backend project re-implements the same layer: an entity, a table, five
 HTTP handlers (`Create`, `Read`, `List`, `Update`, `Delete`), request
 validation, and serialization. Frameworks in other ecosystems automate this —
-Rails scaffolding, Prisma + a REST layer, Django REST Framework, NestJS CRUD.
-Go has no single, idiomatic equivalent. `go-crud` aims to be that: describe your
+Rails scaffolding, Django REST Framework, and in JavaScript:
+
+- **[NestJS](https://docs.nestjs.com/recipes/crud-generator)** —
+  `nest generate resource <name>` scaffolds a module, a controller (or a
+  resolver for GraphQL), a service, DTOs, and an entity with CRUD stubs as
+  editable code — the same generate-and-own model `go-crudgen` uses.
+
+Go has no single, idiomatic equivalent. `go-crudgen` aims to be that: describe your
 entities once, generate idiomatic Go you own and can edit.
 
 ## What it generates
 
-From a single spec describing one or more entities, `go-crud` produces:
+From a single spec describing one or more entities, `go-crudgen` produces:
 
 - **Models** — Go structs with field tags (JSON, validation, ORM).
 - **Storage layer** — repository interfaces plus a concrete implementation
@@ -32,13 +38,13 @@ From a single spec describing one or more entities, `go-crud` produces:
 
 ### REST surface per entity
 
-| Method   | Path             | Action          |
-| -------- | ---------------- | --------------- |
-| `POST`   | `/{plural}`      | Create          |
-| `GET`    | `/{plural}`      | List (paginated)|
-| `GET`    | `/{plural}/{id}` | Read one        |
-| `PUT`    | `/{plural}/{id}` | Update          |
-| `DELETE` | `/{plural}/{id}` | Delete          |
+| Method   | Path             | Action           |
+| -------- | ---------------- | ---------------- |
+| `POST`   | `/{plural}`      | Create           |
+| `GET`    | `/{plural}`      | List (paginated) |
+| `GET`    | `/{plural}/{id}` | Read one         |
+| `PUT`    | `/{plural}/{id}` | Update           |
+| `DELETE` | `/{plural}/{id}` | Delete           |
 
 ## Specification format
 
@@ -52,14 +58,14 @@ The spec format is the heart of the tool. We surveyed common approaches:
   attributes (`@id`, `@unique`, `@default`, `@relation`). Very expressive, but
   requires learning (and us writing) a custom parser.
 - **OpenAPI** uses YAML/JSON and is the industry standard for describing REST
-  APIs; Go tools like `oapi-codegen` and Ent's `elk` already generate from it.
-  Portable, but verbose and API-shaped rather than entity-shaped.
+  APIs; the Go tool `oapi-codegen` generates server and client code directly
+  from an OpenAPI document. Portable, but verbose and API-shaped rather than
+  entity-shaped.
 
-**Decision: the primary format is YAML.** It is declarative, diff-friendly,
+**Decision: the format is YAML.** It is declarative, diff-friendly,
 checked into the repo, needs no custom parser, and reads naturally to anyone
-who has touched OpenAPI, Prisma, or Kubernetes manifests. A Rails-style
-one-line shorthand is offered as a convenience for quick scaffolding, and
-OpenAPI export is on the roadmap for interop.
+who has touched OpenAPI, Prisma, or Kubernetes manifests. OpenAPI export is on
+the roadmap for interop.
 
 ### Example: YAML spec
 
@@ -99,14 +105,6 @@ entities:
         type: string
 ```
 
-### Example: Rails-style shorthand (convenience)
-
-```bash
-go-crud scaffold Post title:string body:text published:bool author:references
-```
-
-This expands to the equivalent YAML before generation.
-
 ### Supported field types (initial)
 
 `string`, `text`, `int`, `int64`, `float`, `decimal`, `bool`, `date`,
@@ -116,14 +114,11 @@ This expands to the equivalent YAML before generation.
 ## Planned usage
 
 ```bash
-# install
-go install example.com/go-crud/cmd/go-crud@latest
+# build the binary (named go-crudgen) from the CLI entrypoint
+go build -o go-crudgen ./cmd/cli
 
 # generate a service from a spec
-go-crud generate --spec ./api.yaml --out ./internal/api
-
-# quick scaffold via shorthand
-go-crud scaffold Post title:string body:text published:bool
+go-crudgen generate --spec ./api.yaml --out ./internal/api
 ```
 
 ## Design principles
@@ -143,7 +138,6 @@ go-crud scaffold Post title:string body:text published:bool
 - [ ] CRUD handler generation (`net/http`)
 - [ ] PostgreSQL repository + migrations
 - [ ] List endpoint: pagination, filtering, sorting
-- [ ] Rails-style shorthand → YAML expansion
 - [ ] Relations (`belongs_to` / `has_many`)
 - [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)
@@ -152,9 +146,10 @@ go-crud scaffold Post title:string body:text published:bool
 ## References
 
 - [Rails Scaffold Generator Guide](https://rails.devcamp.com/trails/learn-ruby-on-rails-from-scratch/campsites/building-your-first-rails-application/guides/rails-scaffold-generator-guide)
+- [NestJS CRUD generator](https://docs.nestjs.com/recipes/crud-generator)
 - [Prisma schema documentation](https://www.prisma.io/docs/orm/prisma-schema/overview)
 - [OpenAPI code generation in Go with oapi-codegen](https://dev.to/nikita_rykhlov/go-tools-code-generation-from-openapi-specs-in-go-with-oapi-codegen-3jc1)
-- [Generate a Go CRUD HTTP API with Ent + elk](https://entgo.io/blog/2021/07/29/generate-a-fully-working-go-crud-http-api-with-ent/)
+- [Generate a Go CRUD HTTP API with Ent + elk](https://entgo.io/blog/2021/07/29/generate-a-fully-working-go-crudgen-http-api-with-ent/)
 
 ## License
 

@@ -1,0 +1,15 @@
+# Binaries (anchored to repo root; built via `go build -o go-crudgen ./cmd/cli`)
+/bin/
+/dist/
+/go-crudgen
+/go-crudgen.exe
+
+# Test & coverage output
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

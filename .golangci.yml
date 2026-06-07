@@ -1,0 +1,102 @@
+# golangci-lint v2 configuration for go-crudgen (Go 1.26)
+# Docs: https://golangci-lint.run/usage/configuration/
+version: "2"
+
+run:
+  # Fail if the go directive in go.mod is newer than the analyzers support.
+  go: "1.26"
+  # Allow extra time on cold caches / CI.
+  timeout: 5m
+  tests: true
+
+linters:
+  # Start from the curated "standard" set, then add high-signal extras.
+  default: standard
+  enable:
+    - asasalint        # catch []any passed as variadic any
+    - bodyclose        # http response bodies must be closed
+    - copyloopvar      # detect needless loop var copies (Go 1.22+ semantics)
+    - durationcheck    # multiplying two durations is almost always a bug
+    - errorlint        # correct errors.Is/As/wrapping usage
+    - gocheckcompilerdirectives # validate //go: directives
+    - gosec            # common security issues
+    - misspell         # spelling in comments/strings
+    - nilerr           # returning nil after a non-nil err check
+    - nolintlint       # keep //nolint directives honest
+    - predeclared      # shadowing predeclared identifiers
+    - revive           # fast, configurable golint replacement
+    - testifylint      # correct testify usage (no-op until you add testify)
+    - unconvert        # redundant type conversions
+    - unparam          # unused function parameters/results
+    - usestdlibvars    # use stdlib constants (http.MethodGet, etc.)
+    - wastedassign     # assignments never read
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # noisy; opt back in if struct memory matters
+    gosec:
+      excludes:
+        - G104 # handled by errcheck
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: early-return
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+    staticcheck:
+      checks:
+        - all
+
+  exclusions:
+    # Use the curated presets for common false positives.
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Relax noisy linters in test files.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+      # Generated CRUD output shouldn't be held to source standards.
+      - path: (^|/)(examples|generated)/
+        linters:
+          - revive
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - go-crudgen
