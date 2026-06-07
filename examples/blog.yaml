@@ -1,0 +1,33 @@
+version: 1
+package: blog            # Go package name for generated code
+module: example.com/blog # import path
+
+entities:
+  - name: Post
+    plural: posts         # optional; defaults to a naive pluralization
+    fields:
+      - name: title
+        type: string
+        required: true
+        validate: "min=1,max=200"
+      - name: body
+        type: text
+      - name: published
+        type: bool
+        default: false
+      - name: author
+        type: references   # belongs-to relation
+        target: Author
+    options:
+      timestamps: true     # adds created_at / updated_at
+      soft_delete: false
+
+  - name: Author
+    fields:
+      - name: email
+        type: string
+        required: true
+        unique: true
+        validate: "email"
+      - name: name
+        type: string
