@@ -6,6 +6,9 @@ entities:
   - name: Post
     plural: posts         # optional; defaults to a naive pluralization
     fields:
+      - name: id
+        type: uuid
+        primary: true      # at least one primary field is required per entity
       - name: title
         type: string
         required: true
@@ -24,6 +27,9 @@ entities:
 
   - name: Author
     fields:
+      - name: id
+        type: uuid
+        primary: true
       - name: email
         type: string
         required: true

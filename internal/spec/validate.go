@@ -55,6 +55,31 @@ func (s *Spec) Validate() error {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
 		}
+		if len(e.PrimaryKey()) == 0 {
+			return fmt.Errorf("entity %q has no primary key: mark at least one field with primary: true", e.Name)
+		}
+	}
+
+	// Reference targets are validated in a second pass so they may point at any
+	// entity regardless of declaration order.
+	byName := make(map[string]*Entity, len(s.Entities))
+	for i := range s.Entities {
+		byName[s.Entities[i].Name] = &s.Entities[i]
+	}
+	for i := range s.Entities {
+		e := &s.Entities[i]
+		for _, f := range e.Fields {
+			if f.Type != "references" {
+				continue
+			}
+			target, ok := byName[f.Target]
+			if !ok {
+				return fmt.Errorf("entity %q field %q references unknown entity %q", e.Name, f.Name, f.Target)
+			}
+			if len(target.PrimaryKey()) != 1 {
+				return fmt.Errorf("entity %q field %q references %q, which has a composite primary key (not yet supported)", e.Name, f.Name, f.Target)
+			}
+		}
 	}
 	return nil
 }

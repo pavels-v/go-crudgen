@@ -27,10 +27,23 @@ type EntityOptions struct {
 type Field struct {
 	Name     string `yaml:"name"`
 	Type     string `yaml:"type"`
+	Primary  bool   `yaml:"primary"` // part of the entity's primary key
 	Required bool   `yaml:"required"`
 	Unique   bool   `yaml:"unique"`
 	Index    bool   `yaml:"index"`
 	Default  any    `yaml:"default"`
 	Validate string `yaml:"validate"` // go-playground/validator rule string
 	Target   string `yaml:"target"`   // referenced entity, when Type == "references"
+}
+
+// PrimaryKey returns the fields that make up the entity's primary key, in
+// declaration order. A spec is invalid (rejected by Validate) if this is empty.
+func (e *Entity) PrimaryKey() []Field {
+	var pk []Field
+	for _, f := range e.Fields {
+		if f.Primary {
+			pk = append(pk, f)
+		}
+	}
+	return pk
 }

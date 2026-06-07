@@ -1,0 +1,14 @@
+package {{ .Package }}
+{{ if .Imports }}
+import (
+{{- range .Imports }}
+	{{ printf "%q" . }}
+{{- end }}
+)
+{{ end }}
+// {{ .Struct }} represents a {{ .Lower }}.
+type {{ .Struct }} struct {
+{{- range .Fields }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
+{{- end }}
+}

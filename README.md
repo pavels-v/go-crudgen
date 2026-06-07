@@ -78,6 +78,9 @@ entities:
   - name: Post
     plural: posts         # optional; defaults to a naive pluralization
     fields:
+      - name: id
+        type: uuid
+        primary: true     # every entity needs at least one primary field
       - name: title
         type: string
         required: true
@@ -96,6 +99,9 @@ entities:
 
   - name: Author
     fields:
+      - name: id
+        type: uuid
+        primary: true
       - name: email
         type: string
         required: true
@@ -109,6 +115,7 @@ entities:
 
 `string`, `text`, `int`, `int64`, `float`, `decimal`, `bool`, `date`,
 `datetime`, `uuid`, `json`, and `references` (relations). Per-field modifiers:
+`primary` (marks a primary-key field; entities may have a composite key),
 `required`, `unique`, `default`, `index`, and `validate` (validation tag rules).
 
 ## Planned usage
@@ -117,7 +124,10 @@ entities:
 # build the binary (named go-crudgen) from the CLI entrypoint
 go build -o go-crudgen ./cmd/cli
 
-# generate a service from a spec
+# preview generated code on stdout (default when --out is omitted)
+go-crudgen generate --spec ./api.yaml
+
+# generate a service from a spec into a directory
 go-crudgen generate --spec ./api.yaml --out ./internal/api
 ```
 
@@ -133,8 +143,8 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api
 
 ## Roadmap
 
-- [ ] YAML spec parser and validation
-- [ ] Model + struct-tag generation
+- [x] YAML spec parser and validation
+- [x] Model + struct-tag generation
 - [ ] CRUD handler generation (`net/http`)
 - [ ] PostgreSQL repository + migrations
 - [ ] List endpoint: pagination, filtering, sorting

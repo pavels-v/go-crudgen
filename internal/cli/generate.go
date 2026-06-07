@@ -12,7 +12,7 @@ import (
 func runGenerate(args []string) int {
 	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
 	specPath := fs.String("spec", "", "path to the YAML entity specification (required)")
-	outDir := fs.String("out", ".", "output directory for generated code")
+	outDir := fs.String("out", "", "output directory for generated code (default: write to stdout)")
 	dryRun := fs.Bool("dry-run", false, "report what would be generated without writing files")
 	if err := fs.Parse(args); err != nil {
 		return 2
