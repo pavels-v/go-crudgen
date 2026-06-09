@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"go-crudgen/internal/spec"
 )
 
@@ -24,30 +26,33 @@ func render(t *testing.T, s *spec.Spec, entity string) string {
 			e = &s.Entities[i]
 		}
 	}
-	if e == nil {
-		t.Fatalf("entity %q not found in spec", entity)
-	}
+	require.NotNilf(t, e, "entity %q not found in spec", entity)
 
 	src, err := renderModel(s, e, byName)
-	if err != nil {
-		t.Fatalf("renderModel(%s): %v", entity, err)
-	}
-	if _, err := parser.ParseFile(token.NewFileSet(), "", src, parser.AllErrors); err != nil {
-		t.Fatalf("generated code does not parse: %v\n%s", err, src)
-	}
+	require.NoErrorf(t, err, "renderModel(%s)", entity)
+	requireParses(t, src)
 	return string(src)
+}
+
+// requireParses fails the test when src is not valid Go source.
+func requireParses(t *testing.T, src []byte) {
+	t.Helper()
+
+	_, err := parser.ParseFile(token.NewFileSet(), "", src, parser.AllErrors)
+	require.NoErrorf(t, err, "generated code does not parse:\n%s", src)
 }
 
 // wantContains asserts the generated code contains want, comparing with runs of
 // whitespace collapsed so gofmt's tab alignment does not matter.
 func wantContains(t *testing.T, got, want string) {
 	t.Helper()
-	if !strings.Contains(strings.Join(strings.Fields(got), " "), want) {
-		t.Errorf("generated code missing %q\n--- got ---\n%s", want, got)
-	}
+	require.Containsf(t, strings.Join(strings.Fields(got), " "), want,
+		"generated code missing %q", want)
 }
 
 func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
+	t.Parallel()
+
 	s := &spec.Spec{
 		Package: "shop",
 		Entities: []spec.Entity{{
@@ -86,6 +91,8 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 }
 
 func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
+	t.Parallel()
+
 	s := &spec.Spec{
 		Package: "blog",
 		Entities: []spec.Entity{
@@ -106,6 +113,8 @@ func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
 }
 
 func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
+	t.Parallel()
+
 	s := &spec.Spec{
 		Package: "app",
 		Entities: []spec.Entity{{
@@ -124,6 +133,8 @@ func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
 }
 
 func TestRenderModel_CompositePrimaryKey(t *testing.T) {
+	t.Parallel()
+
 	s := &spec.Spec{
 		Package: "rel",
 		Entities: []spec.Entity{{
@@ -142,30 +153,223 @@ func TestRenderModel_CompositePrimaryKey(t *testing.T) {
 	wantContains(t, got, "Role string")
 }
 
-func TestPascalCase(t *testing.T) {
-	cases := map[string]string{
-		"title":      "Title",
-		"created_at": "CreatedAt",
-		"id":         "ID",
-		"user_id":    "UserID",
-		"api_url":    "APIURL",
+// renderHandlerSrc runs handlerInfo + renderHandler for the named entity and
+// returns the generated source, failing if the entity is not serveable or the
+// output is not valid Go.
+func renderHandlerSrc(t *testing.T, s *spec.Spec, entity string) string {
+	t.Helper()
+
+	byName := make(map[string]*spec.Entity, len(s.Entities))
+	for i := range s.Entities {
+		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
-	for in, want := range cases {
-		if got := pascalCase(in); got != want {
-			t.Errorf("pascalCase(%q) = %q, want %q", in, got, want)
+	var e *spec.Entity
+	for i := range s.Entities {
+		if s.Entities[i].Name == entity {
+			e = &s.Entities[i]
 		}
+	}
+	require.NotNilf(t, e, "entity %q not found in spec", entity)
+
+	hd, ok, err := handlerInfo(s, e, byName)
+	require.NoErrorf(t, err, "handlerInfo(%s)", entity)
+	require.Truef(t, ok, "entity %q unexpectedly not serveable", entity)
+
+	src, err := renderHandler(hd)
+	require.NoErrorf(t, err, "renderHandler(%s)", entity)
+	requireParses(t, src)
+	return string(src)
+}
+
+func TestRenderModel_DTOs(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Entities: []spec.Entity{{
+			Name: "Post",
+			Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "title", Type: "string", Required: true},
+			},
+			Options: spec.EntityOptions{Timestamps: true},
+		}},
+	}
+
+	got := render(t, s, "Post")
+	for _, want := range []string{
+		"type CreatePostRequest struct {",
+		"type UpdatePostRequest struct {",
+		"Title string",
+		`json:"title" validate:"required"`,
+	} {
+		wantContains(t, got, want)
+	}
+	// The update body omits the primary key (it comes from the path)...
+	require.NotContains(t, strings.Join(strings.Fields(got), " "),
+		"type UpdatePostRequest struct { ID uuid.UUID",
+		"UpdatePostRequest should not contain the primary key field")
+	// ...and DTOs never carry the option-injected timestamp fields.
+	create := got[strings.Index(got, "type CreatePostRequest"):]
+	require.NotContains(t, create, "CreatedAt", "DTOs should not contain timestamp fields")
+}
+
+func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Entities: []spec.Entity{{
+			Name:   "Post",
+			Plural: "posts",
+			Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "title", Type: "string", Required: true},
+			},
+		}},
+	}
+
+	got := renderHandlerSrc(t, s, "Post")
+	for _, want := range []string{
+		`mux.HandleFunc("POST /posts", h.Create)`,
+		`mux.HandleFunc("GET /posts", h.List)`,
+		`mux.HandleFunc("GET /posts/{id}", h.Get)`,
+		`mux.HandleFunc("PUT /posts/{id}", h.Update)`,
+		`mux.HandleFunc("DELETE /posts/{id}", h.Delete)`,
+		"Get(ctx context.Context, id uuid.UUID) (*Post, error)",
+		"id, err := uuid.Parse(r.PathValue(\"id\"))",
+		"writeJSON(w, http.StatusCreated, m)",
+		"w.WriteHeader(http.StatusNoContent)",
+	} {
+		wantContains(t, got, want)
+	}
+}
+
+func TestRenderHandler_StringPKNeedsNoParse(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "cat",
+		Entities: []spec.Entity{{
+			Name:   "Tag",
+			Fields: []spec.Field{{Name: "slug", Type: "string", Primary: true}},
+		}},
+	}
+
+	got := renderHandlerSrc(t, s, "Tag")
+	wantContains(t, got, `id := r.PathValue("id")`)
+}
+
+func TestHandlerInfo_SkipsCompositePK(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "rel",
+		Entities: []spec.Entity{{
+			Name: "Membership",
+			Fields: []spec.Field{
+				{Name: "user_id", Type: "uuid", Primary: true},
+				{Name: "group_id", Type: "uuid", Primary: true},
+			},
+		}},
+	}
+	byName := map[string]*spec.Entity{"Membership": &s.Entities[0]}
+
+	_, ok, err := handlerInfo(s, &s.Entities[0], byName)
+	require.NoError(t, err)
+	require.False(t, ok, "composite-primary-key entity should not be serveable")
+}
+
+func TestRenderShared_WiresEntities(t *testing.T) {
+	t.Parallel()
+
+	src, err := renderShared(sharedData{
+		Package: "blog",
+		Entities: []sharedEntity{
+			{Struct: "Post", Repo: "PostRepository", DepsField: "Posts"},
+		},
+	})
+	require.NoError(t, err)
+	requireParses(t, src)
+
+	got := string(src)
+	for _, want := range []string{
+		"var ErrNotFound = errors.New(\"not found\")",
+		"Posts PostRepository",
+		"RegisterPostRoutes(mux, NewPostHandler(deps.Posts))",
+	} {
+		wantContains(t, got, want)
+	}
+}
+
+func TestPluralize(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		in       string
+		override string
+		want     string
+	}{
+		{name: "regular plural", in: "Post", want: "posts"},
+		{name: "another regular", in: "Author", want: "authors"},
+		{name: "consonant y to ies", in: "Category", want: "categories"},
+		{name: "x to es", in: "Box", want: "boxes"},
+		{name: "vowel y stays", in: "Day", want: "days"},
+		{name: "explicit override", in: "Person", override: "people", want: "people"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tc.want, plural(tc.in, tc.override))
+		})
+	}
+}
+
+func TestPascalCase(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "single word", in: "title", want: "Title"},
+		{name: "snake case", in: "created_at", want: "CreatedAt"},
+		{name: "initialism id", in: "id", want: "ID"},
+		{name: "trailing initialism", in: "user_id", want: "UserID"},
+		{name: "two initialisms", in: "api_url", want: "APIURL"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tc.want, pascalCase(tc.in))
+		})
 	}
 }
 
 func TestSnakeCase(t *testing.T) {
-	cases := map[string]string{
-		"Post":     "post",
-		"Author":   "author",
-		"BlogPost": "blog_post",
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "single word", in: "Post", want: "post"},
+		{name: "another word", in: "Author", want: "author"},
+		{name: "camel case", in: "BlogPost", want: "blog_post"},
 	}
-	for in, want := range cases {
-		if got := snakeCase(in); got != want {
-			t.Errorf("snakeCase(%q) = %q, want %q", in, got, want)
-		}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tc.want, snakeCase(tc.in))
+		})
 	}
 }

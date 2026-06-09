@@ -12,3 +12,17 @@ type {{ .Struct }} struct {
 	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
 {{- end }}
 }
+
+// {{ .CreateName }} is the request body for creating a {{ .Lower }}.
+type {{ .CreateName }} struct {
+{{- range .CreateBody }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
+{{- end }}
+}
+
+// {{ .UpdateName }} is the request body for replacing a {{ .Lower }}.
+type {{ .UpdateName }} struct {
+{{- range .UpdateBody }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
+{{- end }}
+}

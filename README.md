@@ -5,8 +5,9 @@ fully-working, RESTful Go HTTP service — handlers, routing, data models,
 validation, and persistence — so you spend your time on business logic instead
 of CRUD boilerplate.
 
-> Status: early design. Nothing is generated yet; this document describes the
-> service to be built and the decisions behind it.
+> Status: in progress. Models, DTOs, CRUD handlers, and `net/http` router
+> wiring are generated today; the storage layer, migrations, and OpenAPI export
+> are still on the roadmap.
 
 ## Why
 
@@ -27,14 +28,20 @@ entities once, generate idiomatic Go you own and can edit.
 
 From a single spec describing one or more entities, `go-crudgen` produces:
 
-- **Models** — Go structs with field tags (JSON, validation, ORM).
-- **Storage layer** — repository interfaces plus a concrete implementation
-  (initial target: PostgreSQL via SQL/`pgx`; pluggable backends planned).
+- **Models** — Go structs with field tags (JSON, validation).
+- **Request/response DTOs** — `Create`/`Update` bodies with validation derived
+  from the spec.
 - **HTTP handlers** — full CRUD per entity following REST conventions.
 - **Router wiring** — routes registered on a standard `net/http` mux.
-- **Request/response DTOs** — with validation derived from the spec.
-- **Migrations** — SQL schema for each entity (planned).
-- **OpenAPI document** — generated from the same spec for client tooling (planned).
+- **Repository interfaces** — the storage seam each handler depends on; you
+  provide the implementation (a concrete generated backend is on the roadmap).
+
+Still planned:
+
+- **Storage layer** — a concrete repository implementation (initial target:
+  PostgreSQL via SQL/`pgx`; pluggable backends planned).
+- **Migrations** — SQL schema for each entity.
+- **OpenAPI document** — generated from the same spec for client tooling.
 
 ### REST surface per entity
 
@@ -145,7 +152,7 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api
 
 - [x] YAML spec parser and validation
 - [x] Model + struct-tag generation
-- [ ] CRUD handler generation (`net/http`)
+- [x] CRUD handler generation (`net/http`)
 - [ ] PostgreSQL repository + migrations
 - [ ] List endpoint: pagination, filtering, sorting
 - [ ] Relations (`belongs_to` / `has_many`)

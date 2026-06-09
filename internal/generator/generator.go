@@ -61,32 +61,78 @@ func Generate(s *spec.Spec, opts Options) error {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
 
-	for i := range s.Entities {
-		e := &s.Entities[i]
-		src, err := renderModel(s, e, byName)
-		if err != nil {
-			return fmt.Errorf("generating model for %q: %w", e.Name, err)
-		}
+	emit := func(file string, src []byte) error {
 		if toStdout {
-			fmt.Fprintf(os.Stdout, "// file: %s.gen.go\n%s\n", snakeCase(e.Name), src)
-			continue
+			fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", file, src)
+			return nil
 		}
-		path := filepath.Join(opts.OutDir, snakeCase(e.Name)+".gen.go")
+		path := filepath.Join(opts.OutDir, file)
 		if err := os.WriteFile(path, src, 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", path, err)
 		}
 		fmt.Fprintf(os.Stderr, "  wrote %s\n", path)
+		return nil
+	}
+
+	var serveable []sharedEntity
+	for i := range s.Entities {
+		e := &s.Entities[i]
+		base := snakeCase(e.Name)
+
+		src, err := renderModel(s, e, byName)
+		if err != nil {
+			return fmt.Errorf("generating model for %q: %w", e.Name, err)
+		}
+		if err := emit(base+".gen.go", src); err != nil {
+			return err
+		}
+
+		hd, ok, err := handlerInfo(s, e, byName)
+		if err != nil {
+			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
+		}
+		if !ok {
+			fmt.Fprintf(os.Stderr, "  - %s: skipping handlers (needs a single primary key of a path-addressable type)\n", e.Name)
+			continue
+		}
+		hsrc, err := renderHandler(hd)
+		if err != nil {
+			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
+		}
+		if err := emit(base+"_handler.gen.go", hsrc); err != nil {
+			return err
+		}
+		serveable = append(serveable, sharedEntity{
+			Struct:    hd.Struct,
+			Repo:      hd.Repo,
+			DepsField: pascalCase(hd.Plural),
+		})
+	}
+
+	if len(serveable) > 0 {
+		ssrc, err := renderShared(sharedData{Package: s.Package, Entities: serveable})
+		if err != nil {
+			return fmt.Errorf("generating router: %w", err)
+		}
+		if err := emit("http.gen.go", ssrc); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// modelData is the template input for a single entity's model file.
+// modelData is the template input for a single entity's model file: the model
+// struct plus the create/update request DTOs derived from the spec fields.
 type modelData struct {
-	Package string
-	Imports []string
-	Struct  string
-	Lower   string // struct name lower-cased, for the doc comment
-	Fields  []modelField
+	Package    string
+	Imports    []string
+	Struct     string
+	Lower      string // struct name lower-cased, for the doc comment
+	Fields     []modelField
+	CreateName string       // e.g. "CreatePostRequest"
+	UpdateName string       // e.g. "UpdatePostRequest"
+	CreateBody []modelField // all writable fields (includes the primary key)
+	UpdateBody []modelField // writable fields minus the primary key (it comes from the path)
 }
 
 type modelField struct {
@@ -95,10 +141,126 @@ type modelField struct {
 	Tag    string
 }
 
+// handlerData is the template input for one entity's handler file.
+type handlerData struct {
+	Package      string
+	Imports      []string
+	Struct       string
+	Repo         string // e.g. "PostRepository"
+	Plural       string // route segment, e.g. "posts"
+	CreateName   string
+	UpdateName   string
+	PK           pkData
+	CreateAssign []string // field GoNames assigned from the create request
+	UpdateAssign []string // field GoNames assigned from the update request (PK excluded)
+}
+
+type pkData struct {
+	GoName   string
+	GoType   string
+	Expr     string // parse expression for the {id} path value
+	NeedsErr bool
+}
+
+// sharedData is the template input for the package-wide http.gen.go file.
+type sharedData struct {
+	Package  string
+	Entities []sharedEntity
+}
+
+type sharedEntity struct {
+	Struct    string
+	Repo      string
+	DepsField string // field name in Deps, e.g. "Posts"
+}
+
+// handlerInfo builds the handler template data for an entity, reporting ok=false
+// when the entity is not serveable: a composite primary key cannot be addressed
+// by a single /{id} path, and some primary-key types have no path parser.
+func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, bool, error) {
+	pk := e.PrimaryKey()
+	if len(pk) != 1 {
+		return handlerData{}, false, nil
+	}
+	gt, err := fieldType(pk[0], byName)
+	if err != nil {
+		return handlerData{}, false, err
+	}
+	pp, ok := pkParser(gt.expr)
+	if !ok {
+		return handlerData{}, false, nil
+	}
+
+	name := pascalCase(e.Name)
+	data := handlerData{
+		Package:    s.Package,
+		Struct:     name,
+		Repo:       name + "Repository",
+		Plural:     plural(e.Name, e.Plural),
+		CreateName: "Create" + name + "Request",
+		UpdateName: "Update" + name + "Request",
+		PK: pkData{
+			GoName:   pascalCase(pk[0].Name),
+			GoType:   gt.expr,
+			Expr:     pp.expr,
+			NeedsErr: pp.needsErr,
+		},
+	}
+	for _, f := range e.Fields {
+		gn := pascalCase(f.Name)
+		data.CreateAssign = append(data.CreateAssign, gn)
+		if !f.Primary {
+			data.UpdateAssign = append(data.UpdateAssign, gn)
+		}
+	}
+
+	imports := map[string]struct{}{"context": {}, "net/http": {}}
+	if pp.imp != "" {
+		imports[pp.imp] = struct{}{}
+	}
+	for imp := range imports {
+		data.Imports = append(data.Imports, imp)
+	}
+	sort.Strings(data.Imports)
+	return data, true, nil
+}
+
+// renderHandler executes and gofmt-formats the handler file for one entity.
+func renderHandler(data handlerData) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "handler.go.tmpl", data); err != nil {
+		return nil, fmt.Errorf("rendering handler template: %w", err)
+	}
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("formatting generated source: %w", err)
+	}
+	return formatted, nil
+}
+
+// renderShared executes and gofmt-formats the package-wide http file.
+func renderShared(data sharedData) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "http.go.tmpl", data); err != nil {
+		return nil, fmt.Errorf("rendering http template: %w", err)
+	}
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("formatting generated source: %w", err)
+	}
+	return formatted, nil
+}
+
 // renderModel builds, executes, and gofmt-formats the model file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
 	name := pascalCase(e.Name)
-	data := modelData{Package: s.Package, Struct: name, Lower: strings.ToLower(name)}
+	data := modelData{
+		Package:    s.Package,
+		Struct:     name,
+		Lower:      strings.ToLower(name),
+		CreateName: "Create" + name + "Request",
+		UpdateName: "Update" + name + "Request",
+	}
 	imports := make(map[string]struct{})
 
 	add := func(name, goExpr, imp string, tag string) {
@@ -114,6 +276,15 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			return nil, err
 		}
 		add(f.Name, gt.expr, gt.imp, fieldTag(f))
+
+		// DTOs carry only spec fields (not the option-injected timestamp fields).
+		// The create body accepts every field; the update body omits primary-key
+		// fields because they are addressed by the request path.
+		mf := modelField{GoName: pascalCase(f.Name), GoType: gt.expr, Tag: fieldTag(f)}
+		data.CreateBody = append(data.CreateBody, mf)
+		if !f.Primary {
+			data.UpdateBody = append(data.UpdateBody, mf)
+		}
 	}
 
 	if e.Options.Timestamps {

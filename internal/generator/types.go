@@ -40,6 +40,30 @@ func scalarType(t string) (goType, bool) {
 	return goType{}, false
 }
 
+// pkParse describes how a primary key of the given Go type is parsed from the
+// `{id}` path segment inside a handler.
+type pkParse struct {
+	expr     string // expression yielding the id (and an error when needsErr)
+	needsErr bool   // false for string, which needs no parsing
+	imp      string // import the parse expression needs ("" for none)
+}
+
+// pkParser returns how to parse a path id into the given Go primary-key type.
+// ok is false for types we do not generate handlers for (decimal, time, json).
+func pkParser(goExpr string) (pkParse, bool) {
+	switch goExpr {
+	case "string":
+		return pkParse{expr: `r.PathValue("id")`}, true
+	case "int":
+		return pkParse{expr: `strconv.Atoi(r.PathValue("id"))`, needsErr: true, imp: "strconv"}, true
+	case "int64":
+		return pkParse{expr: `strconv.ParseInt(r.PathValue("id"), 10, 64)`, needsErr: true, imp: "strconv"}, true
+	case "uuid.UUID":
+		return pkParse{expr: `uuid.Parse(r.PathValue("id"))`, needsErr: true, imp: "github.com/google/uuid"}, true
+	}
+	return pkParse{}, false
+}
+
 // fieldType resolves a field's Go type. For references it derives the type from
 // the target entity's single primary-key field (validation guarantees the
 // target exists and is not composite).
