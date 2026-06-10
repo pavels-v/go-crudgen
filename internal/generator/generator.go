@@ -26,8 +26,10 @@ type Options struct {
 	DryRun bool
 }
 
-// Generate produces a Go service from the spec. Currently it emits the model
-// structs for each entity (see the roadmap in README.md for what's next).
+// Generate produces a Go service from the spec. It emits a model file per
+// entity, a CRUD handler file for each serveable entity, and a package-wide
+// http.gen.go with the router and shared helpers (see the roadmap in README.md
+// for what's next).
 //
 // When opts.OutDir is empty the generated code is written to stdout; otherwise
 // one file per entity is written into that directory. Progress and diagnostics

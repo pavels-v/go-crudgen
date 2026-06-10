@@ -125,6 +125,9 @@ entities:
 `primary` (marks a primary-key field; entities may have a composite key),
 `required`, `unique`, `default`, `index`, and `validate` (validation tag rules).
 
+> Note: entities with a composite primary key currently generate a model but no
+> HTTP handlers (a single `/{id}` path can't address a composite key yet).
+
 ## Planned usage
 
 ```bash
@@ -154,7 +157,9 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api
 - [x] Model + struct-tag generation
 - [x] CRUD handler generation (`net/http`)
 - [ ] PostgreSQL repository + migrations
-- [ ] List endpoint: pagination, filtering, sorting
+- [x] List endpoint: pagination (`?limit` / `?offset`)
+- [ ] List endpoint: filtering
+- [ ] List endpoint: sorting
 - [ ] Relations (`belongs_to` / `has_many`)
 - [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)
