@@ -1,0 +1,119 @@
+package {{ .Package }}
+
+import (
+{{- range .Imports }}
+	{{ printf "%q" . }}
+{{- end }}
+)
+
+// {{ .Repo }} is the storage interface the {{ .Struct }} handlers depend on.
+// The concrete implementation is provided by the caller.
+type {{ .Repo }} interface {
+	Create(ctx context.Context, m *{{ .Struct }}) error
+	Get(ctx context.Context, id {{ .PK.GoType }}) (*{{ .Struct }}, error)
+	List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error)
+	Update(ctx context.Context, m *{{ .Struct }}) error
+	Delete(ctx context.Context, id {{ .PK.GoType }}) error
+}
+
+// {{ .Struct }}Handler serves the CRUD endpoints for {{ .Struct }}.
+type {{ .Struct }}Handler struct {
+	repo {{ .Repo }}
+}
+
+// New{{ .Struct }}Handler returns a handler backed by repo.
+func New{{ .Struct }}Handler(repo {{ .Repo }}) *{{ .Struct }}Handler {
+	return &{{ .Struct }}Handler{repo: repo}
+}
+
+// Register{{ .Struct }}Routes registers the {{ .Struct }} REST routes on mux.
+func Register{{ .Struct }}Routes(mux *http.ServeMux, h *{{ .Struct }}Handler) {
+	mux.HandleFunc("POST /{{ .Plural }}", h.Create)
+	mux.HandleFunc("GET /{{ .Plural }}", h.List)
+	mux.HandleFunc("GET /{{ .Plural }}/{id}", h.Get)
+	mux.HandleFunc("PUT /{{ .Plural }}/{id}", h.Update)
+	mux.HandleFunc("DELETE /{{ .Plural }}/{id}", h.Delete)
+}
+
+func (h *{{ .Struct }}Handler) Create(w http.ResponseWriter, r *http.Request) {
+	var req {{ .CreateName }}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := validate.Struct(req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	m := {{ .Struct }}{
+{{- range .CreateAssign }}
+		{{ . }}: req.{{ . }},
+{{- end }}
+	}
+	if err := h.repo.Create(r.Context(), &m); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, m)
+}
+
+func (h *{{ .Struct }}Handler) Get(w http.ResponseWriter, r *http.Request) {
+	{{ template "parseID" . }}
+	m, err := h.repo.Get(r.Context(), id)
+	if err != nil {
+		writeRepoError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePage(r)
+	items, err := h.repo.List(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
+	{{ template "parseID" . }}
+	var req {{ .UpdateName }}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := validate.Struct(req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	m := {{ .Struct }}{
+		{{ .PK.GoName }}: id,
+{{- range .UpdateAssign }}
+		{{ . }}: req.{{ . }},
+{{- end }}
+	}
+	if err := h.repo.Update(r.Context(), &m); err != nil {
+		writeRepoError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (h *{{ .Struct }}Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	{{ template "parseID" . }}
+	if err := h.repo.Delete(r.Context(), id); err != nil {
+		writeRepoError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+{{- define "parseID" -}}
+{{ if .PK.NeedsErr }}id, err := {{ .PK.Expr }}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}{{ else }}id := {{ .PK.Expr }}{{ end }}
+{{- end -}}

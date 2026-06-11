@@ -1,6 +1,10 @@
 package spec
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 // validSpec returns a minimal spec that passes Validate; tests mutate a copy to
 // exercise individual failure cases.
@@ -20,12 +24,14 @@ func validSpec() *Spec {
 }
 
 func TestValidate_OK(t *testing.T) {
-	if err := validSpec().Validate(); err != nil {
-		t.Fatalf("expected valid spec, got error: %v", err)
-	}
+	t.Parallel()
+
+	require.NoError(t, validSpec().Validate())
 }
 
 func TestValidate_Errors(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name   string
 		mutate func(*Spec)
@@ -50,11 +56,11 @@ func TestValidate_Errors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			s := validSpec()
 			tc.mutate(s)
-			if err := s.Validate(); err == nil {
-				t.Errorf("expected error for %q, got nil", tc.name)
-			}
+			require.Errorf(t, s.Validate(), "expected error for %q", tc.name)
 		})
 	}
 }
