@@ -15,6 +15,12 @@ type dbData struct {
 	DriverImport string // blank-imported driver package
 }
 
+// nullsData is the template input for the package-wide nulls.gen.go file holding
+// the generic sql.Null[T] conversion helpers shared by every repository.
+type nullsData struct {
+	Package string
+}
+
 // driverInfo maps a --driver choice to its database/sql driver name and the
 // package that must be blank-imported to register it. An empty choice defaults
 // to pgx. ok is false for unsupported drivers.
@@ -79,6 +85,13 @@ type repoData struct {
 	PKGoType        string
 	HasTimestamps   bool
 	NoUpdateColumns bool // entity has no writable columns; Update is an existence check
+	HasNullable     bool // any persisted column is nullable (so sql.Null helpers are used)
+
+	RowStruct  string     // db-mapped scan type, e.g. "postRow"
+	NewRowFunc string     // model -> row constructor, e.g. "newPostRow"
+	RowFields  []rowField // the row struct's fields, in column order
+	ToRow      []assign   // spec-field assignments for NewRowFunc (model -> row)
+	ToModel    []assign   // all persisted columns for toModel (row -> model)
 
 	CreateSQL string
 	GetSQL    string
@@ -86,10 +99,23 @@ type repoData struct {
 	UpdateSQL string
 	DeleteSQL string
 
-	InsertArgs string // create args, e.g. "m.ID, m.Title"
-	UpdateArgs string // update args: non-PK fields then PK, e.g. "m.Title, m.ID"
+	InsertArgs string // create args, e.g. "row.ID, row.Title"
+	UpdateArgs string // update args: non-PK fields then PK, e.g. "row.Title, row.ID"
 	CreateScan string // scan targets for the create RETURNING clause
 	UpdateScan string // scan targets for the update RETURNING clause
+}
+
+// rowField is one field of the repository's row struct.
+type rowField struct {
+	GoName string
+	GoType string
+	Tag    string // db struct tag, e.g. `db:"title"`
+}
+
+// assign is a single keyed field assignment in a generated struct literal.
+type assign struct {
+	Field string
+	Expr  string
 }
 
 // repoInfo builds the repository template data for an entity, reporting ok=false
@@ -108,17 +134,63 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	soft := e.Options.SoftDelete
 	ts := e.Options.Timestamps
 
+	impSet := map[string]struct{}{
+		"context": {}, "database/sql": {}, "errors": {}, "fmt": {}, "github.com/jmoiron/sqlx": {},
+	}
+
 	// Persisted columns in struct order: spec fields first, then the
-	// option-injected columns (shared with renderModel via optionColumns).
+	// option-injected columns (shared with renderModel via optionColumns). Each
+	// column contributes a row-struct field and a model<->row conversion; nullable
+	// columns become sql.Null[T] on the row (pointer on the model), bridged by the
+	// generic toNull/fromNull helpers.
 	type col struct{ Column, GoName string }
 	var specCols, update []col
+	var rowFields []rowField
+	var toRow, toModel []assign
+	hasNullable := false
 	for _, f := range e.Fields {
 		c := col{Column: snakeCase(f.Name), GoName: pascalCase(f.Name)}
 		specCols = append(specCols, c) // the primary key is supplied by the caller
 		if !f.Primary {
 			update = append(update, c)
 		}
+
+		ft, err := fieldType(f, byName)
+		if err != nil {
+			return repoData{}, false, err
+		}
+		if ft.imp != "" {
+			impSet[ft.imp] = struct{}{}
+		}
+		rowType := ft.expr
+		toRowExpr := "m." + c.GoName
+		toModelExpr := "row." + c.GoName
+		if isNullable(f) {
+			rowType = "sql.Null[" + ft.expr + "]"
+			toRowExpr = "toNull(m." + c.GoName + ")"
+			toModelExpr = "fromNull(row." + c.GoName + ")"
+			hasNullable = true
+		}
+		rowFields = append(rowFields, rowField{GoName: c.GoName, GoType: rowType, Tag: fmt.Sprintf("db:%q", c.Column)})
+		toRow = append(toRow, assign{Field: c.GoName, Expr: toRowExpr})
+		toModel = append(toModel, assign{Field: c.GoName, Expr: toModelExpr})
 	}
+
+	// Option-injected columns belong to the row and the model, but not the insert
+	// path (the SQL sets timestamps via now()). deleted_at is nullable.
+	for _, oc := range optionColumns(e.Options) {
+		gn := pascalCase(oc.Column)
+		impSet["time"] = struct{}{}
+		if oc.Column == "deleted_at" {
+			rowFields = append(rowFields, rowField{GoName: gn, GoType: "sql.Null[time.Time]", Tag: fmt.Sprintf("db:%q", oc.Column)})
+			toModel = append(toModel, assign{Field: gn, Expr: "fromNull(row." + gn + ")"})
+			hasNullable = true
+			continue
+		}
+		rowFields = append(rowFields, rowField{GoName: gn, GoType: "time.Time", Tag: fmt.Sprintf("db:%q", oc.Column)})
+		toModel = append(toModel, assign{Field: gn, Expr: "row." + gn})
+	}
+
 	selectCols := make([]string, 0, len(specCols)+2)
 	for _, c := range specCols {
 		selectCols = append(selectCols, c.Column)
@@ -134,7 +206,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	for i, c := range specCols {
 		insCols[i] = c.Column
 		insPh[i] = fmt.Sprintf("$%d", i+1)
-		insArgs[i] = "m." + c.GoName
+		insArgs[i] = "row." + c.GoName
 	}
 	var createScan string
 	if ts {
@@ -168,12 +240,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	updArgs := make([]string, 0, len(update)+1)
 	for i, c := range update {
 		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.Column, i+1))
-		updArgs = append(updArgs, "m."+c.GoName)
+		updArgs = append(updArgs, "row."+c.GoName)
 	}
 	if ts {
 		setClauses = append(setClauses, "updated_at = now()")
 	}
-	updArgs = append(updArgs, "m."+pkGoName)
+	updArgs = append(updArgs, "row."+pkGoName)
 
 	var updateSQL, updateScan string
 	noUpdateColumns := len(setClauses) == 0
@@ -197,13 +269,13 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		deleteSQL = fmt.Sprintf("UPDATE %s SET deleted_at = now() WHERE %s = $1 AND deleted_at IS NULL", table, pkCol)
 	}
 
-	// The primary-key type (uuid.UUID, etc.) appears in the Get/Delete signatures,
-	// so its package must be imported alongside database/sql and sqlx.
-	imports := []string{"context", "database/sql", "errors", "fmt"}
-	if gt.imp != "" {
-		imports = append(imports, gt.imp)
+	// Imports were gathered from every row-field type above (the primary-key type
+	// among them, for the Get/Delete signatures) alongside the always-needed
+	// context/database/sql/errors/fmt/sqlx packages.
+	imports := make([]string, 0, len(impSet))
+	for imp := range impSet {
+		imports = append(imports, imp)
 	}
-	imports = append(imports, "github.com/jmoiron/sqlx")
 	sort.Strings(imports)
 
 	return repoData{
@@ -216,6 +288,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		PKGoType:        gt.expr,
 		HasTimestamps:   ts,
 		NoUpdateColumns: noUpdateColumns,
+		HasNullable:     hasNullable,
+		RowStruct:       unexport(name) + "Row",
+		NewRowFunc:      "new" + name + "Row",
+		RowFields:       rowFields,
+		ToRow:           toRow,
+		ToModel:         toModel,
 		CreateSQL:       createSQL,
 		GetSQL:          getSQL,
 		ListSQL:         listSQL,

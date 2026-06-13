@@ -13,6 +13,14 @@ type goType struct {
 	imp  string // import path, "" for builtins
 }
 
+// isNullable reports whether a field maps to a nullable column. It is the single
+// source of truth shared by the model (pointer field), the repository (sql.Null
+// column), and the migration (absence of a NOT NULL constraint): a column is
+// nullable unless it is required or part of the primary key.
+func isNullable(f spec.Field) bool {
+	return !f.Required && !f.Primary
+}
+
 // scalarType maps a non-reference field type to its Go representation. Stdlib
 // types are used where they fit; uuid and decimal use the established libraries
 // because the stdlib has no equivalent.

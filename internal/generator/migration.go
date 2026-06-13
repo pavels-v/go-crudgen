@@ -1,0 +1,153 @@
+package generator
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"go-crudgen/internal/spec"
+)
+
+// migrationData is the template input for one entity's goose migration file. The
+// DDL is built here rather than in the template (mirroring repo.go) so the column
+// math — types, constraints, primary-key placement — stays testable. Each
+// statement is rendered as its own goose StatementBegin/StatementEnd block.
+type migrationData struct {
+	Up   []string // CREATE TABLE, then any CREATE INDEX statements
+	Down []string // DROP TABLE statement
+}
+
+// sqlType maps a spec field to its PostgreSQL column type. A reference resolves
+// to the target entity's primary-key type; validation guarantees the target
+// exists with a single primary key, and fieldType already rejects a target whose
+// key is itself a reference, so the same case is an error here.
+func sqlType(f spec.Field, byName map[string]*spec.Entity) (string, error) {
+	t := f.Type
+	if t == "references" {
+		pk := byName[f.Target].PrimaryKey()[0]
+		if pk.Type == "references" {
+			return "", fmt.Errorf("reference to %q whose primary key %q is itself a reference (not supported)", f.Target, pk.Name)
+		}
+		t = pk.Type
+	}
+	switch t {
+	case "string", "text":
+		return "TEXT", nil
+	case "int":
+		return "INTEGER", nil
+	case "int64":
+		return "BIGINT", nil
+	case "float":
+		return "DOUBLE PRECISION", nil
+	case "decimal":
+		return "NUMERIC", nil
+	case "bool":
+		return "BOOLEAN", nil
+	case "date":
+		return "DATE", nil
+	case "datetime":
+		return "TIMESTAMPTZ", nil
+	case "uuid":
+		return "UUID", nil
+	case "json":
+		return "JSONB", nil
+	}
+	return "", fmt.Errorf("no SQL type for %q", t)
+}
+
+// sqlDefault formats a field's `default` value as a SQL literal, returning "" when
+// no default is set. YAML scalars decode to bool, int, float64, or string.
+func sqlDefault(v any) (string, error) {
+	switch d := v.(type) {
+	case nil:
+		return "", nil
+	case bool:
+		if d {
+			return "TRUE", nil
+		}
+		return "FALSE", nil
+	case int:
+		return strconv.Itoa(d), nil
+	case int64:
+		return strconv.FormatInt(d, 10), nil
+	case float64:
+		return strconv.FormatFloat(d, 'g', -1, 64), nil
+	case string:
+		return "'" + strings.ReplaceAll(d, "'", "''") + "'", nil
+	}
+	return "", fmt.Errorf("unsupported default value %v (%T)", v, v)
+}
+
+// migrationInfo builds the goose migration for an entity. Unlike handlers and
+// repositories, a migration is generated for every entity — even one with a
+// composite primary key that is not HTTP-serveable still needs its table.
+func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationData, error) {
+	table := plural(e.Name, e.Plural)
+	pkCols := make([]string, 0, len(e.Fields))
+	for _, f := range e.Fields {
+		if f.Primary {
+			pkCols = append(pkCols, snakeCase(f.Name))
+		}
+	}
+	// A single primary key is declared inline on its column; a composite key needs
+	// a table-level PRIMARY KEY constraint instead.
+	compositePK := len(pkCols) > 1
+
+	var lines, indexes []string
+	for _, f := range e.Fields {
+		st, err := sqlType(f, byName)
+		if err != nil {
+			return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
+		}
+		def, err := sqlDefault(f.Default)
+		if err != nil {
+			return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
+		}
+
+		col := snakeCase(f.Name)
+		parts := []string{col, st}
+		if !isNullable(f) {
+			parts = append(parts, "NOT NULL")
+		}
+		if def != "" {
+			parts = append(parts, "DEFAULT "+def)
+		}
+		if f.Primary && !compositePK {
+			parts = append(parts, "PRIMARY KEY")
+		}
+		if f.Unique {
+			parts = append(parts, "UNIQUE")
+		}
+		lines = append(lines, "    "+strings.Join(parts, " "))
+
+		if f.Index && !f.Primary {
+			indexes = append(indexes, col)
+		}
+	}
+
+	// Option-injected columns reuse optionColumns' ordering so the schema and the
+	// generated model never disagree on which columns exist. Timestamps are
+	// NOT NULL DEFAULT now(); the soft-delete marker is nullable.
+	for _, oc := range optionColumns(e.Options) {
+		switch oc.Column {
+		case "created_at", "updated_at":
+			lines = append(lines, fmt.Sprintf("    %s TIMESTAMPTZ NOT NULL DEFAULT now()", oc.Column))
+		case "deleted_at":
+			lines = append(lines, fmt.Sprintf("    %s TIMESTAMPTZ", oc.Column))
+		}
+	}
+
+	if compositePK {
+		lines = append(lines, fmt.Sprintf("    PRIMARY KEY (%s)", strings.Join(pkCols, ", ")))
+	}
+
+	up := []string{fmt.Sprintf("CREATE TABLE %s (\n%s\n);", table, strings.Join(lines, ",\n"))}
+	for _, idx := range indexes {
+		up = append(up, fmt.Sprintf("CREATE INDEX idx_%s_%s ON %s (%s);", table, idx, table, idx))
+	}
+
+	return migrationData{
+		Up:   up,
+		Down: []string{fmt.Sprintf("DROP TABLE %s;", table)},
+	}, nil
+}
