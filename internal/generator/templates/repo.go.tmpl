@@ -14,6 +14,34 @@ const (
 	delete{{ .Struct }}SQL = `{{ .DeleteSQL }}`
 )
 
+// {{ .RowStruct }} is the database representation of {{ .Struct }}. Nullable
+// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
+// {{ .NewRowFunc }} and toModel convert to and from the pointer fields on {{ .Struct }}.
+type {{ .RowStruct }} struct {
+{{- range .RowFields }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
+{{- end }}
+}
+
+// {{ .NewRowFunc }} builds the row written by Create and Update. Option-managed
+// columns (timestamps) are set by the SQL itself, so they are omitted here.
+func {{ .NewRowFunc }}(m *{{ .Struct }}) {{ .RowStruct }} {
+	return {{ .RowStruct }}{
+{{- range .ToRow }}
+		{{ .Field }}: {{ .Expr }},
+{{- end }}
+	}
+}
+
+// toModel converts a scanned row back into the API model.
+func (row {{ .RowStruct }}) toModel() {{ .Struct }} {
+	return {{ .Struct }}{
+{{- range .ToModel }}
+		{{ .Field }}: {{ .Expr }},
+{{- end }}
+	}
+}
+
 // {{ .Receiver }} is a PostgreSQL-backed {{ .Repo }}. It depends on sqlx rather
 // than a concrete driver, so any database/sql-compatible Postgres driver
 // (lib/pq, pgx's stdlib adapter, ...) can back it.
@@ -29,8 +57,9 @@ func {{ .Constructor }}(db *sqlx.DB) *{{ .Receiver }} {
 var _ {{ .Repo }} = (*{{ .Receiver }})(nil)
 
 func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
+	row := {{ .NewRowFunc }}(m)
 {{- if .HasTimestamps }}
-	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan({{ .CreateScan }}); err != nil {
 		return fmt.Errorf("create {{ .LowerStruct }}: %w", err)
 	}
 {{- else }}
@@ -42,28 +71,44 @@ func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
 }
 
 func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Struct }}, error) {
-	var m {{ .Struct }}
-	err := r.db.GetContext(ctx, &m, get{{ .Struct }}SQL, id)
+	var row {{ .RowStruct }}
+	err := r.db.GetContext(ctx, &row, get{{ .Struct }}SQL, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get {{ .LowerStruct }}: %w", err)
 	}
+	m := row.toModel()
 	return &m, nil
 }
 
 func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error) {
-	out := []{{ .Struct }}{}
-	if err := r.db.SelectContext(ctx, &out, list{{ .Struct }}SQL, limit, offset); err != nil {
+	rows := []{{ .RowStruct }}{}
+	if err := r.db.SelectContext(ctx, &rows, list{{ .Struct }}SQL, limit, offset); err != nil {
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
+	}
+	out := make([]{{ .Struct }}, len(rows))
+	for i := range rows {
+		out[i] = rows[i].toModel()
 	}
 	return out, nil
 }
 
 func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
+	row := {{ .NewRowFunc }}(m)
 {{- if .HasTimestamps }}
-	err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan(&m.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan({{ .UpdateScan }})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
+	}
+{{- else if .NoUpdateColumns }}
+	// {{ .Struct }} has no writable columns; verify the row exists.
+	var exists int
+	err := r.db.GetContext(ctx, &exists, update{{ .Struct }}SQL, {{ .UpdateArgs }})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}

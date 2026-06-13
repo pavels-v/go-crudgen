@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"time"
 )
 
 const (
@@ -16,6 +17,44 @@ const (
 	updatePostSQL = `UPDATE posts SET title = $1, body = $2, published = $3, author = $4, updated_at = now() WHERE id = $5 RETURNING updated_at`
 	deletePostSQL = `DELETE FROM posts WHERE id = $1`
 )
+
+// postRow is the database representation of Post. Nullable
+// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
+// newPostRow and toModel convert to and from the pointer fields on Post.
+type postRow struct {
+	ID        uuid.UUID           `db:"id"`
+	Title     string              `db:"title"`
+	Body      sql.Null[string]    `db:"body"`
+	Published sql.Null[bool]      `db:"published"`
+	Author    sql.Null[uuid.UUID] `db:"author"`
+	CreatedAt time.Time           `db:"created_at"`
+	UpdatedAt time.Time           `db:"updated_at"`
+}
+
+// newPostRow builds the row written by Create and Update. Option-managed
+// columns (timestamps) are set by the SQL itself, so they are omitted here.
+func newPostRow(m *Post) postRow {
+	return postRow{
+		ID:        m.ID,
+		Title:     m.Title,
+		Body:      toNull(m.Body),
+		Published: toNull(m.Published),
+		Author:    toNull(m.Author),
+	}
+}
+
+// toModel converts a scanned row back into the API model.
+func (row postRow) toModel() Post {
+	return Post{
+		ID:        row.ID,
+		Title:     row.Title,
+		Body:      fromNull(row.Body),
+		Published: fromNull(row.Published),
+		Author:    fromNull(row.Author),
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
+}
 
 // PostgresPostRepository is a PostgreSQL-backed PostRepository. It depends on sqlx rather
 // than a concrete driver, so any database/sql-compatible Postgres driver
@@ -32,34 +71,41 @@ func NewPostgresPostRepository(db *sqlx.DB) *PostgresPostRepository {
 var _ PostRepository = (*PostgresPostRepository)(nil)
 
 func (r *PostgresPostRepository) Create(ctx context.Context, m *Post) error {
-	if err := r.db.QueryRowContext(ctx, createPostSQL, m.ID, m.Title, m.Body, m.Published, m.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+	row := newPostRow(m)
+	if err := r.db.QueryRowContext(ctx, createPostSQL, row.ID, row.Title, row.Body, row.Published, row.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		return fmt.Errorf("create post: %w", err)
 	}
 	return nil
 }
 
 func (r *PostgresPostRepository) Get(ctx context.Context, id uuid.UUID) (*Post, error) {
-	var m Post
-	err := r.db.GetContext(ctx, &m, getPostSQL, id)
+	var row postRow
+	err := r.db.GetContext(ctx, &row, getPostSQL, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get post: %w", err)
 	}
+	m := row.toModel()
 	return &m, nil
 }
 
 func (r *PostgresPostRepository) List(ctx context.Context, limit, offset int) ([]Post, error) {
-	out := []Post{}
-	if err := r.db.SelectContext(ctx, &out, listPostSQL, limit, offset); err != nil {
+	rows := []postRow{}
+	if err := r.db.SelectContext(ctx, &rows, listPostSQL, limit, offset); err != nil {
 		return nil, fmt.Errorf("list post: %w", err)
+	}
+	out := make([]Post, len(rows))
+	for i := range rows {
+		out[i] = rows[i].toModel()
 	}
 	return out, nil
 }
 
 func (r *PostgresPostRepository) Update(ctx context.Context, m *Post) error {
-	err := r.db.QueryRowContext(ctx, updatePostSQL, m.Title, m.Body, m.Published, m.Author, m.ID).Scan(&m.UpdatedAt)
+	row := newPostRow(m)
+	err := r.db.QueryRowContext(ctx, updatePostSQL, row.Title, row.Body, row.Published, row.Author, row.ID).Scan(&m.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}

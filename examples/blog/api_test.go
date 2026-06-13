@@ -169,10 +169,11 @@ func TestPostCRUD(t *testing.T) {
 
 	var created Post
 	do(t, srv, http.MethodPost, "/posts",
-		CreatePostRequest{ID: id, Title: "Hello", Body: "world", Author: authorID},
+		CreatePostRequest{ID: id, Title: "Hello", Body: new("world"), Author: &authorID},
 		&created, http.StatusCreated)
 	require.Equal(t, id, created.ID)
 	require.Equal(t, "Hello", created.Title)
+	require.Equal(t, "world", *created.Body)
 
 	var got Post
 	do(t, srv, http.MethodGet, idPath, nil, &got, http.StatusOK)
@@ -184,7 +185,7 @@ func TestPostCRUD(t *testing.T) {
 
 	var updated Post
 	do(t, srv, http.MethodPut, idPath,
-		UpdatePostRequest{Title: "Updated", Body: "body2", Author: authorID},
+		UpdatePostRequest{Title: "Updated", Body: new("body2"), Author: &authorID},
 		&updated, http.StatusOK)
 	require.Equal(t, "Updated", updated.Title)
 	require.Equal(t, id, updated.ID)
@@ -201,7 +202,7 @@ func TestPostCreateValidationFails(t *testing.T) {
 
 	// Title is required; omitting it must fail validation with 400.
 	do(t, srv, http.MethodPost, "/posts",
-		CreatePostRequest{ID: uuid.New(), Author: uuid.New()},
+		CreatePostRequest{ID: uuid.New(), Author: new(uuid.New())},
 		nil, http.StatusBadRequest)
 }
 

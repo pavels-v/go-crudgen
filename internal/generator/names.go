@@ -35,6 +35,15 @@ func pascalCase(s string) string {
 	return b.String()
 }
 
+// unexport lower-cases the first letter of an identifier, e.g. "BlogPost" ->
+// "blogPost", for naming package-internal types like the repository row struct.
+func unexport(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
 // plural returns the route path segment for an entity: the explicit override
 // when set, otherwise a naive pluralization of the snake_cased name.
 func plural(name, override string) string {

@@ -6,8 +6,8 @@ validation, and persistence — so you spend your time on business logic instead
 of CRUD boilerplate.
 
 > Status: in progress. Models, DTOs, CRUD handlers, `net/http` router wiring,
-> and PostgreSQL repositories (via `sqlx`/`database/sql`) are generated today;
-> migrations and OpenAPI export are still on the roadmap.
+> PostgreSQL repositories (via `sqlx`/`database/sql`), and goose SQL migrations
+> are generated today; OpenAPI export is still on the roadmap.
 
 ## Why
 
@@ -40,10 +40,13 @@ From a single spec describing one or more entities, `go-crudgen` produces:
 - **Database connection constructor** — a `NewDB` helper that opens the pool
   through your chosen driver (`pgx` by default, `pq` via `--driver`), with that
   driver blank-imported for you.
+- **Migrations** — a [goose](https://github.com/pressly/goose) SQL migration per
+  entity (`migrations/NNNNN_create_<table>.sql`) with `-- +goose Up`/`Down`
+  sections, written for every entity (including composite-key ones that get no
+  handler).
 
 Still planned:
 
-- **Migrations** — SQL schema for each entity.
 - **OpenAPI document** — generated from the same spec for client tooling.
 
 ### REST surface per entity
@@ -128,6 +131,11 @@ entities:
 `primary` (marks a primary-key field; entities may have a composite key),
 `required`, `unique`, `default`, `index`, and `validate` (validation tag rules).
 
+A field that is neither `primary` nor `required` is **nullable**. Nullable fields
+become pointers (`*T`, with `json:",omitempty"`) in the model and request DTOs,
+and `sql.Null[T]` columns in the generated repository's row type, so a SQL `NULL`
+round-trips as a `nil` pointer rather than a zero value.
+
 > Note: entities with a composite primary key currently generate a model but no
 > HTTP handlers (a single `/{id}` path can't address a composite key yet).
 
@@ -142,6 +150,10 @@ go-crudgen generate --spec ./api.yaml
 
 # generate a service from a spec into a directory
 go-crudgen generate --spec ./api.yaml --out ./internal/api
+
+# the generated code imports third-party packages (sqlx, the driver, uuid, ...),
+# so resolve them in the output module afterwards
+cd ./internal/api && go mod tidy
 ```
 
 By default the generator emits a `NewDB` constructor wired to the **pgx**
@@ -153,6 +165,9 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
 
 The driver only affects the generated `NewDB` constructor; the repositories
 themselves stay driver-agnostic (they depend on `*sqlx.DB`, not a driver).
+Re-run `go mod tidy` in the output module after switching drivers so the new
+driver dependency is fetched. `NewDB` applies sane connection-pool defaults
+(max-open/idle conns, conn lifetime) you can tune in the generated file.
 
 ### Wiring the generated service
 
@@ -163,11 +178,11 @@ driver is blank-imported for you); you inject the repositories into the router:
 ```go
 db, err := blog.NewDB(dsn)
 if err != nil {
-	log.Fatal(err)
+  log.Fatal(err)
 }
 router := blog.NewRouter(blog.Deps{
-	Posts:   blog.NewPostgresPostRepository(db),
-	Authors: blog.NewPostgresAuthorRepository(db),
+  Posts:   blog.NewPostgresPostRepository(db),
+  Authors: blog.NewPostgresAuthorRepository(db),
 })
 http.ListenAndServe(":8080", router)
 ```
@@ -189,11 +204,14 @@ http.ListenAndServe(":8080", router)
 - [x] Model + struct-tag generation
 - [x] CRUD handler generation (`net/http`)
 - [x] PostgreSQL repository (`sqlx` / `database/sql`)
-- [ ] Migrations (SQL schema per entity)
+- [x] Migrations (goose SQL schema per entity)
 - [x] List endpoint: pagination (`?limit` / `?offset`)
 - [ ] List endpoint: filtering
 - [ ] List endpoint: sorting
-- [ ] Relations (`belongs_to` / `has_many`)
+- [~] Relations (`belongs_to` / `has_many`)
+  - [x] `belongs_to`: `references` fields generate a foreign-key column typed
+    from the target's primary key
+  - [ ] `has_many`, nested/relation routes, and JOIN-based loading
 - [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)
 - [ ] Auth/middleware hooks

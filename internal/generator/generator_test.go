@@ -76,18 +76,20 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		`"encoding/json"`,
 		`"time"`,
 		"// Product represents a product.",
-		"ID uuid.UUID",
+		"ID uuid.UUID", // primary key -> non-null value type
 		`json:"id"`,
-		"Name string",
-		`json:"name" validate:"required,min=1" db:"name"`, // required merged ahead of validate; db tag for sqlx
-		"Price decimal.Decimal",
-		"InStock bool", // snake_case -> PascalCase
-		`json:"in_stock" db:"in_stock"`,
-		"ReleasedAt time.Time",
-		"Metadata json.RawMessage",
+		"Name string",                           // required -> non-null value type
+		`json:"name" validate:"required,min=1"`, // required merged ahead of validate; no db tag on the API model
+		"Price *decimal.Decimal",                // nullable -> pointer
+		"InStock *bool",                         // snake_case -> PascalCase, nullable -> pointer
+		`json:"in_stock,omitempty"`,
+		"ReleasedAt *time.Time",
+		"Metadata *json.RawMessage",
 	} {
 		wantContains(t, got, want)
 	}
+	// The API model carries no db tags; column mapping lives on the repository row.
+	require.NotContains(t, got, `db:"`, "API model should not carry db struct tags")
 }
 
 func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
@@ -107,9 +109,10 @@ func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
 	}
 
 	got := render(t, s, "Post")
-	// The foreign key takes the Go type of Author's primary key (int64), not uuid.
-	wantContains(t, got, "Author int64")
-	wantContains(t, got, `json:"author"`)
+	// The foreign key takes the Go type of Author's primary key (int64), not uuid;
+	// it is not required, so it is nullable and rendered as a pointer.
+	wantContains(t, got, "Author *int64")
+	wantContains(t, got, `json:"author,omitempty"`)
 }
 
 func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
@@ -150,7 +153,7 @@ func TestRenderModel_CompositePrimaryKey(t *testing.T) {
 	got := render(t, s, "Membership")
 	wantContains(t, got, "UserID uuid.UUID")
 	wantContains(t, got, "GroupID uuid.UUID")
-	wantContains(t, got, "Role string")
+	wantContains(t, got, "Role *string") // not part of the key and not required -> nullable
 }
 
 // renderHandlerSrc runs handlerInfo + renderHandler for the named entity and
@@ -333,8 +336,15 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		// the primary-key type's package is imported for the Get/Delete signatures
 		`"github.com/google/uuid"`,
 		`"github.com/jmoiron/sqlx"`,
-		// sqlx struct scanning + database/sql not-found sentinel
-		"r.db.GetContext(ctx, &m, getPostSQL, id)",
+		// the row struct carries db tags; nullable body becomes sql.Null[T]
+		"type postRow struct {",
+		"Body sql.Null[string]",
+		"func newPostRow(m *Post) postRow",
+		"Body: toNull(m.Body)",
+		"Body: fromNull(row.Body)",
+		// sqlx scans into the row, which is then converted to the API model
+		"r.db.GetContext(ctx, &row, getPostSQL, id)",
+		"m := row.toModel()",
 		"errors.Is(err, sql.ErrNoRows)",
 		// timestamps default to now() on insert and are returned into the struct
 		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
@@ -378,6 +388,273 @@ func TestRenderRepo_SoftDeleteFiltersAndUpdates(t *testing.T) {
 	}
 }
 
+func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
+	t.Parallel()
+
+	// A serveable entity with only a primary key and no timestamps has nothing
+	// writable: the UPDATE must not be `SET  WHERE ...` (invalid SQL). It should
+	// degrade to an existence check by primary key.
+	s := &spec.Spec{
+		Package: "cat",
+		Entities: []spec.Entity{{
+			Name:   "Tag",
+			Fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}},
+		}},
+	}
+
+	got := renderRepoSrc(t, s, "Tag")
+	for _, want := range []string{
+		"updateTagSQL = `SELECT 1 FROM tags WHERE id = $1`",
+		"r.db.GetContext(ctx, &exists, updateTagSQL, row.ID)",
+		"return ErrNotFound",
+	} {
+		wantContains(t, got, want)
+	}
+	// must NOT emit a malformed empty SET clause
+	require.NotContains(t, strings.Join(strings.Fields(got), " "), "SET WHERE",
+		"primary-key-only entity must not generate an empty UPDATE SET clause")
+}
+
+func TestRepoInfo_HasNullable(t *testing.T) {
+	t.Parallel()
+
+	byNameOf := func(s *spec.Spec) map[string]*spec.Entity {
+		m := make(map[string]*spec.Entity, len(s.Entities))
+		for i := range s.Entities {
+			m[s.Entities[i].Name] = &s.Entities[i]
+		}
+		return m
+	}
+
+	cases := []struct {
+		name   string
+		fields []spec.Field
+		want   bool
+	}{
+		{
+			name:   "a non-required column is nullable",
+			fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "body", Type: "text"}},
+			want:   true,
+		},
+		{
+			name:   "all columns required or primary",
+			fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "value", Type: "string", Required: true}},
+			want:   false,
+		},
+		{
+			name:   "soft delete adds a nullable deleted_at",
+			fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "value", Type: "string", Required: true}},
+			want:   false, // overridden below for the soft-delete sub-case
+		},
+	}
+
+	for _, tc := range cases[:2] {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{Package: "app", Entities: []spec.Entity{{Name: "Thing", Fields: tc.fields}}}
+			rd, ok, err := repoInfo(s, &s.Entities[0], byNameOf(s))
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, tc.want, rd.HasNullable)
+		})
+	}
+
+	t.Run("soft delete makes deleted_at nullable", func(t *testing.T) {
+		t.Parallel()
+
+		s := &spec.Spec{Package: "app", Entities: []spec.Entity{{
+			Name:    "Thing",
+			Fields:  []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "value", Type: "string", Required: true}},
+			Options: spec.EntityOptions{SoftDelete: true},
+		}}}
+		rd, ok, err := repoInfo(s, &s.Entities[0], byNameOf(s))
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.True(t, rd.HasNullable, "deleted_at is nullable, so the repo needs sql.Null helpers")
+		wantContains(t, mustRenderRepo(t, rd), "DeletedAt sql.Null[time.Time]")
+	})
+}
+
+// mustRenderRepo renders repo data to source, failing on error or invalid Go.
+func mustRenderRepo(t *testing.T, rd repoData) string {
+	t.Helper()
+	src, err := renderRepo(rd)
+	require.NoError(t, err)
+	requireParses(t, src)
+	return string(src)
+}
+
+func TestRenderNulls_GenericHelpers(t *testing.T) {
+	t.Parallel()
+
+	src, err := renderNulls(nullsData{Package: "blog"})
+	require.NoError(t, err)
+	requireParses(t, src)
+
+	got := string(src)
+	for _, want := range []string{
+		"package blog",
+		`import "database/sql"`,
+		"func toNull[T any](p *T) sql.Null[T]",
+		"func fromNull[T any](n sql.Null[T]) *T",
+		"return sql.Null[T]{V: *p, Valid: true}",
+	} {
+		wantContains(t, got, want)
+	}
+}
+
+// renderMigrationSrc runs migrationInfo + renderMigration for the named entity.
+func renderMigrationSrc(t *testing.T, s *spec.Spec, entity string) string {
+	t.Helper()
+
+	byName := make(map[string]*spec.Entity, len(s.Entities))
+	for i := range s.Entities {
+		byName[s.Entities[i].Name] = &s.Entities[i]
+	}
+	var e *spec.Entity
+	for i := range s.Entities {
+		if s.Entities[i].Name == entity {
+			e = &s.Entities[i]
+		}
+	}
+	require.NotNilf(t, e, "entity %q not found in spec", entity)
+
+	md, err := migrationInfo(e, byName)
+	require.NoErrorf(t, err, "migrationInfo(%s)", entity)
+	src, err := renderMigration(md)
+	require.NoErrorf(t, err, "renderMigration(%s)", entity)
+	return string(src)
+}
+
+func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Entities: []spec.Entity{
+			{Name: "Author", Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+			}},
+			{Name: "Post", Plural: "posts", Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "title", Type: "string", Required: true},
+				{Name: "body", Type: "text"},
+				{Name: "published", Type: "bool", Default: false},
+				{Name: "slug", Type: "string", Unique: true, Index: true},
+				{Name: "author", Type: "references", Target: "Author"},
+			}, Options: spec.EntityOptions{Timestamps: true, SoftDelete: true}},
+		},
+	}
+
+	got := renderMigrationSrc(t, s, "Post")
+	for _, want := range []string{
+		// goose annotations frame the up/down sections and wrap each statement
+		"-- +goose Up",
+		"-- +goose Down",
+		"-- +goose StatementBegin",
+		"-- +goose StatementEnd",
+		"CREATE TABLE posts (",
+		"id UUID NOT NULL PRIMARY KEY",    // single PK declared inline
+		"title TEXT NOT NULL",             // required -> NOT NULL
+		"body TEXT,",                      // optional column is nullable
+		"published BOOLEAN DEFAULT FALSE", // bool default rendered as SQL literal
+		"slug TEXT UNIQUE",                // unique modifier
+		"author UUID",                     // reference takes the target PK's SQL type
+		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+		"updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+		"deleted_at TIMESTAMPTZ", // soft-delete marker is nullable
+		"CREATE INDEX idx_posts_slug ON posts (slug);",
+		"DROP TABLE posts;",
+	} {
+		wantContains(t, got, want)
+	}
+	// Each statement is wrapped in its own block: CREATE TABLE + CREATE INDEX (up)
+	// and DROP TABLE (down) make three.
+	require.Equal(t, 3, strings.Count(got, "-- +goose StatementBegin"))
+	require.Equal(t, 3, strings.Count(got, "-- +goose StatementEnd"))
+}
+
+func TestRenderMigration_CompositePrimaryKey(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "rel",
+		Entities: []spec.Entity{{
+			Name: "Membership",
+			Fields: []spec.Field{
+				{Name: "user_id", Type: "uuid", Primary: true},
+				{Name: "group_id", Type: "uuid", Primary: true},
+				{Name: "role", Type: "string"},
+			},
+		}},
+	}
+
+	got := renderMigrationSrc(t, s, "Membership")
+	// A composite key is a table-level constraint, never inline on a column.
+	wantContains(t, got, "PRIMARY KEY (user_id, group_id)")
+	require.NotContains(t, strings.Join(strings.Fields(got), " "), "UUID NOT NULL PRIMARY KEY",
+		"composite key must not be declared inline on a column")
+}
+
+func TestSQLType(t *testing.T) {
+	t.Parallel()
+
+	byName := map[string]*spec.Entity{
+		"Author": {Name: "Author", Fields: []spec.Field{{Name: "id", Type: "int64", Primary: true}}},
+	}
+	cases := []struct {
+		name  string
+		field spec.Field
+		want  string
+	}{
+		{name: "string", field: spec.Field{Type: "string"}, want: "TEXT"},
+		{name: "int", field: spec.Field{Type: "int"}, want: "INTEGER"},
+		{name: "int64", field: spec.Field{Type: "int64"}, want: "BIGINT"},
+		{name: "datetime", field: spec.Field{Type: "datetime"}, want: "TIMESTAMPTZ"},
+		{name: "uuid", field: spec.Field{Type: "uuid"}, want: "UUID"},
+		{name: "json", field: spec.Field{Type: "json"}, want: "JSONB"},
+		{name: "reference takes target PK type", field: spec.Field{Type: "references", Target: "Author"}, want: "BIGINT"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := sqlType(tc.field, byName)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSQLDefault(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   any
+		want string
+	}{
+		{name: "unset", in: nil, want: ""},
+		{name: "true", in: true, want: "TRUE"},
+		{name: "false", in: false, want: "FALSE"},
+		{name: "int", in: 42, want: "42"},
+		{name: "string is quoted", in: "draft", want: "'draft'"},
+		{name: "string with quote is escaped", in: "o'brien", want: "'o''brien'"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := sqlDefault(tc.in)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestRenderDB_DriverSelection(t *testing.T) {
 	t.Parallel()
 
@@ -404,10 +681,11 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			requireParses(t, src)
 
 			got := string(src)
-			wantContains(t, got, "const driverName = "+tc.wantName)
+			wantContains(t, got, "driverName = "+tc.wantName)
 			wantContains(t, got, tc.wantImport)
 			wantContains(t, got, "func NewDB(dsn string) (*sqlx.DB, error)")
-			wantContains(t, got, "return sqlx.Open(driverName, dsn)")
+			wantContains(t, got, "db, err := sqlx.Open(driverName, dsn)")
+			wantContains(t, got, "db.SetMaxOpenConns(maxOpenConns)")
 		})
 	}
 }
