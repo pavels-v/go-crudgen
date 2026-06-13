@@ -1,4 +1,3 @@
-version: 1
 package: blog            # Go package name for generated code
 module: example.com/blog # import path
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -16,6 +17,11 @@ func runGenerate(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "report what would be generated without writing files")
 	driver := fs.String("driver", "pgx", "database driver for the generated NewDB constructor: pgx or pq")
 	if err := fs.Parse(args); err != nil {
+		// An explicit -h/--help is a success, not a usage error; flag has
+		// already printed the usage text.
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 

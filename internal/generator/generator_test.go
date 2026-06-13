@@ -135,30 +135,9 @@ func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
 	wantContains(t, got, `json:"deleted_at,omitempty"`)
 }
 
-func TestRenderModel_CompositePrimaryKey(t *testing.T) {
-	t.Parallel()
-
-	s := &spec.Spec{
-		Package: "rel",
-		Entities: []spec.Entity{{
-			Name: "Membership",
-			Fields: []spec.Field{
-				{Name: "user_id", Type: "uuid", Primary: true},
-				{Name: "group_id", Type: "uuid", Primary: true},
-				{Name: "role", Type: "string"},
-			},
-		}},
-	}
-
-	got := render(t, s, "Membership")
-	wantContains(t, got, "UserID uuid.UUID")
-	wantContains(t, got, "GroupID uuid.UUID")
-	wantContains(t, got, "Role *string") // not part of the key and not required -> nullable
-}
-
 // renderHandlerSrc runs handlerInfo + renderHandler for the named entity and
-// returns the generated source, failing if the entity is not serveable or the
-// output is not valid Go.
+// returns the generated source, failing if generation errors or the output is
+// not valid Go.
 func renderHandlerSrc(t *testing.T, s *spec.Spec, entity string) string {
 	t.Helper()
 
@@ -174,9 +153,8 @@ func renderHandlerSrc(t *testing.T, s *spec.Spec, entity string) string {
 	}
 	require.NotNilf(t, e, "entity %q not found in spec", entity)
 
-	hd, ok, err := handlerInfo(s, e, byName)
+	hd, err := handlerInfo(s, e, byName)
 	require.NoErrorf(t, err, "handlerInfo(%s)", entity)
-	require.Truef(t, ok, "entity %q unexpectedly not serveable", entity)
 
 	src, err := renderHandler(hd)
 	require.NoErrorf(t, err, "renderHandler(%s)", entity)
@@ -263,29 +241,31 @@ func TestRenderHandler_StringPKNeedsNoParse(t *testing.T) {
 	wantContains(t, got, `id := r.PathValue("id")`)
 }
 
-func TestHandlerInfo_SkipsCompositePK(t *testing.T) {
+func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
 	t.Parallel()
 
+	// int32 has no single-expression strconv parser: the handler parses with a
+	// 32-bit size and casts the int64 result down to the int32 key type.
 	s := &spec.Spec{
-		Package: "rel",
+		Package: "shop",
 		Entities: []spec.Entity{{
-			Name: "Membership",
-			Fields: []spec.Field{
-				{Name: "user_id", Type: "uuid", Primary: true},
-				{Name: "group_id", Type: "uuid", Primary: true},
-			},
+			Name:   "Widget",
+			Fields: []spec.Field{{Name: "id", Type: "int32", Primary: true}},
 		}},
 	}
-	byName := map[string]*spec.Entity{"Membership": &s.Entities[0]}
 
-	_, ok, err := handlerInfo(s, &s.Entities[0], byName)
-	require.NoError(t, err)
-	require.False(t, ok, "composite-primary-key entity should not be serveable")
+	got := renderHandlerSrc(t, s, "Widget")
+	for _, want := range []string{
+		`idRaw, err := strconv.ParseInt(r.PathValue("id"), 10, 32)`,
+		"id := int32(idRaw)",
+		"Get(ctx context.Context, id int32) (*Widget, error)",
+	} {
+		wantContains(t, got, want)
+	}
 }
 
 // renderRepoSrc runs repoInfo + renderRepo for the named entity and returns the
-// generated source, failing if the entity is not serveable or the output is not
-// valid Go.
+// generated source, failing if generation errors or the output is not valid Go.
 func renderRepoSrc(t *testing.T, s *spec.Spec, entity string) string {
 	t.Helper()
 
@@ -301,9 +281,8 @@ func renderRepoSrc(t *testing.T, s *spec.Spec, entity string) string {
 	}
 	require.NotNilf(t, e, "entity %q not found in spec", entity)
 
-	rd, ok, err := repoInfo(s, e, byName)
+	rd, err := repoInfo(s, e, byName)
 	require.NoErrorf(t, err, "repoInfo(%s)", entity)
-	require.Truef(t, ok, "entity %q unexpectedly not serveable", entity)
 
 	src, err := renderRepo(rd)
 	require.NoErrorf(t, err, "renderRepo(%s)", entity)
@@ -453,9 +432,8 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Entities: []spec.Entity{{Name: "Thing", Fields: tc.fields}}}
-			rd, ok, err := repoInfo(s, &s.Entities[0], byNameOf(s))
+			rd, err := repoInfo(s, &s.Entities[0], byNameOf(s))
 			require.NoError(t, err)
-			require.True(t, ok)
 			require.Equal(t, tc.want, rd.HasNullable)
 		})
 	}
@@ -468,9 +446,8 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 			Fields:  []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "value", Type: "string", Required: true}},
 			Options: spec.EntityOptions{SoftDelete: true},
 		}}}
-		rd, ok, err := repoInfo(s, &s.Entities[0], byNameOf(s))
+		rd, err := repoInfo(s, &s.Entities[0], byNameOf(s))
 		require.NoError(t, err)
-		require.True(t, ok)
 		require.True(t, rd.HasNullable, "deleted_at is nullable, so the repo needs sql.Null helpers")
 		wantContains(t, mustRenderRepo(t, rd), "DeletedAt sql.Null[time.Time]")
 	})
@@ -560,7 +537,7 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 		"body TEXT,",                      // optional column is nullable
 		"published BOOLEAN DEFAULT FALSE", // bool default rendered as SQL literal
 		"slug TEXT UNIQUE",                // unique modifier
-		"author UUID",                     // reference takes the target PK's SQL type
+		"author UUID REFERENCES authors (id)", // FK column typed from + pointing at the target PK
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"deleted_at TIMESTAMPTZ", // soft-delete marker is nullable
@@ -575,26 +552,68 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 	require.Equal(t, 3, strings.Count(got, "-- +goose StatementEnd"))
 }
 
-func TestRenderMigration_CompositePrimaryKey(t *testing.T) {
+func TestMigrationOrder(t *testing.T) {
 	t.Parallel()
 
-	s := &spec.Spec{
-		Package: "rel",
-		Entities: []spec.Entity{{
-			Name: "Membership",
-			Fields: []spec.Field{
-				{Name: "user_id", Type: "uuid", Primary: true},
-				{Name: "group_id", Type: "uuid", Primary: true},
-				{Name: "role", Type: "string"},
-			},
-		}},
+	byNameOf := func(s *spec.Spec) map[string]*spec.Entity {
+		m := make(map[string]*spec.Entity, len(s.Entities))
+		for i := range s.Entities {
+			m[s.Entities[i].Name] = &s.Entities[i]
+		}
+		return m
 	}
 
-	got := renderMigrationSrc(t, s, "Membership")
-	// A composite key is a table-level constraint, never inline on a column.
-	wantContains(t, got, "PRIMARY KEY (user_id, group_id)")
-	require.NotContains(t, strings.Join(strings.Fields(got), " "), "UUID NOT NULL PRIMARY KEY",
-		"composite key must not be declared inline on a column")
+	t.Run("referenced entity is ordered first", func(t *testing.T) {
+		t.Parallel()
+
+		// Post references Author but is declared first; Author must still come first
+		// so its table exists when the posts foreign key is created.
+		s := &spec.Spec{Package: "blog", Entities: []spec.Entity{
+			{Name: "Post", Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "author", Type: "references", Target: "Author"},
+			}},
+			{Name: "Author", Fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}}},
+		}}
+
+		order, err := migrationOrder(s.Entities, byNameOf(s))
+		require.NoError(t, err)
+		names := []string{order[0].Name, order[1].Name}
+		require.Equal(t, []string{"Author", "Post"}, names)
+	})
+
+	t.Run("self-reference is allowed", func(t *testing.T) {
+		t.Parallel()
+
+		s := &spec.Spec{Package: "tree", Entities: []spec.Entity{
+			{Name: "Node", Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "parent", Type: "references", Target: "Node"},
+			}},
+		}}
+
+		order, err := migrationOrder(s.Entities, byNameOf(s))
+		require.NoError(t, err)
+		require.Len(t, order, 1)
+	})
+
+	t.Run("reference cycle errors", func(t *testing.T) {
+		t.Parallel()
+
+		s := &spec.Spec{Package: "loop", Entities: []spec.Entity{
+			{Name: "A", Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "b", Type: "references", Target: "B"},
+			}},
+			{Name: "B", Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "a", Type: "references", Target: "A"},
+			}},
+		}}
+
+		_, err := migrationOrder(s.Entities, byNameOf(s))
+		require.Error(t, err)
+	})
 }
 
 func TestSQLType(t *testing.T) {
@@ -609,8 +628,12 @@ func TestSQLType(t *testing.T) {
 		want  string
 	}{
 		{name: "string", field: spec.Field{Type: "string"}, want: "TEXT"},
-		{name: "int", field: spec.Field{Type: "int"}, want: "INTEGER"},
+		{name: "int32", field: spec.Field{Type: "int32"}, want: "INTEGER"},
 		{name: "int64", field: spec.Field{Type: "int64"}, want: "BIGINT"},
+		{name: "float", field: spec.Field{Type: "float"}, want: "DOUBLE PRECISION"},
+		{name: "decimal", field: spec.Field{Type: "decimal"}, want: "NUMERIC"},
+		{name: "bool", field: spec.Field{Type: "bool"}, want: "BOOLEAN"},
+		{name: "date", field: spec.Field{Type: "date"}, want: "DATE"},
 		{name: "datetime", field: spec.Field{Type: "datetime"}, want: "TIMESTAMPTZ"},
 		{name: "uuid", field: spec.Field{Type: "uuid"}, want: "UUID"},
 		{name: "json", field: spec.Field{Type: "json"}, want: "JSONB"},

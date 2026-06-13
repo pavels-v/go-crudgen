@@ -50,12 +50,12 @@ func optionColumns(o spec.EntityOptions) []optionColumn {
 	var cols []optionColumn
 	if o.Timestamps {
 		cols = append(cols,
-			optionColumn{"created_at", "CreatedAt", "time.Time", `json:"created_at"`},
-			optionColumn{"updated_at", "UpdatedAt", "time.Time", `json:"updated_at"`},
+			optionColumn{"created_at", "CreatedAt", goTime, `json:"created_at"`},
+			optionColumn{"updated_at", "UpdatedAt", goTime, `json:"updated_at"`},
 		)
 	}
 	if o.SoftDelete {
-		cols = append(cols, optionColumn{"deleted_at", "DeletedAt", "*time.Time", `json:"deleted_at,omitempty"`})
+		cols = append(cols, optionColumn{"deleted_at", "DeletedAt", "*" + goTime, `json:"deleted_at,omitempty"`})
 	}
 	return cols
 }
@@ -118,13 +118,11 @@ type assign struct {
 	Expr  string
 }
 
-// repoInfo builds the repository template data for an entity, reporting ok=false
-// for the same entities handlerInfo skips (see serveKey): a repository whose
-// interface is never generated would have nothing to implement.
-func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (repoData, bool, error) {
-	pk, gt, _, ok, err := serveKey(e, byName)
-	if err != nil || !ok {
-		return repoData{}, ok, err
+// repoInfo builds the repository template data for an entity.
+func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (repoData, error) {
+	pk, gt, _, err := serveKey(e, byName)
+	if err != nil {
+		return repoData{}, err
 	}
 
 	name := pascalCase(e.Name)
@@ -157,7 +155,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 
 		ft, err := fieldType(f, byName)
 		if err != nil {
-			return repoData{}, false, err
+			return repoData{}, err
 		}
 		if ft.imp != "" {
 			impSet[ft.imp] = struct{}{}
@@ -180,14 +178,14 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// path (the SQL sets timestamps via now()). deleted_at is nullable.
 	for _, oc := range optionColumns(e.Options) {
 		gn := pascalCase(oc.Column)
-		impSet["time"] = struct{}{}
+		impSet[importTime] = struct{}{}
 		if oc.Column == "deleted_at" {
-			rowFields = append(rowFields, rowField{GoName: gn, GoType: "sql.Null[time.Time]", Tag: fmt.Sprintf("db:%q", oc.Column)})
+			rowFields = append(rowFields, rowField{GoName: gn, GoType: "sql.Null[" + goTime + "]", Tag: fmt.Sprintf("db:%q", oc.Column)})
 			toModel = append(toModel, assign{Field: gn, Expr: "fromNull(row." + gn + ")"})
 			hasNullable = true
 			continue
 		}
-		rowFields = append(rowFields, rowField{GoName: gn, GoType: "time.Time", Tag: fmt.Sprintf("db:%q", oc.Column)})
+		rowFields = append(rowFields, rowField{GoName: gn, GoType: goTime, Tag: fmt.Sprintf("db:%q", oc.Column)})
 		toModel = append(toModel, assign{Field: gn, Expr: "row." + gn})
 	}
 
@@ -304,5 +302,5 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		CreateScan:      createScan,
 		UpdateScan:      updateScan,
 		Imports:         imports,
-	}, true, nil
+	}, nil
 }
