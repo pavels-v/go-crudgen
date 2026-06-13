@@ -9,7 +9,7 @@ import (
 var KnownTypes = map[string]struct{}{
 	"string":     {},
 	"text":       {},
-	"int":        {},
+	"int32":      {},
 	"int64":      {},
 	"float":      {},
 	"decimal":    {},
@@ -18,6 +18,21 @@ var KnownTypes = map[string]struct{}{
 	"datetime":   {},
 	"uuid":       {},
 	"json":       {},
+	"references": {},
+}
+
+// PrimaryKeyTypes is the set of field types allowed for a primary key: those the
+// generator can parse from a URL path segment to address a single row via /{id}.
+// The remaining numeric and structural types (decimal, float, bool, date,
+// datetime, json) have no path parser and are rejected. (references is allowed:
+// it resolves to the target's primary key, which this same rule guarantees is
+// path-addressable.)
+var PrimaryKeyTypes = map[string]struct{}{
+	"string":     {},
+	"text":       {},
+	"int32":      {},
+	"int64":      {},
+	"uuid":       {},
 	"references": {},
 }
 
@@ -55,13 +70,21 @@ func (s *Spec) Validate() error {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
 		}
-		if len(e.PrimaryKey()) == 0 {
-			return fmt.Errorf("entity %q has no primary key: mark at least one field with primary: true", e.Name)
+		switch pk := e.PrimaryKey(); len(pk) {
+		case 1:
+			if _, ok := PrimaryKeyTypes[pk[0].Type]; !ok {
+				return fmt.Errorf("entity %q primary key %q has type %q, which cannot address a row via /{id}: use one of string, text, int32, int64, or uuid", e.Name, pk[0].Name, pk[0].Type)
+			}
+		case 0:
+			return fmt.Errorf("entity %q has no primary key: mark exactly one field with primary: true", e.Name)
+		default:
+			return fmt.Errorf("entity %q has a composite primary key, which is not supported: mark exactly one field with primary: true", e.Name)
 		}
 	}
 
 	// Reference targets are validated in a second pass so they may point at any
-	// entity regardless of declaration order.
+	// entity regardless of declaration order. The first pass guarantees every
+	// entity has exactly one primary key, so a target's key is always addressable.
 	byName := make(map[string]*Entity, len(s.Entities))
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
@@ -72,12 +95,8 @@ func (s *Spec) Validate() error {
 			if f.Type != "references" {
 				continue
 			}
-			target, ok := byName[f.Target]
-			if !ok {
+			if _, ok := byName[f.Target]; !ok {
 				return fmt.Errorf("entity %q field %q references unknown entity %q", e.Name, f.Name, f.Target)
-			}
-			if len(target.PrimaryKey()) != 1 {
-				return fmt.Errorf("entity %q field %q references %q, which has a composite primary key (not yet supported)", e.Name, f.Name, f.Target)
 			}
 		}
 	}

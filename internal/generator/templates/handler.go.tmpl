@@ -111,9 +111,14 @@ func (h *{{ .Struct }}Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 {{- define "parseID" -}}
-{{ if .PK.NeedsErr }}id, err := {{ .PK.Expr }}
+{{ if not .PK.NeedsErr }}id := {{ .PK.Expr }}{{ else if .PK.Cast }}idRaw, err := {{ .PK.Expr }}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
-	}{{ else }}id := {{ .PK.Expr }}{{ end }}
+	}
+	id := {{ .PK.Cast }}(idRaw){{ else }}id, err := {{ .PK.Expr }}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}{{ end }}
 {{- end -}}

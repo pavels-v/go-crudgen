@@ -7,7 +7,7 @@ CREATE TABLE posts (
     title TEXT NOT NULL,
     body TEXT,
     published BOOLEAN DEFAULT FALSE,
-    author UUID,
+    author UUID REFERENCES authors (id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

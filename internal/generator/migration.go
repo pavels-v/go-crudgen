@@ -30,29 +30,11 @@ func sqlType(f spec.Field, byName map[string]*spec.Entity) (string, error) {
 		}
 		t = pk.Type
 	}
-	switch t {
-	case "string", "text":
-		return "TEXT", nil
-	case "int":
-		return "INTEGER", nil
-	case "int64":
-		return "BIGINT", nil
-	case "float":
-		return "DOUBLE PRECISION", nil
-	case "decimal":
-		return "NUMERIC", nil
-	case "bool":
-		return "BOOLEAN", nil
-	case "date":
-		return "DATE", nil
-	case "datetime":
-		return "TIMESTAMPTZ", nil
-	case "uuid":
-		return "UUID", nil
-	case "json":
-		return "JSONB", nil
+	ti, ok := scalarTypes[t]
+	if !ok {
+		return "", fmt.Errorf("no SQL type for %q", t)
 	}
-	return "", fmt.Errorf("no SQL type for %q", t)
+	return ti.sqlType, nil
 }
 
 // sqlDefault formats a field's `default` value as a SQL literal, returning "" when
@@ -78,20 +60,54 @@ func sqlDefault(v any) (string, error) {
 	return "", fmt.Errorf("unsupported default value %v (%T)", v, v)
 }
 
-// migrationInfo builds the goose migration for an entity. Unlike handlers and
-// repositories, a migration is generated for every entity — even one with a
-// composite primary key that is not HTTP-serveable still needs its table.
-func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationData, error) {
-	table := plural(e.Name, e.Plural)
-	pkCols := make([]string, 0, len(e.Fields))
-	for _, f := range e.Fields {
-		if f.Primary {
-			pkCols = append(pkCols, snakeCase(f.Name))
+// migrationOrder returns the entities ordered so that every entity follows the
+// entities it references. goose applies migrations in sequence, so a referenced
+// table must be created (numbered) before the table whose foreign key points at
+// it. A self-reference is fine inline (the table exists within its own CREATE
+// TABLE) and is ignored here; a reference cycle between distinct entities cannot
+// be expressed with inline foreign keys and is reported as an error.
+func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*spec.Entity, error) {
+	const (
+		unvisited = iota
+		visiting
+		done
+	)
+	state := make(map[string]int, len(entities))
+	var order []*spec.Entity
+	var visit func(e *spec.Entity) error
+	visit = func(e *spec.Entity) error {
+		switch state[e.Name] {
+		case done:
+			return nil
+		case visiting:
+			return fmt.Errorf("reference cycle involving entity %q (inline foreign keys cannot express it)", e.Name)
+		}
+		state[e.Name] = visiting
+		for _, f := range e.Fields {
+			if f.Type != "references" || f.Target == e.Name {
+				continue
+			}
+			if err := visit(byName[f.Target]); err != nil {
+				return err
+			}
+		}
+		state[e.Name] = done
+		order = append(order, e)
+		return nil
+	}
+	for i := range entities {
+		if err := visit(&entities[i]); err != nil {
+			return nil, err
 		}
 	}
-	// A single primary key is declared inline on its column; a composite key needs
-	// a table-level PRIMARY KEY constraint instead.
-	compositePK := len(pkCols) > 1
+	return order, nil
+}
+
+// migrationInfo builds the goose migration for an entity. Unlike handlers and
+// repositories, a migration is generated for every entity — even one whose
+// primary-key type is not HTTP-serveable still needs its table.
+func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationData, error) {
+	table := plural(e.Name, e.Plural)
 
 	var lines, indexes []string
 	for _, f := range e.Fields {
@@ -112,11 +128,16 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 		if def != "" {
 			parts = append(parts, "DEFAULT "+def)
 		}
-		if f.Primary && !compositePK {
+		if f.Primary {
 			parts = append(parts, "PRIMARY KEY")
 		}
 		if f.Unique {
 			parts = append(parts, "UNIQUE")
+		}
+		if f.Type == "references" {
+			target := byName[f.Target]
+			parts = append(parts, fmt.Sprintf("REFERENCES %s (%s)",
+				plural(target.Name, target.Plural), snakeCase(target.PrimaryKey()[0].Name)))
 		}
 		lines = append(lines, "    "+strings.Join(parts, " "))
 
@@ -131,14 +152,10 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 	for _, oc := range optionColumns(e.Options) {
 		switch oc.Column {
 		case "created_at", "updated_at":
-			lines = append(lines, fmt.Sprintf("    %s TIMESTAMPTZ NOT NULL DEFAULT now()", oc.Column))
+			lines = append(lines, fmt.Sprintf("    %s %s NOT NULL DEFAULT now()", oc.Column, sqlTimestamptz))
 		case "deleted_at":
-			lines = append(lines, fmt.Sprintf("    %s TIMESTAMPTZ", oc.Column))
+			lines = append(lines, fmt.Sprintf("    %s %s", oc.Column, sqlTimestamptz))
 		}
-	}
-
-	if compositePK {
-		lines = append(lines, fmt.Sprintf("    PRIMARY KEY (%s)", strings.Join(pkCols, ", ")))
 	}
 
 	up := []string{fmt.Sprintf("CREATE TABLE %s (\n%s\n);", table, strings.Join(lines, ",\n"))}

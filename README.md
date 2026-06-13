@@ -42,8 +42,9 @@ From a single spec describing one or more entities, `go-crudgen` produces:
   driver blank-imported for you.
 - **Migrations** — a [goose](https://github.com/pressly/goose) SQL migration per
   entity (`migrations/NNNNN_create_<table>.sql`) with `-- +goose Up`/`Down`
-  sections, written for every entity (including composite-key ones that get no
-  handler).
+  sections, written for every entity. `references` fields become `REFERENCES`
+  foreign keys, and migrations are numbered in dependency order so a referenced
+  table is always created before the table whose key points at it.
 
 Still planned:
 
@@ -83,7 +84,6 @@ the roadmap for interop.
 ### Example: YAML spec
 
 ```yaml
-version: 1
 package: blog            # Go package name for generated code
 module: example.com/blog # import path
 
@@ -93,7 +93,7 @@ entities:
     fields:
       - name: id
         type: uuid
-        primary: true     # every entity needs at least one primary field
+        primary: true     # every entity needs exactly one primary field
       - name: title
         type: string
         required: true
@@ -126,9 +126,9 @@ entities:
 
 ### Supported field types (initial)
 
-`string`, `text`, `int`, `int64`, `float`, `decimal`, `bool`, `date`,
+`string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`,
 `datetime`, `uuid`, `json`, and `references` (relations). Per-field modifiers:
-`primary` (marks a primary-key field; entities may have a composite key),
+`primary` (marks the single primary-key field every entity must have),
 `required`, `unique`, `default`, `index`, and `validate` (validation tag rules).
 
 A field that is neither `primary` nor `required` is **nullable**. Nullable fields
@@ -136,8 +136,11 @@ become pointers (`*T`, with `json:",omitempty"`) in the model and request DTOs,
 and `sql.Null[T]` columns in the generated repository's row type, so a SQL `NULL`
 round-trips as a `nil` pointer rather than a zero value.
 
-> Note: entities with a composite primary key currently generate a model but no
-> HTTP handlers (a single `/{id}` path can't address a composite key yet).
+> Note: each entity must have exactly one primary-key field, and its type must be
+> one the generator can parse from a `/{id}` path segment: `string`, `text`,
+> `int32`, `int64`, `uuid`, or a `references` to such a key. Composite keys and
+> non-addressable key types (`decimal`, `float`, `bool`, `date`, `datetime`,
+> `json`) are rejected.
 
 ## Planned usage
 
@@ -210,7 +213,8 @@ http.ListenAndServe(":8080", router)
 - [ ] List endpoint: sorting
 - [~] Relations (`belongs_to` / `has_many`)
   - [x] `belongs_to`: `references` fields generate a foreign-key column typed
-    from the target's primary key
+    from the target's primary key, with a SQL `REFERENCES` constraint;
+    migrations are ordered so the referenced table is created first
   - [ ] `has_many`, nested/relation routes, and JOIN-based loading
 - [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)

@@ -13,6 +13,68 @@ type goType struct {
 	imp  string // import path, "" for builtins
 }
 
+// Go type expressions emitted for spec field types. scalarType produces these and
+// pkParser matches against them, so sharing the constants keeps the two in sync.
+const (
+	goString  = "string"
+	goInt32   = "int32"
+	goInt64   = "int64"
+	goFloat64 = "float64"
+	goBool    = "bool"
+	goDecimal = "decimal.Decimal"
+	goTime    = "time.Time"
+	goUUID    = "uuid.UUID"
+	goJSON    = "json.RawMessage"
+)
+
+// Import paths the generated code needs for particular field types.
+const (
+	importStrconv = "strconv"
+	importTime    = "time"
+	importUUID    = "github.com/google/uuid"
+	importDecimal = "github.com/shopspring/decimal"
+	importJSON    = "encoding/json"
+)
+
+// PostgreSQL column types emitted for spec field types.
+const (
+	sqlText        = "TEXT"
+	sqlInteger     = "INTEGER"
+	sqlBigint      = "BIGINT"
+	sqlDouble      = "DOUBLE PRECISION"
+	sqlNumeric     = "NUMERIC"
+	sqlBoolean     = "BOOLEAN"
+	sqlDate        = "DATE"
+	sqlTimestamptz = "TIMESTAMPTZ"
+	sqlUUID        = "UUID"
+	sqlJSONB       = "JSONB"
+)
+
+// typeInfo is the complete mapping for one scalar spec field type: its Go type
+// expression and the import that type needs, plus its PostgreSQL column type.
+type typeInfo struct {
+	goExpr   string
+	goImport string // "" for builtins
+	sqlType  string
+}
+
+// scalarTypes is the single source of truth mapping each non-reference spec field
+// type to its Go and SQL representations. scalarType and sqlType both read from
+// it, so a new field type is added in exactly one place.
+var scalarTypes = map[string]typeInfo{
+	"string":   {goExpr: goString, sqlType: sqlText},
+	"text":     {goExpr: goString, sqlType: sqlText},
+	"int32":    {goExpr: goInt32, sqlType: sqlInteger},
+	"int64":    {goExpr: goInt64, sqlType: sqlBigint},
+	"float":    {goExpr: goFloat64, sqlType: sqlDouble},
+	"bool":     {goExpr: goBool, sqlType: sqlBoolean},
+	"decimal":  {goExpr: goDecimal, goImport: importDecimal, sqlType: sqlNumeric},
+	"date":     {goExpr: goTime, goImport: importTime, sqlType: sqlDate},
+	"datetime": {goExpr: goTime, goImport: importTime, sqlType: sqlTimestamptz},
+	"uuid":     {goExpr: goUUID, goImport: importUUID, sqlType: sqlUUID},
+	"json":     {goExpr: goJSON, goImport: importJSON, sqlType: sqlJSONB},
+}
+
 // isNullable reports whether a field maps to a nullable column. It is the single
 // source of truth shared by the model (pointer field), the repository (sql.Null
 // column), and the migration (absence of a NOT NULL constraint): a column is
@@ -21,31 +83,14 @@ func isNullable(f spec.Field) bool {
 	return !f.Required && !f.Primary
 }
 
-// scalarType maps a non-reference field type to its Go representation. Stdlib
-// types are used where they fit; uuid and decimal use the established libraries
-// because the stdlib has no equivalent.
+// scalarType maps a non-reference field type to its Go representation, reading
+// from the shared scalarTypes table. ok is false for an unknown type.
 func scalarType(t string) (goType, bool) {
-	switch t {
-	case "string", "text":
-		return goType{expr: "string"}, true
-	case "int":
-		return goType{expr: "int"}, true
-	case "int64":
-		return goType{expr: "int64"}, true
-	case "float":
-		return goType{expr: "float64"}, true
-	case "bool":
-		return goType{expr: "bool"}, true
-	case "decimal":
-		return goType{expr: "decimal.Decimal", imp: "github.com/shopspring/decimal"}, true
-	case "date", "datetime":
-		return goType{expr: "time.Time", imp: "time"}, true
-	case "uuid":
-		return goType{expr: "uuid.UUID", imp: "github.com/google/uuid"}, true
-	case "json":
-		return goType{expr: "json.RawMessage", imp: "encoding/json"}, true
+	ti, ok := scalarTypes[t]
+	if !ok {
+		return goType{}, false
 	}
-	return goType{}, false
+	return goType{expr: ti.goExpr, imp: ti.goImport}, true
 }
 
 // pkParse describes how a primary key of the given Go type is parsed from the
@@ -54,20 +99,22 @@ type pkParse struct {
 	expr     string // expression yielding the id (and an error when needsErr)
 	needsErr bool   // false for string, which needs no parsing
 	imp      string // import the parse expression needs ("" for none)
+	cast     string // Go type to convert the parsed value to ("" when expr already yields the PK type)
 }
 
 // pkParser returns how to parse a path id into the given Go primary-key type.
 // ok is false for types we do not generate handlers for (decimal, time, json).
 func pkParser(goExpr string) (pkParse, bool) {
 	switch goExpr {
-	case "string":
+	case goString:
 		return pkParse{expr: `r.PathValue("id")`}, true
-	case "int":
-		return pkParse{expr: `strconv.Atoi(r.PathValue("id"))`, needsErr: true, imp: "strconv"}, true
-	case "int64":
-		return pkParse{expr: `strconv.ParseInt(r.PathValue("id"), 10, 64)`, needsErr: true, imp: "strconv"}, true
-	case "uuid.UUID":
-		return pkParse{expr: `uuid.Parse(r.PathValue("id"))`, needsErr: true, imp: "github.com/google/uuid"}, true
+	case goInt32:
+		// strconv has no parse-to-int32, so parse with a 32-bit size and cast.
+		return pkParse{expr: `strconv.ParseInt(r.PathValue("id"), 10, 32)`, needsErr: true, imp: importStrconv, cast: goInt32}, true
+	case goInt64:
+		return pkParse{expr: `strconv.ParseInt(r.PathValue("id"), 10, 64)`, needsErr: true, imp: importStrconv}, true
+	case goUUID:
+		return pkParse{expr: `uuid.Parse(r.PathValue("id"))`, needsErr: true, imp: importUUID}, true
 	}
 	return pkParse{}, false
 }

@@ -46,12 +46,16 @@ func TestValidate_Errors(t *testing.T) {
 		{"reference without target", func(s *Spec) { s.Entities[1].Fields[1].Target = "" }},
 		{"reference to unknown entity", func(s *Spec) { s.Entities[1].Fields[1].Target = "Ghost" }},
 		{"entity without primary key", func(s *Spec) { s.Entities[0].Fields[0].Primary = false }},
-		{"reference to composite primary key", func(s *Spec) {
+		{"composite primary key", func(s *Spec) {
 			s.Entities[0].Fields = []Field{
 				{Name: "a", Type: "uuid", Primary: true},
 				{Name: "b", Type: "uuid", Primary: true},
 			}
 		}},
+		{"decimal primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "decimal" }},
+		{"bool primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "bool" }},
+		{"datetime primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "datetime" }},
+		{"json primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "json" }},
 	}
 
 	for _, tc := range cases {

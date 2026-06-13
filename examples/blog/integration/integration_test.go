@@ -49,6 +49,12 @@ func TestIntegration(t *testing.T) {
 		id, authorID := uuid.New(), uuid.New()
 		idPath := "/posts/" + id.String()
 
+		// The post's author column has a foreign key to authors(id), so the author
+		// must exist before a post can reference it.
+		do(t, srv, http.MethodPost, "/authors",
+			blog.CreateAuthorRequest{ID: authorID, Email: authorID.String() + "@example.com", Name: new("Ada")},
+			nil, http.StatusCreated)
+
 		var created blog.Post
 		do(t, srv, http.MethodPost, "/posts",
 			blog.CreatePostRequest{ID: id, Title: "Hello", Body: new("world"), Author: &authorID},

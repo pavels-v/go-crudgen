@@ -69,6 +69,17 @@ func Generate(s *spec.Spec, opts Options) error {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
 
+	// Migrations are numbered so that a referenced table is created before the
+	// table whose foreign key points at it, regardless of declaration order.
+	order, err := migrationOrder(s.Entities, byName)
+	if err != nil {
+		return err
+	}
+	migNum := make(map[string]int, len(order))
+	for i, e := range order {
+		migNum[e.Name] = i + 1
+	}
+
 	emit := func(file string, src []byte) error {
 		if toStdout {
 			fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", file, src)
@@ -101,8 +112,9 @@ func Generate(s *spec.Spec, opts Options) error {
 			return err
 		}
 
-		// Every entity needs a table, including composite-key entities that get no
-		// handler or repository. Migrations are numbered in declaration order.
+		// Every entity needs a table, including ones whose primary-key type gets no
+		// handler or repository. Migrations are numbered in dependency order (see
+		// migrationOrder) so foreign keys resolve when goose applies them.
 		md, err := migrationInfo(e, byName)
 		if err != nil {
 			return fmt.Errorf("generating migration for %q: %w", e.Name, err)
@@ -111,18 +123,14 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generating migration for %q: %w", e.Name, err)
 		}
-		migFile := fmt.Sprintf("migrations/%05d_create_%s.sql", i+1, plural(e.Name, e.Plural))
+		migFile := fmt.Sprintf("migrations/%05d_create_%s.sql", migNum[e.Name], plural(e.Name, e.Plural))
 		if err := emit(migFile, msrc); err != nil {
 			return err
 		}
 
-		hd, ok, err := handlerInfo(s, e, byName)
+		hd, err := handlerInfo(s, e, byName)
 		if err != nil {
 			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
-		}
-		if !ok {
-			fmt.Fprintf(os.Stderr, "  - %s: skipping handlers (needs a single primary key of a path-addressable type)\n", e.Name)
-			continue
 		}
 		hsrc, err := renderHandler(hd)
 		if err != nil {
@@ -132,14 +140,9 @@ func Generate(s *spec.Spec, opts Options) error {
 			return err
 		}
 
-		rd, ok, err := repoInfo(s, e, byName)
+		rd, err := repoInfo(s, e, byName)
 		if err != nil {
 			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
-		}
-		if !ok {
-			// serveKey gates both handler and repo, so reaching here means an
-			// entity that handlers accept but repos reject — a generator bug.
-			return fmt.Errorf("internal: %q is serveable as a handler but not as a repository", e.Name)
 		}
 		rsrc, err := renderRepo(rd)
 		if err != nil {
@@ -234,6 +237,7 @@ type pkData struct {
 	GoType   string
 	Expr     string // parse expression for the {id} path value
 	NeedsErr bool
+	Cast     string // Go type to convert the parsed value to ("" when none needed)
 }
 
 // sharedData is the template input for the package-wide http.gen.go file.
@@ -248,33 +252,29 @@ type sharedEntity struct {
 	DepsField string // field name in Deps, e.g. "Posts"
 }
 
-// serveKey resolves the single, path-addressable primary key an entity needs to
-// be serveable. ok is false (with no error) when the entity must be skipped: a
-// composite primary key cannot be addressed by a single /{id} path, and some
-// primary-key types have no path parser. handlerInfo and repoInfo share this so
-// their notion of "serveable" can never drift apart.
-func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, pp pkParse, ok bool, err error) {
-	pks := e.PrimaryKey()
-	if len(pks) != 1 {
-		return spec.Field{}, goType{}, pkParse{}, false, nil
-	}
-	gt, err = fieldType(pks[0], byName)
+// serveKey resolves the path-addressable primary key used to build an entity's
+// handler and repository. Validation guarantees exactly one primary key of a
+// path-addressable type, so the pkParser miss below is a defensive check against
+// an unvalidated spec, not a normal skip. handlerInfo and repoInfo share this so
+// their notion of the primary key can never drift apart.
+func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, pp pkParse, err error) {
+	pk = e.PrimaryKey()[0]
+	gt, err = fieldType(pk, byName)
 	if err != nil {
-		return spec.Field{}, goType{}, pkParse{}, false, err
+		return spec.Field{}, goType{}, pkParse{}, err
 	}
-	pp, ok = pkParser(gt.expr)
+	pp, ok := pkParser(gt.expr)
 	if !ok {
-		return spec.Field{}, goType{}, pkParse{}, false, nil
+		return spec.Field{}, goType{}, pkParse{}, fmt.Errorf("entity %q primary key %q has non-path-addressable type %q (validation should have rejected it)", e.Name, pk.Name, pk.Type)
 	}
-	return pks[0], gt, pp, true, nil
+	return pk, gt, pp, nil
 }
 
-// handlerInfo builds the handler template data for an entity, reporting ok=false
-// when the entity is not serveable (see serveKey).
-func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, bool, error) {
-	pk, gt, pp, ok, err := serveKey(e, byName)
-	if err != nil || !ok {
-		return handlerData{}, ok, err
+// handlerInfo builds the handler template data for an entity.
+func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, error) {
+	pk, gt, pp, err := serveKey(e, byName)
+	if err != nil {
+		return handlerData{}, err
 	}
 
 	name := pascalCase(e.Name)
@@ -290,6 +290,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			GoType:   gt.expr,
 			Expr:     pp.expr,
 			NeedsErr: pp.needsErr,
+			Cast:     pp.cast,
 		},
 	}
 	for _, f := range e.Fields {
@@ -308,7 +309,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		data.Imports = append(data.Imports, imp)
 	}
 	sort.Strings(data.Imports)
-	return data, true, nil
+	return data, nil
 }
 
 // renderTemplate executes the named template with data and gofmt-formats it.
@@ -382,7 +383,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	// Option-injected columns (timestamps, soft-delete) share one definition
 	// with repoInfo so the model struct and the generated SQL never disagree.
 	for _, oc := range optionColumns(e.Options) {
-		add(oc.Column, oc.GoType, "time", oc.JSONTag)
+		add(oc.Column, oc.GoType, importTime, oc.JSONTag)
 	}
 
 	for imp := range imports {

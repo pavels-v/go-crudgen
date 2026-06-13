@@ -3,7 +3,6 @@ package spec
 
 // Spec is the top-level entity specification (see examples/blog.yaml for an example).
 type Spec struct {
-	Version  int      `yaml:"version"`
 	Package  string   `yaml:"package"`
 	Module   string   `yaml:"module"`
 	Entities []Entity `yaml:"entities"`
@@ -36,8 +35,9 @@ type Field struct {
 	Target   string `yaml:"target"`   // referenced entity, when Type == "references"
 }
 
-// PrimaryKey returns the fields that make up the entity's primary key, in
-// declaration order. A spec is invalid (rejected by Validate) if this is empty.
+// PrimaryKey returns the fields marked primary, in declaration order. A valid
+// spec (per Validate) has exactly one; the slice lets Validate detect and reject
+// missing or composite keys before any code relies on the single-key invariant.
 func (e *Entity) PrimaryKey() []Field {
 	var pk []Field
 	for _, f := range e.Fields {
