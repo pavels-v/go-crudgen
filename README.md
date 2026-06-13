@@ -163,11 +163,11 @@ driver is blank-imported for you); you inject the repositories into the router:
 ```go
 db, err := blog.NewDB(dsn)
 if err != nil {
-	log.Fatal(err)
+  log.Fatal(err)
 }
 router := blog.NewRouter(blog.Deps{
-	Posts:   blog.NewPostgresPostRepository(db),
-	Authors: blog.NewPostgresAuthorRepository(db),
+  Posts:   blog.NewPostgresPostRepository(db),
+  Authors: blog.NewPostgresAuthorRepository(db),
 })
 http.ListenAndServe(":8080", router)
 ```
