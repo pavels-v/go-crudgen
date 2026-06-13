@@ -5,9 +5,9 @@ fully-working, RESTful Go HTTP service — handlers, routing, data models,
 validation, and persistence — so you spend your time on business logic instead
 of CRUD boilerplate.
 
-> Status: in progress. Models, DTOs, CRUD handlers, and `net/http` router
-> wiring are generated today; the storage layer, migrations, and OpenAPI export
-> are still on the roadmap.
+> Status: in progress. Models, DTOs, CRUD handlers, `net/http` router wiring,
+> and PostgreSQL repositories (via `sqlx`/`database/sql`) are generated today;
+> migrations and OpenAPI export are still on the roadmap.
 
 ## Why
 
@@ -33,13 +33,16 @@ From a single spec describing one or more entities, `go-crudgen` produces:
   from the spec.
 - **HTTP handlers** — full CRUD per entity following REST conventions.
 - **Router wiring** — routes registered on a standard `net/http` mux.
-- **Repository interfaces** — the storage seam each handler depends on; you
-  provide the implementation (a concrete generated backend is on the roadmap).
+- **Repository interfaces + a PostgreSQL implementation** — the storage seam
+  each handler depends on, plus a generated `sqlx`-backed repository that
+  satisfies it. The repository talks to `database/sql`, so it binds to no
+  specific driver.
+- **Database connection constructor** — a `NewDB` helper that opens the pool
+  through your chosen driver (`pgx` by default, `pq` via `--driver`), with that
+  driver blank-imported for you.
 
 Still planned:
 
-- **Storage layer** — a concrete repository implementation (initial target:
-  PostgreSQL via SQL/`pgx`; pluggable backends planned).
 - **Migrations** — SQL schema for each entity.
 - **OpenAPI document** — generated from the same spec for client tooling.
 
@@ -141,6 +144,34 @@ go-crudgen generate --spec ./api.yaml
 go-crudgen generate --spec ./api.yaml --out ./internal/api
 ```
 
+By default the generator emits a `NewDB` constructor wired to the **pgx**
+driver. Pass `--driver pq` to use `lib/pq` instead:
+
+```bash
+go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
+```
+
+The driver only affects the generated `NewDB` constructor; the repositories
+themselves stay driver-agnostic (they depend on `*sqlx.DB`, not a driver).
+
+### Wiring the generated service
+
+Handlers depend on the repository *interface*; the generated Postgres
+repository implements it. The generated `NewDB` opens the pool (the chosen
+driver is blank-imported for you); you inject the repositories into the router:
+
+```go
+db, err := blog.NewDB(dsn)
+if err != nil {
+	log.Fatal(err)
+}
+router := blog.NewRouter(blog.Deps{
+	Posts:   blog.NewPostgresPostRepository(db),
+	Authors: blog.NewPostgresAuthorRepository(db),
+})
+http.ListenAndServe(":8080", router)
+```
+
 ## Design principles
 
 - **Idiomatic, readable Go** — output looks hand-written, not magic.
@@ -149,14 +180,16 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api
 - **Standard library first** — `net/http` routing, minimal dependencies.
 - **Spec is the source of truth** — re-running the generator is safe and
   predictable.
-- **Pluggable storage** — repository interfaces keep the DB swappable.
+- **Pluggable storage** — repository interfaces keep the DB swappable, and the
+  generated Postgres repository targets `database/sql`, so any driver works.
 
 ## Roadmap
 
 - [x] YAML spec parser and validation
 - [x] Model + struct-tag generation
 - [x] CRUD handler generation (`net/http`)
-- [ ] PostgreSQL repository + migrations
+- [x] PostgreSQL repository (`sqlx` / `database/sql`)
+- [ ] Migrations (SQL schema per entity)
 - [x] List endpoint: pagination (`?limit` / `?offset`)
 - [ ] List endpoint: filtering
 - [ ] List endpoint: sorting

@@ -6,9 +6,9 @@ import (
 
 // Author represents a author.
 type Author struct {
-	ID    uuid.UUID `json:"id"`
-	Email string    `json:"email" validate:"required,email"`
-	Name  string    `json:"name"`
+	ID    uuid.UUID `json:"id" db:"id"`
+	Email string    `json:"email" validate:"required,email" db:"email"`
+	Name  string    `json:"name" db:"name"`
 }
 
 // CreateAuthorRequest is the request body for creating a author.
