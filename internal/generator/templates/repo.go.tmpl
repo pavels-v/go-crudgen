@@ -30,7 +30,7 @@ var _ {{ .Repo }} = (*{{ .Receiver }})(nil)
 
 func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
 {{- if .HasTimestamps }}
-	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan({{ .CreateScan }}); err != nil {
 		return fmt.Errorf("create {{ .LowerStruct }}: %w", err)
 	}
 {{- else }}
@@ -63,7 +63,17 @@ func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .St
 
 func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 {{- if .HasTimestamps }}
-	err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan(&m.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan({{ .UpdateScan }})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
+	}
+{{- else if .NoUpdateColumns }}
+	// {{ .Struct }} has no writable columns; verify the row exists.
+	var exists int
+	err := r.db.GetContext(ctx, &exists, update{{ .Struct }}SQL, {{ .UpdateArgs }})
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}

@@ -142,6 +142,10 @@ go-crudgen generate --spec ./api.yaml
 
 # generate a service from a spec into a directory
 go-crudgen generate --spec ./api.yaml --out ./internal/api
+
+# the generated code imports third-party packages (sqlx, the driver, uuid, ...),
+# so resolve them in the output module afterwards
+cd ./internal/api && go mod tidy
 ```
 
 By default the generator emits a `NewDB` constructor wired to the **pgx**
@@ -153,6 +157,9 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
 
 The driver only affects the generated `NewDB` constructor; the repositories
 themselves stay driver-agnostic (they depend on `*sqlx.DB`, not a driver).
+Re-run `go mod tidy` in the output module after switching drivers so the new
+driver dependency is fetched. `NewDB` applies sane connection-pool defaults
+(max-open/idle conns, conn lifetime) you can tune in the generated file.
 
 ### Wiring the generated service
 

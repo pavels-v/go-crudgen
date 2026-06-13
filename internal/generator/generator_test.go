@@ -378,6 +378,33 @@ func TestRenderRepo_SoftDeleteFiltersAndUpdates(t *testing.T) {
 	}
 }
 
+func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
+	t.Parallel()
+
+	// A serveable entity with only a primary key and no timestamps has nothing
+	// writable: the UPDATE must not be `SET  WHERE ...` (invalid SQL). It should
+	// degrade to an existence check by primary key.
+	s := &spec.Spec{
+		Package: "cat",
+		Entities: []spec.Entity{{
+			Name:   "Tag",
+			Fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}},
+		}},
+	}
+
+	got := renderRepoSrc(t, s, "Tag")
+	for _, want := range []string{
+		"updateTagSQL = `SELECT 1 FROM tags WHERE id = $1`",
+		"r.db.GetContext(ctx, &exists, updateTagSQL, m.ID)",
+		"return ErrNotFound",
+	} {
+		wantContains(t, got, want)
+	}
+	// must NOT emit a malformed empty SET clause
+	require.NotContains(t, strings.Join(strings.Fields(got), " "), "SET WHERE",
+		"primary-key-only entity must not generate an empty UPDATE SET clause")
+}
+
 func TestRenderDB_DriverSelection(t *testing.T) {
 	t.Parallel()
 
@@ -404,10 +431,11 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			requireParses(t, src)
 
 			got := string(src)
-			wantContains(t, got, "const driverName = "+tc.wantName)
+			wantContains(t, got, "driverName = "+tc.wantName)
 			wantContains(t, got, tc.wantImport)
 			wantContains(t, got, "func NewDB(dsn string) (*sqlx.DB, error)")
-			wantContains(t, got, "return sqlx.Open(driverName, dsn)")
+			wantContains(t, got, "db, err := sqlx.Open(driverName, dsn)")
+			wantContains(t, got, "db.SetMaxOpenConns(maxOpenConns)")
 		})
 	}
 }

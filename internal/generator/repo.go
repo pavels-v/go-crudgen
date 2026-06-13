@@ -28,19 +28,57 @@ func driverInfo(driver string) (name, imp string, ok bool) {
 	return "", "", false
 }
 
+// optionColumn describes a column injected by an EntityOptions toggle.
+type optionColumn struct {
+	Column  string
+	GoName  string
+	GoType  string
+	JSONTag string
+}
+
+// optionColumns returns the columns injected by an entity's options, in the
+// order they are appended to the model struct (timestamps, then soft-delete).
+// renderModel and repoInfo both consume it so the model struct and the
+// generated SQL agree on which columns exist and their order.
+func optionColumns(o spec.EntityOptions) []optionColumn {
+	var cols []optionColumn
+	if o.Timestamps {
+		cols = append(cols,
+			optionColumn{"created_at", "CreatedAt", "time.Time", `json:"created_at"`},
+			optionColumn{"updated_at", "UpdatedAt", "time.Time", `json:"updated_at"`},
+		)
+	}
+	if o.SoftDelete {
+		cols = append(cols, optionColumn{"deleted_at", "DeletedAt", "*time.Time", `json:"deleted_at,omitempty"`})
+	}
+	return cols
+}
+
+// scanList renders the scan-target list for a set of columns, e.g. ["created_at"]
+// -> "&m.CreatedAt". It shares the column list with the SQL builder so a
+// RETURNING clause and its Scan targets can never drift in arity or order.
+func scanList(cols []string) string {
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = "&m." + pascalCase(c)
+	}
+	return strings.Join(out, ", ")
+}
+
 // repoData is the template input for one entity's PostgreSQL repository file.
 // The SQL statements are built here rather than in the template so the column
 // math (placeholders, ordering, soft-delete/timestamp handling) stays testable.
 type repoData struct {
-	Package       string
-	Imports       []string
-	Struct        string
-	LowerStruct   string // struct name lower-cased, for error messages
-	Repo          string // interface name, e.g. "PostRepository"
-	Receiver      string // concrete type, e.g. "PostgresPostRepository"
-	Constructor   string // e.g. "NewPostgresPostRepository"
-	PKGoType      string
-	HasTimestamps bool
+	Package         string
+	Imports         []string
+	Struct          string
+	LowerStruct     string // struct name lower-cased, for error messages
+	Repo            string // interface name, e.g. "PostRepository"
+	Receiver        string // concrete type, e.g. "PostgresPostRepository"
+	Constructor     string // e.g. "NewPostgresPostRepository"
+	PKGoType        string
+	HasTimestamps   bool
+	NoUpdateColumns bool // entity has no writable columns; Update is an existence check
 
 	CreateSQL string
 	GetSQL    string
@@ -48,68 +86,57 @@ type repoData struct {
 	UpdateSQL string
 	DeleteSQL string
 
-	InsertArgs  string // create args, e.g. "m.ID, m.Title"
-	UpdateArgs  string // update args: non-PK fields then PK, e.g. "m.Title, m.ID"
-	ScanTargets string // all columns, e.g. "&m.ID, &m.Title, &m.CreatedAt"
+	InsertArgs string // create args, e.g. "m.ID, m.Title"
+	UpdateArgs string // update args: non-PK fields then PK, e.g. "m.Title, m.ID"
+	CreateScan string // scan targets for the create RETURNING clause
+	UpdateScan string // scan targets for the update RETURNING clause
 }
 
 // repoInfo builds the repository template data for an entity, reporting ok=false
-// for the same entities handlerInfo skips: a repository whose interface is never
-// generated would have nothing to implement.
+// for the same entities handlerInfo skips (see serveKey): a repository whose
+// interface is never generated would have nothing to implement.
 func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (repoData, bool, error) {
-	pk := e.PrimaryKey()
-	if len(pk) != 1 {
-		return repoData{}, false, nil
-	}
-	gt, err := fieldType(pk[0], byName)
-	if err != nil {
-		return repoData{}, false, err
-	}
-	if _, ok := pkParser(gt.expr); !ok {
-		return repoData{}, false, nil
+	pk, gt, _, ok, err := serveKey(e, byName)
+	if err != nil || !ok {
+		return repoData{}, ok, err
 	}
 
 	name := pascalCase(e.Name)
 	table := plural(e.Name, e.Plural)
-	pkCol := snakeCase(pk[0].Name)
+	pkCol := snakeCase(pk.Name)
+	pkGoName := pascalCase(pk.Name)
 	soft := e.Options.SoftDelete
 	ts := e.Options.Timestamps
 
 	// Persisted columns in struct order: spec fields first, then the
-	// option-injected timestamp and soft-delete columns.
+	// option-injected columns (shared with renderModel via optionColumns).
 	type col struct{ Column, GoName string }
-	var all, insert, update []col
+	var specCols, update []col
 	for _, f := range e.Fields {
 		c := col{Column: snakeCase(f.Name), GoName: pascalCase(f.Name)}
-		all = append(all, c)
-		insert = append(insert, c) // the primary key is supplied by the caller
+		specCols = append(specCols, c) // the primary key is supplied by the caller
 		if !f.Primary {
 			update = append(update, c)
 		}
 	}
-	if ts {
-		all = append(all, col{"created_at", "CreatedAt"}, col{"updated_at", "UpdatedAt"})
+	selectCols := make([]string, 0, len(specCols)+2)
+	for _, c := range specCols {
+		selectCols = append(selectCols, c.Column)
 	}
-	if soft {
-		all = append(all, col{"deleted_at", "DeletedAt"})
-	}
-
-	selectCols := make([]string, len(all))
-	scan := make([]string, len(all))
-	for i, c := range all {
-		selectCols[i] = c.Column
-		scan[i] = "&m." + c.GoName
+	for _, oc := range optionColumns(e.Options) {
+		selectCols = append(selectCols, oc.Column)
 	}
 
 	// INSERT: spec fields take placeholders; timestamps default to now().
-	insCols := make([]string, len(insert))
-	insPh := make([]string, len(insert))
-	insArgs := make([]string, len(insert))
-	for i, c := range insert {
+	insCols := make([]string, len(specCols))
+	insPh := make([]string, len(specCols))
+	insArgs := make([]string, len(specCols))
+	for i, c := range specCols {
 		insCols[i] = c.Column
 		insPh[i] = fmt.Sprintf("$%d", i+1)
 		insArgs[i] = "m." + c.GoName
 	}
+	var createScan string
 	if ts {
 		insCols = append(insCols, "created_at", "updated_at")
 		insPh = append(insPh, "now()", "now()")
@@ -117,7 +144,9 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	createSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		table, strings.Join(insCols, ", "), strings.Join(insPh, ", "))
 	if ts {
-		createSQL += " RETURNING created_at, updated_at"
+		ret := []string{"created_at", "updated_at"}
+		createSQL += " RETURNING " + strings.Join(ret, ", ")
+		createScan = scanList(ret)
 	}
 
 	softFilter := ""
@@ -137,21 +166,30 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// UPDATE: non-PK fields get placeholders $1..$n, the PK gets $n+1.
 	setClauses := make([]string, 0, len(update)+1)
 	updArgs := make([]string, 0, len(update)+1)
-	n := 0
-	for _, c := range update {
-		n++
-		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.Column, n))
+	for i, c := range update {
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.Column, i+1))
 		updArgs = append(updArgs, "m."+c.GoName)
 	}
 	if ts {
 		setClauses = append(setClauses, "updated_at = now()")
 	}
-	n++
-	updateSQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d%s",
-		table, strings.Join(setClauses, ", "), pkCol, n, softFilter)
-	updArgs = append(updArgs, "m."+pascalCase(pk[0].Name))
-	if ts {
-		updateSQL += " RETURNING updated_at"
+	updArgs = append(updArgs, "m."+pkGoName)
+
+	var updateSQL, updateScan string
+	noUpdateColumns := len(setClauses) == 0
+	if noUpdateColumns {
+		// Nothing writable (a primary-key-only entity without timestamps): an
+		// empty SET would be invalid SQL, so Update degrades to an existence
+		// check by primary key that still returns ErrNotFound for a missing row.
+		updateSQL = fmt.Sprintf("SELECT 1 FROM %s WHERE %s = $1%s", table, pkCol, softFilter)
+	} else {
+		updateSQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d%s",
+			table, strings.Join(setClauses, ", "), pkCol, len(update)+1, softFilter)
+		if ts {
+			ret := []string{"updated_at"}
+			updateSQL += " RETURNING " + strings.Join(ret, ", ")
+			updateScan = scanList(ret)
+		}
 	}
 
 	deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", table, pkCol)
@@ -169,22 +207,24 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	sort.Strings(imports)
 
 	return repoData{
-		Package:       s.Package,
-		Struct:        name,
-		LowerStruct:   strings.ToLower(name),
-		Repo:          name + "Repository",
-		Receiver:      "Postgres" + name + "Repository",
-		Constructor:   "NewPostgres" + name + "Repository",
-		PKGoType:      gt.expr,
-		HasTimestamps: ts,
-		CreateSQL:     createSQL,
-		GetSQL:        getSQL,
-		ListSQL:       listSQL,
-		UpdateSQL:     updateSQL,
-		DeleteSQL:     deleteSQL,
-		InsertArgs:    strings.Join(insArgs, ", "),
-		UpdateArgs:    strings.Join(updArgs, ", "),
-		ScanTargets:   strings.Join(scan, ", "),
-		Imports:       imports,
+		Package:         s.Package,
+		Struct:          name,
+		LowerStruct:     strings.ToLower(name),
+		Repo:            name + "Repository",
+		Receiver:        "Postgres" + name + "Repository",
+		Constructor:     "NewPostgres" + name + "Repository",
+		PKGoType:        gt.expr,
+		HasTimestamps:   ts,
+		NoUpdateColumns: noUpdateColumns,
+		CreateSQL:       createSQL,
+		GetSQL:          getSQL,
+		ListSQL:         listSQL,
+		UpdateSQL:       updateSQL,
+		DeleteSQL:       deleteSQL,
+		InsertArgs:      strings.Join(insArgs, ", "),
+		UpdateArgs:      strings.Join(updArgs, ", "),
+		CreateScan:      createScan,
+		UpdateScan:      updateScan,
+		Imports:         imports,
 	}, true, nil
 }

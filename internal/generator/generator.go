@@ -111,9 +111,14 @@ func Generate(s *spec.Spec, opts Options) error {
 			return err
 		}
 
-		rd, _, err := repoInfo(s, e, byName)
+		rd, ok, err := repoInfo(s, e, byName)
 		if err != nil {
 			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
+		}
+		if !ok {
+			// serveKey gates both handler and repo, so reaching here means an
+			// entity that handlers accept but repos reject — a generator bug.
+			return fmt.Errorf("internal: %q is serveable as a handler but not as a repository", e.Name)
 		}
 		rsrc, err := renderRepo(rd)
 		if err != nil {
@@ -146,6 +151,12 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err := emit("db.gen.go", dbsrc); err != nil {
 			return err
 		}
+	}
+
+	// The generated code imports third-party packages (sqlx, the driver, uuid,
+	// ...); the caller must resolve them in the output module.
+	if !toStdout {
+		fmt.Fprintf(os.Stderr, "go-crudgen: done. Run `go mod tidy` in %s to resolve dependencies.\n", opts.OutDir)
 	}
 	return nil
 }
@@ -203,21 +214,33 @@ type sharedEntity struct {
 	DepsField string // field name in Deps, e.g. "Posts"
 }
 
-// handlerInfo builds the handler template data for an entity, reporting ok=false
-// when the entity is not serveable: a composite primary key cannot be addressed
-// by a single /{id} path, and some primary-key types have no path parser.
-func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, bool, error) {
-	pk := e.PrimaryKey()
-	if len(pk) != 1 {
-		return handlerData{}, false, nil
+// serveKey resolves the single, path-addressable primary key an entity needs to
+// be serveable. ok is false (with no error) when the entity must be skipped: a
+// composite primary key cannot be addressed by a single /{id} path, and some
+// primary-key types have no path parser. handlerInfo and repoInfo share this so
+// their notion of "serveable" can never drift apart.
+func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, pp pkParse, ok bool, err error) {
+	pks := e.PrimaryKey()
+	if len(pks) != 1 {
+		return spec.Field{}, goType{}, pkParse{}, false, nil
 	}
-	gt, err := fieldType(pk[0], byName)
+	gt, err = fieldType(pks[0], byName)
 	if err != nil {
-		return handlerData{}, false, err
+		return spec.Field{}, goType{}, pkParse{}, false, err
 	}
-	pp, ok := pkParser(gt.expr)
+	pp, ok = pkParser(gt.expr)
 	if !ok {
-		return handlerData{}, false, nil
+		return spec.Field{}, goType{}, pkParse{}, false, nil
+	}
+	return pks[0], gt, pp, true, nil
+}
+
+// handlerInfo builds the handler template data for an entity, reporting ok=false
+// when the entity is not serveable (see serveKey).
+func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, bool, error) {
+	pk, gt, pp, ok, err := serveKey(e, byName)
+	if err != nil || !ok {
+		return handlerData{}, ok, err
 	}
 
 	name := pascalCase(e.Name)
@@ -229,7 +252,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		CreateName: "Create" + name + "Request",
 		UpdateName: "Update" + name + "Request",
 		PK: pkData{
-			GoName:   pascalCase(pk[0].Name),
+			GoName:   pascalCase(pk.Name),
 			GoType:   gt.expr,
 			Expr:     pp.expr,
 			NeedsErr: pp.needsErr,
@@ -254,11 +277,11 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	return data, true, nil
 }
 
-// renderHandler executes and gofmt-formats the handler file for one entity.
-func renderHandler(data handlerData) ([]byte, error) {
+// renderTemplate executes the named template with data and gofmt-formats it.
+func renderTemplate(name string, data any) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "handler.go.tmpl", data); err != nil {
-		return nil, fmt.Errorf("rendering handler template: %w", err)
+	if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		return nil, fmt.Errorf("rendering %s: %w", name, err)
 	}
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -267,44 +290,10 @@ func renderHandler(data handlerData) ([]byte, error) {
 	return formatted, nil
 }
 
-// renderRepo executes and gofmt-formats the PostgreSQL repository file for one entity.
-func renderRepo(data repoData) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "repo.go.tmpl", data); err != nil {
-		return nil, fmt.Errorf("rendering repository template: %w", err)
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("formatting generated source: %w", err)
-	}
-	return formatted, nil
-}
-
-// renderDB executes and gofmt-formats the package-wide database connection file.
-func renderDB(data dbData) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "db.go.tmpl", data); err != nil {
-		return nil, fmt.Errorf("rendering db template: %w", err)
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("formatting generated source: %w", err)
-	}
-	return formatted, nil
-}
-
-// renderShared executes and gofmt-formats the package-wide http file.
-func renderShared(data sharedData) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "http.go.tmpl", data); err != nil {
-		return nil, fmt.Errorf("rendering http template: %w", err)
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("formatting generated source: %w", err)
-	}
-	return formatted, nil
-}
+func renderHandler(data handlerData) ([]byte, error) { return renderTemplate("handler.go.tmpl", data) }
+func renderRepo(data repoData) ([]byte, error)       { return renderTemplate("repo.go.tmpl", data) }
+func renderDB(data dbData) ([]byte, error)            { return renderTemplate("db.go.tmpl", data) }
+func renderShared(data sharedData) ([]byte, error)   { return renderTemplate("http.go.tmpl", data) }
 
 // renderModel builds, executes, and gofmt-formats the model file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
@@ -345,12 +334,10 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 	}
 
-	if e.Options.Timestamps {
-		add("created_at", "time.Time", "time", `json:"created_at"`)
-		add("updated_at", "time.Time", "time", `json:"updated_at"`)
-	}
-	if e.Options.SoftDelete {
-		add("deleted_at", "*time.Time", "time", `json:"deleted_at,omitempty"`)
+	// Option-injected columns (timestamps, soft-delete) share one definition
+	// with repoInfo so the model struct and the generated SQL never disagree.
+	for _, oc := range optionColumns(e.Options) {
+		add(oc.Column, oc.GoType, "time", oc.JSONTag)
 	}
 
 	for imp := range imports {
@@ -358,15 +345,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	}
 	sort.Strings(data.Imports)
 
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "model.go.tmpl", data); err != nil {
-		return nil, fmt.Errorf("rendering template: %w", err)
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("formatting generated source: %w", err)
-	}
-	return formatted, nil
+	return renderTemplate("model.go.tmpl", data)
 }
 
 // fieldTag builds the struct tag for a field: a json name plus a validate rule
