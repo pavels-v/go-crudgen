@@ -72,5 +72,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ## 5. Golang
 
 1. Follow the "Uber Go Style Guide" for the code you produce
-2. Use table-driven tests approach for unit tests. Use require lib instead of assert when its possible
-3. Use t.Parallel() for unit tests when its possible
+2. Use table-driven tests approach for unit tests
+3. Use require lib instead of assert when it makes sense
+4. Use t.Parallel() for unit tests when it makes sense
