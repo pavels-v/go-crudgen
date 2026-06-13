@@ -24,6 +24,7 @@ var tmpl = template.Must(template.ParseFS(templates, "templates/*.tmpl"))
 type Options struct {
 	OutDir string
 	DryRun bool
+	Driver string // database driver for the connection constructor: "pgx" (default) or "pq"
 }
 
 // Generate produces a Go service from the spec. It emits a model file per
@@ -35,6 +36,11 @@ type Options struct {
 // one file per entity is written into that directory. Progress and diagnostics
 // always go to stderr so stdout carries only generated code.
 func Generate(s *spec.Spec, opts Options) error {
+	driverName, driverImp, ok := driverInfo(opts.Driver)
+	if !ok {
+		return fmt.Errorf("unknown driver %q (supported: pgx, pq)", opts.Driver)
+	}
+
 	toStdout := opts.OutDir == ""
 
 	dest := opts.OutDir
@@ -104,6 +110,19 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err := emit(base+"_handler.gen.go", hsrc); err != nil {
 			return err
 		}
+
+		rd, _, err := repoInfo(s, e, byName)
+		if err != nil {
+			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
+		}
+		rsrc, err := renderRepo(rd)
+		if err != nil {
+			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
+		}
+		if err := emit(base+"_repo.gen.go", rsrc); err != nil {
+			return err
+		}
+
 		serveable = append(serveable, sharedEntity{
 			Struct:    hd.Struct,
 			Repo:      hd.Repo,
@@ -117,6 +136,14 @@ func Generate(s *spec.Spec, opts Options) error {
 			return fmt.Errorf("generating router: %w", err)
 		}
 		if err := emit("http.gen.go", ssrc); err != nil {
+			return err
+		}
+
+		dbsrc, err := renderDB(dbData{Package: s.Package, DriverName: driverName, DriverImport: driverImp})
+		if err != nil {
+			return fmt.Errorf("generating db connection: %w", err)
+		}
+		if err := emit("db.gen.go", dbsrc); err != nil {
 			return err
 		}
 	}
@@ -240,6 +267,32 @@ func renderHandler(data handlerData) ([]byte, error) {
 	return formatted, nil
 }
 
+// renderRepo executes and gofmt-formats the PostgreSQL repository file for one entity.
+func renderRepo(data repoData) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "repo.go.tmpl", data); err != nil {
+		return nil, fmt.Errorf("rendering repository template: %w", err)
+	}
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("formatting generated source: %w", err)
+	}
+	return formatted, nil
+}
+
+// renderDB executes and gofmt-formats the package-wide database connection file.
+func renderDB(data dbData) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "db.go.tmpl", data); err != nil {
+		return nil, fmt.Errorf("rendering db template: %w", err)
+	}
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("formatting generated source: %w", err)
+	}
+	return formatted, nil
+}
+
 // renderShared executes and gofmt-formats the package-wide http file.
 func renderShared(data sharedData) ([]byte, error) {
 	var buf bytes.Buffer
@@ -269,6 +322,9 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		if imp != "" {
 			imports[imp] = struct{}{}
 		}
+		// Model fields carry a db tag so sqlx's GetContext/SelectContext map
+		// columns by name (its default mapper lower-cases, mangling created_at).
+		tag = fmt.Sprintf("%s db:%q", tag, snakeCase(name))
 		data.Fields = append(data.Fields, modelField{GoName: pascalCase(name), GoType: goExpr, Tag: tag})
 	}
 

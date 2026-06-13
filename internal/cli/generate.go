@@ -14,6 +14,7 @@ func runGenerate(args []string) int {
 	specPath := fs.String("spec", "", "path to the YAML entity specification (required)")
 	outDir := fs.String("out", "", "output directory for generated code (default: write to stdout)")
 	dryRun := fs.Bool("dry-run", false, "report what would be generated without writing files")
+	driver := fs.String("driver", "pgx", "database driver for the generated NewDB constructor: pgx or pq")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -30,7 +31,7 @@ func runGenerate(args []string) int {
 		return 1
 	}
 
-	if err := generator.Generate(s, generator.Options{OutDir: *outDir, DryRun: *dryRun}); err != nil {
+	if err := generator.Generate(s, generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver}); err != nil {
 		fmt.Fprintf(os.Stderr, "generate: %v\n", err)
 		return 1
 	}

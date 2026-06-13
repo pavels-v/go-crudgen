@@ -79,10 +79,10 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		"ID uuid.UUID",
 		`json:"id"`,
 		"Name string",
-		`json:"name" validate:"required,min=1"`, // required merged ahead of validate
+		`json:"name" validate:"required,min=1" db:"name"`, // required merged ahead of validate; db tag for sqlx
 		"Price decimal.Decimal",
 		"InStock bool", // snake_case -> PascalCase
-		`json:"in_stock"`,
+		`json:"in_stock" db:"in_stock"`,
 		"ReleasedAt time.Time",
 		"Metadata json.RawMessage",
 	} {
@@ -278,6 +278,145 @@ func TestHandlerInfo_SkipsCompositePK(t *testing.T) {
 	_, ok, err := handlerInfo(s, &s.Entities[0], byName)
 	require.NoError(t, err)
 	require.False(t, ok, "composite-primary-key entity should not be serveable")
+}
+
+// renderRepoSrc runs repoInfo + renderRepo for the named entity and returns the
+// generated source, failing if the entity is not serveable or the output is not
+// valid Go.
+func renderRepoSrc(t *testing.T, s *spec.Spec, entity string) string {
+	t.Helper()
+
+	byName := make(map[string]*spec.Entity, len(s.Entities))
+	for i := range s.Entities {
+		byName[s.Entities[i].Name] = &s.Entities[i]
+	}
+	var e *spec.Entity
+	for i := range s.Entities {
+		if s.Entities[i].Name == entity {
+			e = &s.Entities[i]
+		}
+	}
+	require.NotNilf(t, e, "entity %q not found in spec", entity)
+
+	rd, ok, err := repoInfo(s, e, byName)
+	require.NoErrorf(t, err, "repoInfo(%s)", entity)
+	require.Truef(t, ok, "entity %q unexpectedly not serveable", entity)
+
+	src, err := renderRepo(rd)
+	require.NoErrorf(t, err, "renderRepo(%s)", entity)
+	requireParses(t, src)
+	return string(src)
+}
+
+func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Entities: []spec.Entity{{
+			Name:   "Post",
+			Plural: "posts",
+			Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "title", Type: "string", Required: true},
+				{Name: "body", Type: "text"},
+			},
+			Options: spec.EntityOptions{Timestamps: true},
+		}},
+	}
+
+	got := renderRepoSrc(t, s, "Post")
+	for _, want := range []string{
+		// compile-time check that the concrete type implements the interface
+		"var _ PostRepository = (*PostgresPostRepository)(nil)",
+		"func NewPostgresPostRepository(db *sqlx.DB) *PostgresPostRepository",
+		// the primary-key type's package is imported for the Get/Delete signatures
+		`"github.com/google/uuid"`,
+		`"github.com/jmoiron/sqlx"`,
+		// sqlx struct scanning + database/sql not-found sentinel
+		"r.db.GetContext(ctx, &m, getPostSQL, id)",
+		"errors.Is(err, sql.ErrNoRows)",
+		// timestamps default to now() on insert and are returned into the struct
+		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
+		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
+		"ORDER BY id LIMIT $1 OFFSET $2",
+		// the primary key is the trailing placeholder in the update
+		"UPDATE posts SET title = $1, body = $2, updated_at = now() WHERE id = $3 RETURNING updated_at",
+		"DELETE FROM posts WHERE id = $1",
+	} {
+		wantContains(t, got, want)
+	}
+}
+
+func TestRenderRepo_SoftDeleteFiltersAndUpdates(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "app",
+		Entities: []spec.Entity{{
+			Name: "Account",
+			Fields: []spec.Field{
+				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "name", Type: "string"},
+			},
+			Options: spec.EntityOptions{SoftDelete: true},
+		}},
+	}
+
+	got := renderRepoSrc(t, s, "Account")
+	for _, want := range []string{
+		// reads exclude soft-deleted rows
+		"WHERE id = $1 AND deleted_at IS NULL",
+		"FROM accounts WHERE deleted_at IS NULL ORDER BY id",
+		// delete is a soft update, not a row removal
+		"UPDATE accounts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL",
+		// no timestamps -> Exec + RowsAffected for the not-found check
+		"res.RowsAffected()",
+		"if n == 0 {",
+	} {
+		wantContains(t, got, want)
+	}
+}
+
+func TestRenderDB_DriverSelection(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		driver     string
+		wantName   string
+		wantImport string
+	}{
+		{name: "default is pgx", driver: "", wantName: `"pgx"`, wantImport: `_ "github.com/jackc/pgx/v5/stdlib"`},
+		{name: "explicit pgx", driver: "pgx", wantName: `"pgx"`, wantImport: `_ "github.com/jackc/pgx/v5/stdlib"`},
+		{name: "pq maps to postgres", driver: "pq", wantName: `"postgres"`, wantImport: `_ "github.com/lib/pq"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			name, imp, ok := driverInfo(tc.driver)
+			require.Truef(t, ok, "driverInfo(%q) ok", tc.driver)
+
+			src, err := renderDB(dbData{Package: "blog", DriverName: name, DriverImport: imp})
+			require.NoError(t, err)
+			requireParses(t, src)
+
+			got := string(src)
+			wantContains(t, got, "const driverName = "+tc.wantName)
+			wantContains(t, got, tc.wantImport)
+			wantContains(t, got, "func NewDB(dsn string) (*sqlx.DB, error)")
+			wantContains(t, got, "return sqlx.Open(driverName, dsn)")
+		})
+	}
+}
+
+func TestDriverInfo_RejectsUnknown(t *testing.T) {
+	t.Parallel()
+
+	_, _, ok := driverInfo("mysql")
+	require.False(t, ok, "unknown driver should be rejected")
 }
 
 func TestRenderShared_WiresEntities(t *testing.T) {

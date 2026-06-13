@@ -1,0 +1,102 @@
+package {{ .Package }}
+
+import (
+{{- range .Imports }}
+	{{ printf "%q" . }}
+{{- end }}
+)
+
+const (
+	create{{ .Struct }}SQL = `{{ .CreateSQL }}`
+	get{{ .Struct }}SQL    = `{{ .GetSQL }}`
+	list{{ .Struct }}SQL   = `{{ .ListSQL }}`
+	update{{ .Struct }}SQL = `{{ .UpdateSQL }}`
+	delete{{ .Struct }}SQL = `{{ .DeleteSQL }}`
+)
+
+// {{ .Receiver }} is a PostgreSQL-backed {{ .Repo }}. It depends on sqlx rather
+// than a concrete driver, so any database/sql-compatible Postgres driver
+// (lib/pq, pgx's stdlib adapter, ...) can back it.
+type {{ .Receiver }} struct {
+	db *sqlx.DB
+}
+
+// {{ .Constructor }} returns a {{ .Receiver }} backed by db.
+func {{ .Constructor }}(db *sqlx.DB) *{{ .Receiver }} {
+	return &{{ .Receiver }}{db: db}
+}
+
+var _ {{ .Repo }} = (*{{ .Receiver }})(nil)
+
+func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
+{{- if .HasTimestamps }}
+	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+		return fmt.Errorf("create {{ .LowerStruct }}: %w", err)
+	}
+{{- else }}
+	if _, err := r.db.ExecContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}); err != nil {
+		return fmt.Errorf("create {{ .LowerStruct }}: %w", err)
+	}
+{{- end }}
+	return nil
+}
+
+func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Struct }}, error) {
+	var m {{ .Struct }}
+	err := r.db.GetContext(ctx, &m, get{{ .Struct }}SQL, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get {{ .LowerStruct }}: %w", err)
+	}
+	return &m, nil
+}
+
+func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error) {
+	out := []{{ .Struct }}{}
+	if err := r.db.SelectContext(ctx, &out, list{{ .Struct }}SQL, limit, offset); err != nil {
+		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
+	}
+	return out, nil
+}
+
+func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
+{{- if .HasTimestamps }}
+	err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan(&m.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
+	}
+{{- else }}
+	res, err := r.db.ExecContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }})
+	if err != nil {
+		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+{{- end }}
+	return nil
+}
+
+func (r *{{ .Receiver }}) Delete(ctx context.Context, id {{ .PKGoType }}) error {
+	res, err := r.db.ExecContext(ctx, delete{{ .Struct }}SQL, id)
+	if err != nil {
+		return fmt.Errorf("delete {{ .LowerStruct }}: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete {{ .LowerStruct }}: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
