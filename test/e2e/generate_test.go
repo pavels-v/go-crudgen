@@ -48,7 +48,7 @@ func TestGenerateBlogExample(t *testing.T) {
 	blogDir := filepath.Join(root, "examples", "blog")
 
 	// Regenerate the example with the default (pgx) driver.
-	run(t, root, "go", "run", "./cmd/cli", "generate",
+	run(t, root, "go", "run", "./cmd/go-crudgen", "generate",
 		"--spec", "examples/blog.yaml", "--out", "examples/blog")
 
 	for _, f := range []string{

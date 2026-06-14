@@ -1,7 +1,7 @@
 # go-crudgen developer tasks. Run `make help` for the list.
 
 BINARY := go-crudgen
-CMD    := ./cmd/cli
+CMD    := ./cmd/go-crudgen
 
 .DEFAULT_GOAL := help
 

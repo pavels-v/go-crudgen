@@ -145,8 +145,11 @@ round-trips as a `nil` pointer rather than a zero value.
 ## Planned usage
 
 ```bash
-# build the binary (named go-crudgen) from the CLI entrypoint
-go build -o go-crudgen ./cmd/cli
+# install the go-crudgen binary onto your PATH
+go install go-crudgen/cmd/go-crudgen@latest
+
+# or build it locally from the CLI entrypoint
+go build -o go-crudgen ./cmd/go-crudgen
 
 # preview generated code on stdout (default when --out is omitted)
 go-crudgen generate --spec ./api.yaml

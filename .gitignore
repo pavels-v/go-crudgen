@@ -1,4 +1,4 @@
-# Binaries (anchored to repo root; built via `go build -o go-crudgen ./cmd/cli`)
+# Binaries (anchored to repo root; built via `go build -o go-crudgen ./cmd/go-crudgen`)
 /bin/
 /dist/
 /go-crudgen
