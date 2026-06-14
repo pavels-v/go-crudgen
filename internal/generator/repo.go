@@ -21,18 +21,69 @@ type nullsData struct {
 	Package string
 }
 
+// Supported --driver choices.
+const (
+	driverPgx = "pgx"
+	driverPq  = "pq"
+)
+
+// database/sql driver names registered by each choice's blank import.
+const (
+	sqlDriverPgx = "pgx"
+	sqlDriverPq  = "postgres"
+)
+
+// Driver packages blank-imported to register the database/sql driver.
+const (
+	importDriverPgx = "github.com/jackc/pgx/v5/stdlib"
+	importDriverPq  = "github.com/lib/pq"
+)
+
+// Packages every generated repository imports.
+const (
+	importNetHTTP     = "net/http"
+	importContext     = "context"
+	importDatabaseSQL = "database/sql"
+	importErrors      = "errors"
+	importFmt         = "fmt"
+	importSQLx        = "github.com/jmoiron/sqlx"
+)
+
 // driverInfo maps a --driver choice to its database/sql driver name and the
 // package that must be blank-imported to register it. An empty choice defaults
 // to pgx. ok is false for unsupported drivers.
 func driverInfo(driver string) (name, imp string, ok bool) {
 	switch driver {
-	case "", "pgx":
-		return "pgx", "github.com/jackc/pgx/v5/stdlib", true
-	case "pq":
-		return "postgres", "github.com/lib/pq", true
+	case "", driverPgx:
+		return sqlDriverPgx, importDriverPgx, true
+	case driverPq:
+		return sqlDriverPq, importDriverPq, true
 	}
 	return "", "", false
 }
+
+// Column names injected by entity options (timestamps and soft-delete).
+const (
+	colCreatedAt = "created_at"
+	colUpdatedAt = "updated_at"
+	colDeletedAt = "deleted_at"
+)
+
+// fmt.Sprintf templates for the struct tags emitted on row/model fields.
+const (
+	tagDB   = "db:%q"
+	tagJSON = "json:%q"
+)
+
+// clauseReturning is appended to an INSERT/UPDATE to scan DB-populated columns back.
+const clauseReturning = " RETURNING %s"
+
+// fmt.Sprintf templates for the Go expressions emitted into repository code.
+const (
+	exprNull     = "sql.Null[%s]" // nullable row-field type wrapping a base type
+	exprToNull   = "toNull(%s)"   // model field -> sql.Null (write path)
+	exprFromNull = "fromNull(%s)" // sql.Null -> model field (scan path)
+)
 
 // optionColumn describes a column injected by an EntityOptions toggle.
 type optionColumn struct {
@@ -50,12 +101,12 @@ func optionColumns(o spec.EntityOptions) []optionColumn {
 	var cols []optionColumn
 	if o.Timestamps {
 		cols = append(cols,
-			optionColumn{"created_at", "CreatedAt", goTime, `json:"created_at"`},
-			optionColumn{"updated_at", "UpdatedAt", goTime, `json:"updated_at"`},
+			optionColumn{colCreatedAt, "CreatedAt", goTime, fmt.Sprintf(tagJSON, colCreatedAt)},
+			optionColumn{colUpdatedAt, "UpdatedAt", goTime, fmt.Sprintf(tagJSON, colUpdatedAt)},
 		)
 	}
 	if o.SoftDelete {
-		cols = append(cols, optionColumn{"deleted_at", "DeletedAt", "*" + goTime, `json:"deleted_at,omitempty"`})
+		cols = append(cols, optionColumn{colDeletedAt, "DeletedAt", "*" + goTime, fmt.Sprintf(tagJSON, colDeletedAt+",omitempty")})
 	}
 	return cols
 }
@@ -133,7 +184,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	ts := e.Options.Timestamps
 
 	impSet := map[string]struct{}{
-		"context": {}, "database/sql": {}, "errors": {}, "fmt": {}, "github.com/jmoiron/sqlx": {},
+		importContext: {}, importDatabaseSQL: {}, importErrors: {}, importFmt: {}, importSQLx: {},
 	}
 
 	// Persisted columns in struct order: spec fields first, then the
@@ -164,12 +215,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		toRowExpr := "m." + c.GoName
 		toModelExpr := "row." + c.GoName
 		if isNullable(f) {
-			rowType = "sql.Null[" + ft.expr + "]"
-			toRowExpr = "toNull(m." + c.GoName + ")"
-			toModelExpr = "fromNull(row." + c.GoName + ")"
+			rowType = fmt.Sprintf(exprNull, ft.expr)
+			toRowExpr = fmt.Sprintf(exprToNull, "m."+c.GoName)
+			toModelExpr = fmt.Sprintf(exprFromNull, "row."+c.GoName)
 			hasNullable = true
 		}
-		rowFields = append(rowFields, rowField{GoName: c.GoName, GoType: rowType, Tag: fmt.Sprintf("db:%q", c.Column)})
+		rowFields = append(rowFields, rowField{GoName: c.GoName, GoType: rowType, Tag: fmt.Sprintf(tagDB, c.Column)})
 		toRow = append(toRow, assign{Field: c.GoName, Expr: toRowExpr})
 		toModel = append(toModel, assign{Field: c.GoName, Expr: toModelExpr})
 	}
@@ -179,13 +230,13 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	for _, oc := range optionColumns(e.Options) {
 		gn := pascalCase(oc.Column)
 		impSet[importTime] = struct{}{}
-		if oc.Column == "deleted_at" {
-			rowFields = append(rowFields, rowField{GoName: gn, GoType: "sql.Null[" + goTime + "]", Tag: fmt.Sprintf("db:%q", oc.Column)})
-			toModel = append(toModel, assign{Field: gn, Expr: "fromNull(row." + gn + ")"})
+		if oc.Column == colDeletedAt {
+			rowFields = append(rowFields, rowField{GoName: gn, GoType: fmt.Sprintf(exprNull, goTime), Tag: fmt.Sprintf(tagDB, oc.Column)})
+			toModel = append(toModel, assign{Field: gn, Expr: fmt.Sprintf(exprFromNull, "row."+gn)})
 			hasNullable = true
 			continue
 		}
-		rowFields = append(rowFields, rowField{GoName: gn, GoType: goTime, Tag: fmt.Sprintf("db:%q", oc.Column)})
+		rowFields = append(rowFields, rowField{GoName: gn, GoType: goTime, Tag: fmt.Sprintf(tagDB, oc.Column)})
 		toModel = append(toModel, assign{Field: gn, Expr: "row." + gn})
 	}
 
@@ -208,27 +259,27 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 	var createScan string
 	if ts {
-		insCols = append(insCols, "created_at", "updated_at")
+		insCols = append(insCols, colCreatedAt, colUpdatedAt)
 		insPh = append(insPh, "now()", "now()")
 	}
 	createSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		table, strings.Join(insCols, ", "), strings.Join(insPh, ", "))
 	if ts {
-		ret := []string{"created_at", "updated_at"}
-		createSQL += " RETURNING " + strings.Join(ret, ", ")
+		ret := []string{colCreatedAt, colUpdatedAt}
+		createSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, ", "))
 		createScan = scanList(ret)
 	}
 
 	softFilter := ""
 	if soft {
-		softFilter = " AND deleted_at IS NULL"
+		softFilter = fmt.Sprintf(" AND %s IS NULL", colDeletedAt)
 	}
 	getSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1%s",
 		strings.Join(selectCols, ", "), table, pkCol, softFilter)
 
 	listWhere := ""
 	if soft {
-		listWhere = " WHERE deleted_at IS NULL"
+		listWhere = fmt.Sprintf(" WHERE %s IS NULL", colDeletedAt)
 	}
 	listSQL := fmt.Sprintf("SELECT %s FROM %s%s ORDER BY %s LIMIT $1 OFFSET $2",
 		strings.Join(selectCols, ", "), table, listWhere, pkCol)
@@ -241,7 +292,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		updArgs = append(updArgs, "row."+c.GoName)
 	}
 	if ts {
-		setClauses = append(setClauses, "updated_at = now()")
+		setClauses = append(setClauses, fmt.Sprintf("%s = now()", colUpdatedAt))
 	}
 	updArgs = append(updArgs, "row."+pkGoName)
 
@@ -256,15 +307,15 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		updateSQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d%s",
 			table, strings.Join(setClauses, ", "), pkCol, len(update)+1, softFilter)
 		if ts {
-			ret := []string{"updated_at"}
-			updateSQL += " RETURNING " + strings.Join(ret, ", ")
+			ret := []string{colUpdatedAt}
+			updateSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, ", "))
 			updateScan = scanList(ret)
 		}
 	}
 
 	deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", table, pkCol)
 	if soft {
-		deleteSQL = fmt.Sprintf("UPDATE %s SET deleted_at = now() WHERE %s = $1 AND deleted_at IS NULL", table, pkCol)
+		deleteSQL = fmt.Sprintf("UPDATE %s SET %s = now() WHERE %s = $1 AND %s IS NULL", table, colDeletedAt, pkCol, colDeletedAt)
 	}
 
 	// Imports were gathered from every row-field type above (the primary-key type

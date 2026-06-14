@@ -23,9 +23,9 @@ type migrationData struct {
 // key is itself a reference, so the same case is an error here.
 func sqlType(f spec.Field, byName map[string]*spec.Entity) (string, error) {
 	t := f.Type
-	if t == "references" {
+	if t == spec.TypeReferences {
 		pk := byName[f.Target].PrimaryKey()[0]
-		if pk.Type == "references" {
+		if pk.Type == spec.TypeReferences {
 			return "", fmt.Errorf("reference to %q whose primary key %q is itself a reference (not supported)", f.Target, pk.Name)
 		}
 		t = pk.Type
@@ -84,7 +84,7 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 		}
 		state[e.Name] = visiting
 		for _, f := range e.Fields {
-			if f.Type != "references" || f.Target == e.Name {
+			if f.Type != spec.TypeReferences || f.Target == e.Name {
 				continue
 			}
 			if err := visit(byName[f.Target]); err != nil {
@@ -134,7 +134,7 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 		if f.Unique {
 			parts = append(parts, "UNIQUE")
 		}
-		if f.Type == "references" {
+		if f.Type == spec.TypeReferences {
 			target := byName[f.Target]
 			parts = append(parts, fmt.Sprintf("REFERENCES %s (%s)",
 				plural(target.Name, target.Plural), snakeCase(target.PrimaryKey()[0].Name)))
@@ -151,9 +151,9 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 	// NOT NULL DEFAULT now(); the soft-delete marker is nullable.
 	for _, oc := range optionColumns(e.Options) {
 		switch oc.Column {
-		case "created_at", "updated_at":
+		case colCreatedAt, colUpdatedAt:
 			lines = append(lines, fmt.Sprintf("    %s %s NOT NULL DEFAULT now()", oc.Column, sqlTimestamptz))
-		case "deleted_at":
+		case colDeletedAt:
 			lines = append(lines, fmt.Sprintf("    %s %s", oc.Column, sqlTimestamptz))
 		}
 	}

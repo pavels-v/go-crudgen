@@ -301,7 +301,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 	}
 
-	imports := map[string]struct{}{"context": {}, "net/http": {}}
+	imports := map[string]struct{}{importContext: {}, importNetHTTP: {}}
 	if pp.imp != "" {
 		imports[pp.imp] = struct{}{}
 	}
@@ -412,7 +412,7 @@ func fieldTag(f spec.Field) string {
 	if isNullable(f) {
 		jsonName += ",omitempty"
 	}
-	tag := fmt.Sprintf("json:%q", jsonName)
+	tag := fmt.Sprintf(tagJSON, jsonName)
 
 	var rules []string
 	if f.Required && !strings.Contains(f.Validate, "required") {

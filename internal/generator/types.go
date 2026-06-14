@@ -123,7 +123,7 @@ func pkParser(goExpr string) (pkParse, bool) {
 // the target entity's single primary-key field (validation guarantees the
 // target exists and is not composite).
 func fieldType(f spec.Field, byName map[string]*spec.Entity) (goType, error) {
-	if f.Type != "references" {
+	if f.Type != spec.TypeReferences {
 		gt, ok := scalarType(f.Type)
 		if !ok {
 			return goType{}, fmt.Errorf("unsupported field type %q", f.Type)
@@ -133,7 +133,7 @@ func fieldType(f spec.Field, byName map[string]*spec.Entity) (goType, error) {
 
 	target := byName[f.Target]
 	pk := target.PrimaryKey()[0]
-	if pk.Type == "references" {
+	if pk.Type == spec.TypeReferences {
 		return goType{}, fmt.Errorf("reference to %q whose primary key %q is itself a reference (not supported)", f.Target, pk.Name)
 	}
 	gt, ok := scalarType(pk.Type)

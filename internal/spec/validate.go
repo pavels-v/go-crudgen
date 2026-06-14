@@ -7,18 +7,18 @@ import (
 
 // KnownTypes is the set of field types the generator understands.
 var KnownTypes = map[string]struct{}{
-	"string":     {},
-	"text":       {},
-	"int32":      {},
-	"int64":      {},
-	"float":      {},
-	"decimal":    {},
-	"bool":       {},
-	"date":       {},
-	"datetime":   {},
-	"uuid":       {},
-	"json":       {},
-	"references": {},
+	"string":       {},
+	"text":         {},
+	"int32":        {},
+	"int64":        {},
+	"float":        {},
+	"decimal":      {},
+	"bool":         {},
+	"date":         {},
+	"datetime":     {},
+	"uuid":         {},
+	"json":         {},
+	TypeReferences: {},
 }
 
 // PrimaryKeyTypes is the set of field types allowed for a primary key: those the
@@ -28,12 +28,12 @@ var KnownTypes = map[string]struct{}{
 // it resolves to the target's primary key, which this same rule guarantees is
 // path-addressable.)
 var PrimaryKeyTypes = map[string]struct{}{
-	"string":     {},
-	"text":       {},
-	"int32":      {},
-	"int64":      {},
-	"uuid":       {},
-	"references": {},
+	"string":       {},
+	"text":         {},
+	"int32":        {},
+	"int64":        {},
+	"uuid":         {},
+	TypeReferences: {},
 }
 
 // Validate checks the spec for structural errors.
@@ -66,7 +66,7 @@ func (s *Spec) Validate() error {
 			if _, ok := KnownTypes[f.Type]; !ok {
 				return fmt.Errorf("entity %q field %q has unknown type %q", e.Name, f.Name, f.Type)
 			}
-			if f.Type == "references" && f.Target == "" {
+			if f.Type == TypeReferences && f.Target == "" {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
 		}
@@ -92,7 +92,7 @@ func (s *Spec) Validate() error {
 	for i := range s.Entities {
 		e := &s.Entities[i]
 		for _, f := range e.Fields {
-			if f.Type != "references" {
+			if f.Type != TypeReferences {
 				continue
 			}
 			if _, ok := byName[f.Target]; !ok {

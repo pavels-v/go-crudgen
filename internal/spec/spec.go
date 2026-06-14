@@ -22,6 +22,10 @@ type EntityOptions struct {
 	SoftDelete bool `yaml:"soft_delete"`
 }
 
+// TypeReferences is the field Type value marking a belongs-to relation; the
+// field's Target names the referenced entity.
+const TypeReferences = "references"
+
 // Field is a single attribute of an entity.
 type Field struct {
 	Name     string `yaml:"name"`
