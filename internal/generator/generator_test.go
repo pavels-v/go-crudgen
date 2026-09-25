@@ -383,8 +383,9 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"m := row.toModel()",
 		"errors.Is(err, sql.ErrNoRows)",
 		// timestamps default to now() on insert and are returned into the struct
-		"INSERT INTO posts (title, body, created_at, updated_at) VALUES ($1, $2, now(), now()) RETURNING id, created_at, updated_at",
-		"Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)",
+		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
+		"m.ID = uuid.New() row := newPostRow(m)",
+		"r.db.QueryRowContext(ctx, createPostSQL, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
 		"ORDER BY id LIMIT $1 OFFSET $2",
 		// the primary key is the trailing placeholder in the update
@@ -1020,4 +1021,46 @@ func TestNowDefault(t *testing.T) {
 	handler := renderHandlerSrc(t, s, "Event")
 	wantContains(t, handler, `"time"`)
 	wantContains(t, handler, "OccurredAt: valueOr(req.OccurredAt, time.Now()),")
+}
+
+func TestRenderRepo_KeyGeneration(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		keyType string
+		want    []string
+		notWant string
+	}{
+		{"uuid in code", spec.TypeUUID, []string{
+			"INSERT INTO items (id, name) VALUES ($1, $2)`",
+			"m.ID = uuid.New()",
+		}, "RETURNING"},
+		{"int64 identity in database", spec.TypeInt64, []string{
+			"INSERT INTO items (name) VALUES ($1) RETURNING id`",
+			"Scan(&m.ID)",
+		}, "m.ID ="},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{
+				Package: "app",
+				Entities: []spec.Entity{{
+					Name: "Item",
+					Fields: []spec.Field{
+						{Name: "id", Type: tc.keyType, Primary: true},
+						{Name: "name", Type: spec.TypeString, Required: true},
+					},
+				}},
+			}
+			got := renderRepoSrc(t, s, "Item")
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+			require.NotContains(t, got, tc.notWant)
+		})
+	}
 }

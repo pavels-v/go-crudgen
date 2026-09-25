@@ -57,6 +57,9 @@ func {{ .Constructor }}(db *sqlx.DB) *{{ .Receiver }} {
 var _ {{ .Repo }} = (*{{ .Receiver }})(nil)
 
 func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
+{{- if .GenerateUUID }}
+	m.{{ .PKGoName }} = uuid.New()
+{{- end }}
 	row := {{ .NewRowFunc }}(m)
 {{- if .CreateScan }}
 	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan({{ .CreateScan }}); err != nil {

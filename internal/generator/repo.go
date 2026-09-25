@@ -142,6 +142,8 @@ type repoData struct {
 	Constructor     string // e.g. "NewPostgresPostRepository"
 	PKGoType        string
 	HasTimestamps   bool
+	GenerateUUID    bool // the uuid primary key is generated in Go before insert
+	PKGoName        string
 	NoUpdateColumns bool // entity has no writable columns; Update is an existence check
 	HasNullable     bool // any persisted column is nullable (so sql.Null helpers are used)
 
@@ -260,12 +262,14 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 
 	// INSERT: spec fields take placeholders; timestamps default to now().
 	_, pkGenerated := keyGenerator(pk)
+	pkInCode := pkGenerated && pk.Type == spec.TypeUUID
+	pkInDB := pkGenerated && !pkInCode
 	insCols := make([]string, 0, len(specCols)+2)
 	insPh := make([]string, 0, len(specCols)+2)
 	insArgs := make([]string, 0, len(specCols))
 	var ret []string
 	for _, c := range specCols {
-		if pkGenerated && c.Column == pkCol {
+		if pkInDB && c.Column == pkCol {
 			ret = append(ret, c.Column)
 			continue
 		}
@@ -348,6 +352,8 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		Constructor:     fmt.Sprintf(namePostgresRepoCtor, name),
 		PKGoType:        gt.expr,
 		HasTimestamps:   ts,
+		GenerateUUID:    pkInCode,
+		PKGoName:        pkGoName,
 		NoUpdateColumns: noUpdateColumns,
 		HasNullable:     hasNullable,
 		RowStruct:       fmt.Sprintf(nameRow, unexport(name)),

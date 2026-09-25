@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	createPostSQL = `INSERT INTO posts (title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now(), now()) RETURNING id, created_at, updated_at`
+	createPostSQL = `INSERT INTO posts (id, title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now()) RETURNING created_at, updated_at`
 	getPostSQL    = `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts WHERE id = $1`
 	listPostSQL   = `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`
 	updatePostSQL = `UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`
@@ -79,8 +79,9 @@ func NewPostgresPostRepository(db *sqlx.DB) *PostgresPostRepository {
 var _ PostRepository = (*PostgresPostRepository)(nil)
 
 func (r *PostgresPostRepository) Create(ctx context.Context, m *Post) error {
+	m.ID = uuid.New()
 	row := newPostRow(m)
-	if err := r.db.QueryRowContext(ctx, createPostSQL, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := r.db.QueryRowContext(ctx, createPostSQL, row.ID, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		return fmt.Errorf("create post: %w", mapWriteError(err))
 	}
 	return nil

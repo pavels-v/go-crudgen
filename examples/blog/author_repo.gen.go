@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	createAuthorSQL = `INSERT INTO authors (email, name, born_on) VALUES ($1, $2, $3) RETURNING id`
+	createAuthorSQL = `INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`
 	getAuthorSQL    = `SELECT id, email, name, born_on FROM authors WHERE id = $1`
 	listAuthorSQL   = `SELECT id, email, name, born_on FROM authors ORDER BY id LIMIT $1 OFFSET $2`
 	updateAuthorSQL = `UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`
@@ -65,8 +65,9 @@ func NewPostgresAuthorRepository(db *sqlx.DB) *PostgresAuthorRepository {
 var _ AuthorRepository = (*PostgresAuthorRepository)(nil)
 
 func (r *PostgresAuthorRepository) Create(ctx context.Context, m *Author) error {
+	m.ID = uuid.New()
 	row := newAuthorRow(m)
-	if err := r.db.QueryRowContext(ctx, createAuthorSQL, row.Email, row.Name, row.BornOn).Scan(&m.ID); err != nil {
+	if _, err := r.db.ExecContext(ctx, createAuthorSQL, row.ID, row.Email, row.Name, row.BornOn); err != nil {
 		return fmt.Errorf("create author: %w", mapWriteError(err))
 	}
 	return nil
