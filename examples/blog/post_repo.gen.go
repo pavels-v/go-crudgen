@@ -12,14 +12,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const (
-	createPostSQL = `INSERT INTO posts (id, title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now()) RETURNING created_at, updated_at`
-	getPostSQL    = `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts WHERE id = $1`
-	listPostSQL   = `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`
-	updatePostSQL = `UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`
-	deletePostSQL = `DELETE FROM posts WHERE id = $1`
-)
-
 // postRow is the database representation of Post. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // newPostRow and toModel convert to and from the pointer fields on Post.
@@ -81,7 +73,7 @@ var _ PostRepository = (*PostgresPostRepository)(nil)
 func (r *PostgresPostRepository) Create(ctx context.Context, m *Post) error {
 	m.ID = uuid.New()
 	row := newPostRow(m)
-	if err := r.db.QueryRowContext(ctx, createPostSQL, row.ID, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		return fmt.Errorf("create post: %w", mapWriteError(err))
 	}
 	return nil
@@ -89,7 +81,7 @@ func (r *PostgresPostRepository) Create(ctx context.Context, m *Post) error {
 
 func (r *PostgresPostRepository) Get(ctx context.Context, id uuid.UUID) (*Post, error) {
 	var row postRow
-	if err := r.db.GetContext(ctx, &row, getPostSQL, id); err != nil {
+	if err := r.db.GetContext(ctx, &row, `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts WHERE id = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -101,7 +93,7 @@ func (r *PostgresPostRepository) Get(ctx context.Context, id uuid.UUID) (*Post, 
 
 func (r *PostgresPostRepository) List(ctx context.Context, limit, offset int) ([]Post, error) {
 	rows := []postRow{}
-	if err := r.db.SelectContext(ctx, &rows, listPostSQL, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list post: %w", err)
 	}
 	out := make([]Post, len(rows))
@@ -113,7 +105,7 @@ func (r *PostgresPostRepository) List(ctx context.Context, limit, offset int) ([
 
 func (r *PostgresPostRepository) Update(ctx context.Context, m *Post) error {
 	row := newPostRow(m)
-	if err := r.db.QueryRowContext(ctx, updatePostSQL, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author, row.ID).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := r.db.QueryRowContext(ctx, `UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author, row.ID).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -123,7 +115,7 @@ func (r *PostgresPostRepository) Update(ctx context.Context, m *Post) error {
 }
 
 func (r *PostgresPostRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.ExecContext(ctx, deletePostSQL, id)
+	res, err := r.db.ExecContext(ctx, `DELETE FROM posts WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete post: %w", mapDeleteError(err))
 	}

@@ -6,14 +6,6 @@ import (
 {{- end }}
 )
 
-const (
-	create{{ .Struct }}SQL = `{{ .CreateSQL }}`
-	get{{ .Struct }}SQL    = `{{ .GetSQL }}`
-	list{{ .Struct }}SQL   = `{{ .ListSQL }}`
-	update{{ .Struct }}SQL = `{{ .UpdateSQL }}`
-	delete{{ .Struct }}SQL = `{{ .DeleteSQL }}`
-)
-
 // {{ .RowStruct }} is the database representation of {{ .Struct }}. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // {{ .NewRowFunc }} and toModel convert to and from the pointer fields on {{ .Struct }}.
@@ -62,11 +54,11 @@ func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
 {{- end }}
 	row := {{ .NewRowFunc }}(m)
 {{- if .CreateScan }}
-	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan({{ .CreateScan }}); err != nil {
+	if err := r.db.QueryRowContext(ctx, `{{ .CreateSQL }}`, {{ .InsertArgs }}).Scan({{ .CreateScan }}); err != nil {
 		return fmt.Errorf("create {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
 {{- else }}
-	if _, err := r.db.ExecContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}); err != nil {
+	if _, err := r.db.ExecContext(ctx, `{{ .CreateSQL }}`, {{ .InsertArgs }}); err != nil {
 		return fmt.Errorf("create {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
 {{- end }}
@@ -75,7 +67,7 @@ func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
 
 func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Struct }}, error) {
 	var row {{ .RowStruct }}
-	if err := r.db.GetContext(ctx, &row, get{{ .Struct }}SQL, id); err != nil {
+	if err := r.db.GetContext(ctx, &row, `{{ .GetSQL }}`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -87,7 +79,7 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Str
 
 func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error) {
 	rows := []{{ .RowStruct }}{}
-	if err := r.db.SelectContext(ctx, &rows, list{{ .Struct }}SQL, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, `{{ .ListSQL }}`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
 	}
 	out := make([]{{ .Struct }}, len(rows))
@@ -100,7 +92,7 @@ func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .St
 func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 	row := {{ .NewRowFunc }}(m)
 {{- if .HasTimestamps }}
-	if err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan({{ .UpdateScan }}); err != nil {
+	if err := r.db.QueryRowContext(ctx, `{{ .UpdateSQL }}`, {{ .UpdateArgs }}).Scan({{ .UpdateScan }}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -109,14 +101,14 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 {{- else if .NoUpdateColumns }}
 	// {{ .Struct }} has no writable columns; verify the row exists.
 	var exists int
-	if err := r.db.GetContext(ctx, &exists, update{{ .Struct }}SQL, {{ .UpdateArgs }}); err != nil {
+	if err := r.db.GetContext(ctx, &exists, `{{ .UpdateSQL }}`, {{ .UpdateArgs }}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
 	}
 {{- else }}
-	res, err := r.db.ExecContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }})
+	res, err := r.db.ExecContext(ctx, `{{ .UpdateSQL }}`, {{ .UpdateArgs }})
 	if err != nil {
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
@@ -132,7 +124,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 }
 
 func (r *{{ .Receiver }}) Delete(ctx context.Context, id {{ .PKGoType }}) error {
-	res, err := r.db.ExecContext(ctx, delete{{ .Struct }}SQL, id)
+	res, err := r.db.ExecContext(ctx, `{{ .DeleteSQL }}`, id)
 	if err != nil {
 		return fmt.Errorf("delete {{ .LowerStruct }}: %w", mapDeleteError(err))
 	}

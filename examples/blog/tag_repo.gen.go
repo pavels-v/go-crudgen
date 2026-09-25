@@ -9,14 +9,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const (
-	createTagSQL = `INSERT INTO tags (slug, label, color, weight) VALUES ($1, $2, $3, $4)`
-	getTagSQL    = `SELECT slug, label, color, weight FROM tags WHERE slug = $1`
-	listTagSQL   = `SELECT slug, label, color, weight FROM tags ORDER BY slug LIMIT $1 OFFSET $2`
-	updateTagSQL = `UPDATE tags SET label = $1, color = $2, weight = $3 WHERE slug = $4`
-	deleteTagSQL = `DELETE FROM tags WHERE slug = $1`
-)
-
 // tagRow is the database representation of Tag. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // newTagRow and toModel convert to and from the pointer fields on Tag.
@@ -64,7 +56,7 @@ var _ TagRepository = (*PostgresTagRepository)(nil)
 
 func (r *PostgresTagRepository) Create(ctx context.Context, m *Tag) error {
 	row := newTagRow(m)
-	if _, err := r.db.ExecContext(ctx, createTagSQL, row.Slug, row.Label, row.Color, row.Weight); err != nil {
+	if _, err := r.db.ExecContext(ctx, `INSERT INTO tags (slug, label, color, weight) VALUES ($1, $2, $3, $4)`, row.Slug, row.Label, row.Color, row.Weight); err != nil {
 		return fmt.Errorf("create tag: %w", mapWriteError(err))
 	}
 	return nil
@@ -72,7 +64,7 @@ func (r *PostgresTagRepository) Create(ctx context.Context, m *Tag) error {
 
 func (r *PostgresTagRepository) Get(ctx context.Context, id string) (*Tag, error) {
 	var row tagRow
-	if err := r.db.GetContext(ctx, &row, getTagSQL, id); err != nil {
+	if err := r.db.GetContext(ctx, &row, `SELECT slug, label, color, weight FROM tags WHERE slug = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -84,7 +76,7 @@ func (r *PostgresTagRepository) Get(ctx context.Context, id string) (*Tag, error
 
 func (r *PostgresTagRepository) List(ctx context.Context, limit, offset int) ([]Tag, error) {
 	rows := []tagRow{}
-	if err := r.db.SelectContext(ctx, &rows, listTagSQL, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, `SELECT slug, label, color, weight FROM tags ORDER BY slug LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list tag: %w", err)
 	}
 	out := make([]Tag, len(rows))
@@ -96,7 +88,7 @@ func (r *PostgresTagRepository) List(ctx context.Context, limit, offset int) ([]
 
 func (r *PostgresTagRepository) Update(ctx context.Context, m *Tag) error {
 	row := newTagRow(m)
-	res, err := r.db.ExecContext(ctx, updateTagSQL, row.Label, row.Color, row.Weight, row.Slug)
+	res, err := r.db.ExecContext(ctx, `UPDATE tags SET label = $1, color = $2, weight = $3 WHERE slug = $4`, row.Label, row.Color, row.Weight, row.Slug)
 	if err != nil {
 		return fmt.Errorf("update tag: %w", mapWriteError(err))
 	}
@@ -111,7 +103,7 @@ func (r *PostgresTagRepository) Update(ctx context.Context, m *Tag) error {
 }
 
 func (r *PostgresTagRepository) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, deleteTagSQL, id)
+	res, err := r.db.ExecContext(ctx, `DELETE FROM tags WHERE slug = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", mapDeleteError(err))
 	}

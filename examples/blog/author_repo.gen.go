@@ -11,14 +11,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const (
-	createAuthorSQL = `INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`
-	getAuthorSQL    = `SELECT id, email, name, born_on FROM authors WHERE id = $1`
-	listAuthorSQL   = `SELECT id, email, name, born_on FROM authors ORDER BY id LIMIT $1 OFFSET $2`
-	updateAuthorSQL = `UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`
-	deleteAuthorSQL = `DELETE FROM authors WHERE id = $1`
-)
-
 // authorRow is the database representation of Author. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // newAuthorRow and toModel convert to and from the pointer fields on Author.
@@ -67,7 +59,7 @@ var _ AuthorRepository = (*PostgresAuthorRepository)(nil)
 func (r *PostgresAuthorRepository) Create(ctx context.Context, m *Author) error {
 	m.ID = uuid.New()
 	row := newAuthorRow(m)
-	if _, err := r.db.ExecContext(ctx, createAuthorSQL, row.ID, row.Email, row.Name, row.BornOn); err != nil {
+	if _, err := r.db.ExecContext(ctx, `INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`, row.ID, row.Email, row.Name, row.BornOn); err != nil {
 		return fmt.Errorf("create author: %w", mapWriteError(err))
 	}
 	return nil
@@ -75,7 +67,7 @@ func (r *PostgresAuthorRepository) Create(ctx context.Context, m *Author) error 
 
 func (r *PostgresAuthorRepository) Get(ctx context.Context, id uuid.UUID) (*Author, error) {
 	var row authorRow
-	if err := r.db.GetContext(ctx, &row, getAuthorSQL, id); err != nil {
+	if err := r.db.GetContext(ctx, &row, `SELECT id, email, name, born_on FROM authors WHERE id = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -87,7 +79,7 @@ func (r *PostgresAuthorRepository) Get(ctx context.Context, id uuid.UUID) (*Auth
 
 func (r *PostgresAuthorRepository) List(ctx context.Context, limit, offset int) ([]Author, error) {
 	rows := []authorRow{}
-	if err := r.db.SelectContext(ctx, &rows, listAuthorSQL, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, `SELECT id, email, name, born_on FROM authors ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list author: %w", err)
 	}
 	out := make([]Author, len(rows))
@@ -99,7 +91,7 @@ func (r *PostgresAuthorRepository) List(ctx context.Context, limit, offset int) 
 
 func (r *PostgresAuthorRepository) Update(ctx context.Context, m *Author) error {
 	row := newAuthorRow(m)
-	res, err := r.db.ExecContext(ctx, updateAuthorSQL, row.Email, row.Name, row.BornOn, row.ID)
+	res, err := r.db.ExecContext(ctx, `UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`, row.Email, row.Name, row.BornOn, row.ID)
 	if err != nil {
 		return fmt.Errorf("update author: %w", mapWriteError(err))
 	}
@@ -114,7 +106,7 @@ func (r *PostgresAuthorRepository) Update(ctx context.Context, m *Author) error 
 }
 
 func (r *PostgresAuthorRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.ExecContext(ctx, deleteAuthorSQL, id)
+	res, err := r.db.ExecContext(ctx, `DELETE FROM authors WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete author: %w", mapDeleteError(err))
 	}

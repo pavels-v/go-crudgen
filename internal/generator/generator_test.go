@@ -229,8 +229,7 @@ func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
 	}
 
 	repo := renderRepoSrc(t, s, "Tag")
-	wantContains(t, repo, "createTagSQL = `INSERT INTO tags (slug, published) VALUES ($1, $2)`")
-	wantContains(t, repo, "r.db.ExecContext(ctx, createTagSQL, row.Slug, row.Published)")
+	wantContains(t, repo, "r.db.ExecContext(ctx, `INSERT INTO tags (slug, published) VALUES ($1, $2)`, row.Slug, row.Published)")
 }
 
 func TestRenderHandler_GeneratedKeyNotAssigned(t *testing.T) {
@@ -379,13 +378,13 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"Body: toNull(m.Body)",
 		"Body: fromNull(row.Body)",
 		// sqlx scans into the row, which is then converted to the API model
-		"r.db.GetContext(ctx, &row, getPostSQL, id)",
+		"r.db.GetContext(ctx, &row, `SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1`, id)",
 		"m := row.toModel()",
 		"errors.Is(err, sql.ErrNoRows)",
 		// timestamps default to now() on insert and are returned into the struct
 		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
 		"m.ID = uuid.New() row := newPostRow(m)",
-		"r.db.QueryRowContext(ctx, createPostSQL, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
+		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
 		"ORDER BY id LIMIT $1 OFFSET $2",
 		// the primary key is the trailing placeholder in the update
@@ -442,8 +441,7 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 
 	got := renderRepoSrc(t, s, "Tag")
 	for _, want := range []string{
-		"updateTagSQL = `SELECT 1 FROM tags WHERE id = $1`",
-		"r.db.GetContext(ctx, &exists, updateTagSQL, row.ID)",
+		"r.db.GetContext(ctx, &exists, `SELECT 1 FROM tags WHERE id = $1`, row.ID)",
 		"return ErrNotFound",
 	} {
 		wantContains(t, got, want)
