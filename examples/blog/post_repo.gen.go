@@ -3,6 +3,7 @@ package blog
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,10 +13,10 @@ import (
 )
 
 const (
-	createPostSQL = `INSERT INTO posts (id, title, body, published, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, now(), now()) RETURNING created_at, updated_at`
-	getPostSQL    = `SELECT id, title, body, published, author, created_at, updated_at FROM posts WHERE id = $1`
-	listPostSQL   = `SELECT id, title, body, published, author, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`
-	updatePostSQL = `UPDATE posts SET title = $1, body = $2, published = $3, author = $4, updated_at = now() WHERE id = $5 RETURNING updated_at`
+	createPostSQL = `INSERT INTO posts (title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now(), now()) RETURNING id, created_at, updated_at`
+	getPostSQL    = `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts WHERE id = $1`
+	listPostSQL   = `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`
+	updatePostSQL = `UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`
 	deletePostSQL = `DELETE FROM posts WHERE id = $1`
 )
 
@@ -23,13 +24,15 @@ const (
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // newPostRow and toModel convert to and from the pointer fields on Post.
 type postRow struct {
-	ID        uuid.UUID           `db:"id"`
-	Title     string              `db:"title"`
-	Body      sql.Null[string]    `db:"body"`
-	Published sql.Null[bool]      `db:"published"`
-	Author    sql.Null[uuid.UUID] `db:"author"`
-	CreatedAt time.Time           `db:"created_at"`
-	UpdatedAt time.Time           `db:"updated_at"`
+	ID        uuid.UUID                 `db:"id"`
+	Title     string                    `db:"title"`
+	Body      sql.Null[string]          `db:"body"`
+	Published bool                      `db:"published"`
+	Views     int64                     `db:"views"`
+	Metadata  sql.Null[json.RawMessage] `db:"metadata"`
+	Author    sql.Null[uuid.UUID]       `db:"author"`
+	CreatedAt time.Time                 `db:"created_at"`
+	UpdatedAt time.Time                 `db:"updated_at"`
 }
 
 // newPostRow builds the row written by Create and Update. Option-managed
@@ -39,7 +42,9 @@ func newPostRow(m *Post) postRow {
 		ID:        m.ID,
 		Title:     m.Title,
 		Body:      toNull(m.Body),
-		Published: toNull(m.Published),
+		Published: m.Published,
+		Views:     m.Views,
+		Metadata:  toNull(m.Metadata),
 		Author:    toNull(m.Author),
 	}
 }
@@ -50,7 +55,9 @@ func (row postRow) toModel() Post {
 		ID:        row.ID,
 		Title:     row.Title,
 		Body:      fromNull(row.Body),
-		Published: fromNull(row.Published),
+		Published: row.Published,
+		Views:     row.Views,
+		Metadata:  fromNull(row.Metadata),
 		Author:    fromNull(row.Author),
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
@@ -73,8 +80,8 @@ var _ PostRepository = (*PostgresPostRepository)(nil)
 
 func (r *PostgresPostRepository) Create(ctx context.Context, m *Post) error {
 	row := newPostRow(m)
-	if err := r.db.QueryRowContext(ctx, createPostSQL, row.ID, row.Title, row.Body, row.Published, row.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
-		return fmt.Errorf("create post: %w", err)
+	if err := r.db.QueryRowContext(ctx, createPostSQL, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		return fmt.Errorf("create post: %w", mapWriteError(err))
 	}
 	return nil
 }
@@ -105,11 +112,11 @@ func (r *PostgresPostRepository) List(ctx context.Context, limit, offset int) ([
 
 func (r *PostgresPostRepository) Update(ctx context.Context, m *Post) error {
 	row := newPostRow(m)
-	if err := r.db.QueryRowContext(ctx, updatePostSQL, row.Title, row.Body, row.Published, row.Author, row.ID).Scan(&m.UpdatedAt); err != nil {
+	if err := r.db.QueryRowContext(ctx, updatePostSQL, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author, row.ID).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return fmt.Errorf("update post: %w", err)
+		return fmt.Errorf("update post: %w", mapWriteError(err))
 	}
 	return nil
 }
@@ -117,7 +124,7 @@ func (r *PostgresPostRepository) Update(ctx context.Context, m *Post) error {
 func (r *PostgresPostRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	res, err := r.db.ExecContext(ctx, deletePostSQL, id)
 	if err != nil {
-		return fmt.Errorf("delete post: %w", err)
+		return fmt.Errorf("delete post: %w", mapDeleteError(err))
 	}
 	n, err := res.RowsAffected()
 	if err != nil {

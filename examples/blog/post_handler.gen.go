@@ -47,14 +47,15 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := Post{
-		ID:        req.ID,
 		Title:     req.Title,
 		Body:      req.Body,
-		Published: req.Published,
+		Published: valueOr(req.Published, false),
+		Views:     valueOr(req.Views, 0),
+		Metadata:  req.Metadata,
 		Author:    req.Author,
 	}
 	if err := h.repo.Create(r.Context(), &m); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, m)
@@ -68,7 +69,7 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := h.repo.Get(r.Context(), id)
 	if err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -78,7 +79,7 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePage(r)
 	items, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -103,11 +104,13 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ID:        id,
 		Title:     req.Title,
 		Body:      req.Body,
-		Published: req.Published,
+		Published: valueOr(req.Published, false),
+		Views:     valueOr(req.Views, 0),
+		Metadata:  req.Metadata,
 		Author:    req.Author,
 	}
 	if err := h.repo.Update(r.Context(), &m); err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -120,7 +123,7 @@ func (h *PostHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -7,31 +7,47 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
-// postStore and authorStore are minimal in-memory repositories used to exercise
-// the generated handlers end to end. They are test fixtures, not generated code;
-// the real implementations arrive with the storage milestone.
-type postStore struct {
-	mu   sync.Mutex
-	data map[uuid.UUID]Post
+type memStore[K comparable, M any] struct {
+	mu     sync.Mutex
+	data   map[K]M
+	key    func(*M) *K
+	nextID func() K
 }
 
-func newPostStore() *postStore { return &postStore{data: map[uuid.UUID]Post{}} }
+func newMemStore[K comparable, M any](key func(*M) *K, nextID func() K) *memStore[K, M] {
+	return &memStore[K, M]{
+		data:   map[K]M{},
+		key:    key,
+		nextID: nextID,
+	}
+}
 
-func (s *postStore) Create(_ context.Context, m *Post) error {
+func (s *memStore[K, M]) Create(_ context.Context, m *M) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data[m.ID] = *m
+	if s.nextID != nil {
+		*s.key(m) = s.nextID()
+	}
+	k := *s.key(m)
+	if _, ok := s.data[k]; ok {
+		return ErrAlreadyExists
+	}
+	s.data[k] = *m
 	return nil
 }
 
-func (s *postStore) Get(_ context.Context, id uuid.UUID) (*Post, error) {
+func (s *memStore[K, M]) Get(_ context.Context, id K) (*M, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m, ok := s.data[id]
@@ -41,83 +57,28 @@ func (s *postStore) Get(_ context.Context, id uuid.UUID) (*Post, error) {
 	return &m, nil
 }
 
-func (s *postStore) List(_ context.Context, limit, offset int) ([]Post, error) {
+func (s *memStore[K, M]) List(_ context.Context, _, _ int) ([]M, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Post, 0, len(s.data))
+	out := make([]M, 0, len(s.data))
 	for _, m := range s.data {
 		out = append(out, m)
 	}
 	return out, nil
 }
 
-func (s *postStore) Update(_ context.Context, m *Post) error {
+func (s *memStore[K, M]) Update(_ context.Context, m *M) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.data[m.ID]; !ok {
+	k := *s.key(m)
+	if _, ok := s.data[k]; !ok {
 		return ErrNotFound
 	}
-	s.data[m.ID] = *m
+	s.data[k] = *m
 	return nil
 }
 
-func (s *postStore) Delete(_ context.Context, id uuid.UUID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.data[id]; !ok {
-		return ErrNotFound
-	}
-	delete(s.data, id)
-	return nil
-}
-
-// authorStore exists so NewRouter has a repository for every entity; the tests
-// below drive the Post endpoints.
-type authorStore struct {
-	mu   sync.Mutex
-	data map[uuid.UUID]Author
-}
-
-func newAuthorStore() *authorStore { return &authorStore{data: map[uuid.UUID]Author{}} }
-
-func (s *authorStore) Create(_ context.Context, m *Author) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.data[m.ID] = *m
-	return nil
-}
-
-func (s *authorStore) Get(_ context.Context, id uuid.UUID) (*Author, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	m, ok := s.data[id]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	return &m, nil
-}
-
-func (s *authorStore) List(_ context.Context, limit, offset int) ([]Author, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Author, 0, len(s.data))
-	for _, m := range s.data {
-		out = append(out, m)
-	}
-	return out, nil
-}
-
-func (s *authorStore) Update(_ context.Context, m *Author) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.data[m.ID]; !ok {
-		return ErrNotFound
-	}
-	s.data[m.ID] = *m
-	return nil
-}
-
-func (s *authorStore) Delete(_ context.Context, id uuid.UUID) error {
+func (s *memStore[K, M]) Delete(_ context.Context, id K) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.data[id]; !ok {
@@ -128,7 +89,13 @@ func (s *authorStore) Delete(_ context.Context, id uuid.UUID) error {
 }
 
 func newServer() *httptest.Server {
-	return httptest.NewServer(NewRouter(Deps{Posts: newPostStore(), Authors: newAuthorStore()}))
+	var commentSeq atomic.Int64
+	return httptest.NewServer(NewRouter(Deps{
+		Posts:    newMemStore(func(m *Post) *uuid.UUID { return &m.ID }, uuid.New),
+		Authors:  newMemStore(func(m *Author) *uuid.UUID { return &m.ID }, uuid.New),
+		Comments: newMemStore(func(m *Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
+		Tags:     newMemStore[string](func(m *Tag) *string { return &m.Slug }, nil),
+	}))
 }
 
 // do issues a request, asserts the status code, and decodes the response into
@@ -164,16 +131,17 @@ func TestPostCRUD(t *testing.T) {
 	srv := newServer()
 	defer srv.Close()
 
-	id, authorID := uuid.New(), uuid.New()
-	idPath := "/posts/" + id.String()
+	authorID := uuid.New()
 
 	var created Post
 	do(t, srv, http.MethodPost, "/posts",
-		CreatePostRequest{ID: id, Title: "Hello", Body: new("world"), Author: &authorID},
+		CreatePostRequest{Title: "Hello", Body: new("world"), Author: &authorID},
 		&created, http.StatusCreated)
-	require.Equal(t, id, created.ID)
+	require.NotEqual(t, uuid.Nil, created.ID)
 	require.Equal(t, "Hello", created.Title)
 	require.Equal(t, "world", *created.Body)
+	require.False(t, created.Published)
+	idPath := "/posts/" + created.ID.String()
 
 	var got Post
 	do(t, srv, http.MethodGet, idPath, nil, &got, http.StatusOK)
@@ -188,7 +156,7 @@ func TestPostCRUD(t *testing.T) {
 		UpdatePostRequest{Title: "Updated", Body: new("body2"), Author: &authorID},
 		&updated, http.StatusOK)
 	require.Equal(t, "Updated", updated.Title)
-	require.Equal(t, id, updated.ID)
+	require.Equal(t, created.ID, updated.ID)
 
 	do(t, srv, http.MethodDelete, idPath, nil, nil, http.StatusNoContent)
 	do(t, srv, http.MethodGet, idPath, nil, nil, http.StatusNotFound)
@@ -202,7 +170,7 @@ func TestPostCreateValidationFails(t *testing.T) {
 
 	// Title is required; omitting it must fail validation with 400.
 	do(t, srv, http.MethodPost, "/posts",
-		CreatePostRequest{ID: uuid.New(), Author: new(uuid.New())},
+		CreatePostRequest{Author: new(uuid.New())},
 		nil, http.StatusBadRequest)
 }
 
@@ -213,4 +181,109 @@ func TestGetInvalidIDIsBadRequest(t *testing.T) {
 	defer srv.Close()
 
 	do(t, srv, http.MethodGet, "/posts/not-a-uuid", nil, nil, http.StatusBadRequest)
+}
+
+func TestCreateRejectsMalformedBody(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer()
+	t.Cleanup(srv.Close)
+
+	valid := `{"title":"Hello"}`
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"trailing object", valid + `{}`},
+		{"trailing garbage", valid + `x`},
+		{"second value", valid + valid},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			resp, err := http.Post(srv.URL+"/posts", contentTypeJSON, strings.NewReader(tc.body))
+			require.NoError(t, err)
+			defer func() { require.NoError(t, resp.Body.Close()) }()
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		})
+	}
+}
+
+func TestPostCreateAppliesDefault(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer()
+	t.Cleanup(srv.Close)
+
+	cases := []struct {
+		name      string
+		published *bool
+		want      bool
+	}{
+		{"omitted takes default", nil, false},
+		{"explicit value kept", new(true), true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var created Post
+			do(t, srv, http.MethodPost, "/posts",
+				CreatePostRequest{Title: "Hello", Published: tc.published},
+				&created, http.StatusCreated)
+			require.Equal(t, tc.want, created.Published)
+		})
+	}
+}
+
+func TestCommentDefaults(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer()
+	defer srv.Close()
+
+	before := time.Now()
+	var created Comment
+	do(t, srv, http.MethodPost, "/comments",
+		CreateCommentRequest{Post: uuid.New(), Body: "Nice"},
+		&created, http.StatusCreated)
+	require.NotZero(t, created.ID)
+	require.Zero(t, created.Likes)
+	require.False(t, created.PostedAt.Before(before), "posted_at defaults to now")
+
+	var got Comment
+	do(t, srv, http.MethodGet, "/comments/"+strconv.FormatInt(created.ID, 10), nil, &got, http.StatusOK)
+	require.Equal(t, created.Body, got.Body)
+}
+
+func TestCommentRequiresPost(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer()
+	defer srv.Close()
+
+	do(t, srv, http.MethodPost, "/comments", CreateCommentRequest{Body: "Orphan"}, nil, http.StatusBadRequest)
+}
+
+func TestTagClientKey(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer()
+	defer srv.Close()
+
+	const slug = "go"
+
+	var created Tag
+	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Go"}, &created, http.StatusCreated)
+	require.Equal(t, Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1}, created)
+
+	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Again"}, nil, http.StatusConflict)
+	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Label: "No slug"}, nil, http.StatusBadRequest)
+
+	var updated Tag
+	do(t, srv, http.MethodPut, "/tags/"+slug, UpdateTagRequest{Label: "Golang", Color: new("blue")}, &updated, http.StatusOK)
+	require.Equal(t, Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1}, updated)
 }

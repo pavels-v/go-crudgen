@@ -47,12 +47,12 @@ func (h *AuthorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := Author{
-		ID:    req.ID,
-		Email: req.Email,
-		Name:  req.Name,
+		Email:  req.Email,
+		Name:   req.Name,
+		BornOn: req.BornOn,
 	}
 	if err := h.repo.Create(r.Context(), &m); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, m)
@@ -66,7 +66,7 @@ func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := h.repo.Get(r.Context(), id)
 	if err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -76,7 +76,7 @@ func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePage(r)
 	items, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -98,12 +98,13 @@ func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := Author{
-		ID:    id,
-		Email: req.Email,
-		Name:  req.Name,
+		ID:     id,
+		Email:  req.Email,
+		Name:   req.Name,
+		BornOn: req.BornOn,
 	}
 	if err := h.repo.Update(r.Context(), &m); err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -116,7 +117,7 @@ func (h *AuthorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

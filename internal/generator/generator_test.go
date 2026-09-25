@@ -194,6 +194,62 @@ func TestRenderModel_DTOs(t *testing.T) {
 	_, create, ok := strings.Cut(got, "type CreatePostRequest")
 	require.True(t, ok, "CreatePostRequest should be generated")
 	require.NotContains(t, create, "CreatedAt", "DTOs should not contain timestamp fields")
+	require.NotContains(t, create, "ID uuid.UUID", "a generated key is not part of CreatePostRequest")
+}
+
+func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "cat",
+		Entities: []spec.Entity{{
+			Name: "Tag",
+			Fields: []spec.Field{
+				{Name: "slug", Type: spec.TypeString, Primary: true},
+				{Name: "published", Type: spec.TypeBool, Default: false},
+			},
+		}},
+	}
+
+	got := render(t, s, "Tag")
+	for _, want := range []string{
+		"type Tag struct { Slug string `json:\"slug\"` Published bool `json:\"published\"` }",
+		"type CreateTagRequest struct { Slug string `json:\"slug\" validate:\"required\"` Published *bool `json:\"published\"` }",
+		"type UpdateTagRequest struct { Published *bool `json:\"published\"` }",
+	} {
+		wantContains(t, got, want)
+	}
+
+	handler := renderHandlerSrc(t, s, "Tag")
+	for _, want := range []string{
+		"Slug: req.Slug,",
+		"Published: valueOr(req.Published, false),",
+	} {
+		wantContains(t, handler, want)
+	}
+
+	repo := renderRepoSrc(t, s, "Tag")
+	wantContains(t, repo, "createTagSQL = `INSERT INTO tags (slug, published) VALUES ($1, $2)`")
+	wantContains(t, repo, "r.db.ExecContext(ctx, createTagSQL, row.Slug, row.Published)")
+}
+
+func TestRenderHandler_GeneratedKeyNotAssigned(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Entities: []spec.Entity{{
+			Name: "Post",
+			Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "title", Type: spec.TypeString, Required: true},
+			},
+		}},
+	}
+
+	got := renderHandlerSrc(t, s, "Post")
+	require.NotContains(t, got, "req.ID")
+	wantContains(t, got, "Title: req.Title,")
 }
 
 func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
@@ -327,11 +383,12 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"m := row.toModel()",
 		"errors.Is(err, sql.ErrNoRows)",
 		// timestamps default to now() on insert and are returned into the struct
-		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
+		"INSERT INTO posts (title, body, created_at, updated_at) VALUES ($1, $2, now(), now()) RETURNING id, created_at, updated_at",
+		"Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
 		"ORDER BY id LIMIT $1 OFFSET $2",
 		// the primary key is the trailing placeholder in the update
-		"UPDATE posts SET title = $1, body = $2, updated_at = now() WHERE id = $3 RETURNING updated_at",
+		"UPDATE posts SET title = $1, body = $2, updated_at = now() WHERE id = $3 RETURNING created_at, updated_at",
 		"DELETE FROM posts WHERE id = $1",
 	} {
 		wantContains(t, got, want)
@@ -533,12 +590,12 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 		"-- +goose StatementBegin",
 		"-- +goose StatementEnd",
 		"CREATE TABLE posts (",
-		"id UUID NOT NULL PRIMARY KEY",        // single PK declared inline
-		"title TEXT NOT NULL",                 // required -> NOT NULL
-		"body TEXT,",                          // optional column is nullable
-		"published BOOLEAN DEFAULT FALSE",     // bool default rendered as SQL literal
-		"slug TEXT UNIQUE",                    // unique modifier
-		"author UUID REFERENCES authors (id)", // FK column typed from + pointing at the target PK
+		"id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY", // single PK declared inline
+		"title TEXT NOT NULL", // required -> NOT NULL
+		"body TEXT,",          // optional column is nullable
+		"published BOOLEAN NOT NULL DEFAULT FALSE", // bool default rendered as SQL literal
+		"slug TEXT UNIQUE",                         // unique modifier
+		"author UUID REFERENCES authors (id)",      // FK column typed from + pointing at the target PK
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"deleted_at TIMESTAMPTZ", // soft-delete marker is nullable
@@ -710,6 +767,9 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			wantContains(t, got, "func NewDB(dsn string) (*sqlx.DB, error)")
 			wantContains(t, got, "db, err := sqlx.Open(driverName, dsn)")
 			wantContains(t, got, "db.SetMaxOpenConns(maxOpenConns)")
+			wantContains(t, got, `sqlStateUniqueViolation = "23505"`)
+			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", ErrAlreadyExists, err)")
+			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", ErrStillReferenced, err)")
 		})
 	}
 }
@@ -736,6 +796,12 @@ func TestRenderShared_WiresEntities(t *testing.T) {
 	got := string(src)
 	for _, want := range []string{
 		"var ErrNotFound = errors.New(\"not found\")",
+		"ErrAlreadyExists: http.StatusConflict,",
+		"ErrReferenceNotFound: http.StatusUnprocessableEntity,",
+		"ErrStillReferenced: http.StatusConflict,",
+		"writeError(w, http.StatusInternalServerError, errInternal)",
+		"func valueOr[T any](p *T, def T) T",
+		"return errTrailingJSON",
 		"Posts PostRepository",
 		"RegisterPostRoutes(mux, NewPostHandler(deps.Posts))",
 	} {
@@ -844,4 +910,114 @@ func TestGroupImports(t *testing.T) {
 			require.Equal(t, tc.want, groupImports(set))
 		})
 	}
+}
+
+func TestCheckColumns(t *testing.T) {
+	t.Parallel()
+
+	id := spec.Field{Name: "id", Type: spec.TypeUUID, Primary: true}
+	cases := []struct {
+		name    string
+		fields  []spec.Field
+		options spec.EntityOptions
+		wantErr bool
+	}{
+		{"distinct", []spec.Field{id, {Name: "title", Type: spec.TypeString}}, spec.EntityOptions{Timestamps: true, SoftDelete: true}, false},
+		{"duplicate name", []spec.Field{id, {Name: "title", Type: spec.TypeString}, {Name: "title", Type: spec.TypeText}}, spec.EntityOptions{}, true},
+		{"same column", []spec.Field{id, {Name: "authorName", Type: spec.TypeString}, {Name: "author_name", Type: spec.TypeString}}, spec.EntityOptions{}, true},
+		{"same go field", []spec.Field{id, {Name: "Id", Type: spec.TypeString}}, spec.EntityOptions{}, true},
+		{"timestamps collision", []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime}}, spec.EntityOptions{Timestamps: true}, true},
+		{"soft delete collision", []spec.Field{id, {Name: "deletedAt", Type: spec.TypeDatetime}}, spec.EntityOptions{SoftDelete: true}, true},
+		{"option column without option", []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime}}, spec.EntityOptions{}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := checkColumns(&spec.Entity{Name: "Post", Fields: tc.fields, Options: tc.options})
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestRenderMigration_KeyGeneration(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		keyType string
+		want    string
+	}{
+		{"uuid", spec.TypeUUID, "id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY"},
+		{"int32", spec.TypeInt32, "id INTEGER NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY"},
+		{"int64", spec.TypeInt64, "id BIGINT NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY"},
+		{"string", spec.TypeString, "id TEXT NOT NULL PRIMARY KEY"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{
+				Package: "app",
+				Entities: []spec.Entity{{
+					Name:   "Item",
+					Fields: []spec.Field{{Name: "id", Type: tc.keyType, Primary: true}},
+				}},
+			}
+			wantContains(t, renderMigrationSrc(t, s, "Item"), tc.want)
+		})
+	}
+}
+
+func TestGoLiteral(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   any
+		want string
+	}{
+		{"bool", true, "true"},
+		{"int", 42, "42"},
+		{"float", 1.5, "1.5"},
+		{"string", `say "hi"`, `"say \"hi\""`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := goLiteral(tc.in)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestNowDefault(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "app",
+		Entities: []spec.Entity{{
+			Name: "Event",
+			Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "occurred_at", Type: spec.TypeDatetime, Default: spec.DefaultNow},
+			},
+		}},
+	}
+
+	wantContains(t, renderMigrationSrc(t, s, "Event"), "occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+	wantContains(t, render(t, s, "Event"), "OccurredAt time.Time `json:\"occurred_at\"`")
+
+	handler := renderHandlerSrc(t, s, "Event")
+	wantContains(t, handler, `"time"`)
+	wantContains(t, handler, "OccurredAt: valueOr(req.OccurredAt, time.Now()),")
 }

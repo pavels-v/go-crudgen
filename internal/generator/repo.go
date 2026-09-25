@@ -259,23 +259,29 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 
 	// INSERT: spec fields take placeholders; timestamps default to now().
+	_, pkGenerated := keyGenerator(pk)
 	insCols := make([]string, 0, len(specCols)+2)
 	insPh := make([]string, 0, len(specCols)+2)
-	insArgs := make([]string, len(specCols))
-	for i, c := range specCols {
+	insArgs := make([]string, 0, len(specCols))
+	var ret []string
+	for _, c := range specCols {
+		if pkGenerated && c.Column == pkCol {
+			ret = append(ret, c.Column)
+			continue
+		}
 		insCols = append(insCols, c.Column)
-		insPh = append(insPh, fmt.Sprintf("$%d", i+1))
-		insArgs[i] = fmt.Sprintf(exprRowField, c.GoName)
+		insPh = append(insPh, fmt.Sprintf("$%d", len(insPh)+1))
+		insArgs = append(insArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
-	var createScan string
 	if ts {
 		insCols = append(insCols, colCreatedAt, colUpdatedAt)
 		insPh = append(insPh, "now()", "now()")
+		ret = append(ret, colCreatedAt, colUpdatedAt)
 	}
 	createSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		table, strings.Join(insCols, ", "), strings.Join(insPh, ", "))
-	if ts {
-		ret := []string{colCreatedAt, colUpdatedAt}
+	var createScan string
+	if len(ret) > 0 {
 		createSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, ", "))
 		createScan = scanList(ret)
 	}
@@ -317,7 +323,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		updateSQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d%s",
 			table, strings.Join(setClauses, ", "), pkCol, len(update)+1, softFilter)
 		if ts {
-			ret := []string{colUpdatedAt}
+			ret := []string{colCreatedAt, colUpdatedAt}
 			updateSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, ", "))
 			updateScan = scanList(ret)
 		}

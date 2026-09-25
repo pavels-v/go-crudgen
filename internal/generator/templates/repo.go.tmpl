@@ -58,13 +58,13 @@ var _ {{ .Repo }} = (*{{ .Receiver }})(nil)
 
 func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
 	row := {{ .NewRowFunc }}(m)
-{{- if .HasTimestamps }}
+{{- if .CreateScan }}
 	if err := r.db.QueryRowContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}).Scan({{ .CreateScan }}); err != nil {
-		return fmt.Errorf("create {{ .LowerStruct }}: %w", err)
+		return fmt.Errorf("create {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
 {{- else }}
 	if _, err := r.db.ExecContext(ctx, create{{ .Struct }}SQL, {{ .InsertArgs }}); err != nil {
-		return fmt.Errorf("create {{ .LowerStruct }}: %w", err)
+		return fmt.Errorf("create {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
 {{- end }}
 	return nil
@@ -101,7 +101,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
+		return fmt.Errorf("update {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
 {{- else if .NoUpdateColumns }}
 	// {{ .Struct }} has no writable columns; verify the row exists.
@@ -115,7 +115,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 {{- else }}
 	res, err := r.db.ExecContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }})
 	if err != nil {
-		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
+		return fmt.Errorf("update {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
@@ -131,7 +131,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 func (r *{{ .Receiver }}) Delete(ctx context.Context, id {{ .PKGoType }}) error {
 	res, err := r.db.ExecContext(ctx, delete{{ .Struct }}SQL, id)
 	if err != nil {
-		return fmt.Errorf("delete {{ .LowerStruct }}: %w", err)
+		return fmt.Errorf("delete {{ .LowerStruct }}: %w", mapDeleteError(err))
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
