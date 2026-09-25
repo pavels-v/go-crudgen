@@ -2,6 +2,10 @@
 
 BINARY := go-crudgen
 CMD    := ./cmd/go-crudgen
+TOOL   := go tool -modfile="$(CURDIR)/tools/go.mod"
+LINT   := $(TOOL) golangci-lint
+LINTC  := -c "$(CURDIR)/.golangci.yml"
+MODS   := . examples/blog examples/blog/integration
 
 .DEFAULT_GOAL := help
 
@@ -26,14 +30,14 @@ integration: ## Run examples/blog integration tests against real Postgres via te
 verify-examples: e2e ## Regenerate examples via e2e and fail if the committed output is stale (CI gate)
 	git diff --exit-code examples/blog
 
-lint: ## Run golangci-lint (requires golangci-lint v2.x)
-	golangci-lint run ./... -v
+lint: ## Run golangci-lint (pinned in tools/go.mod) on every module
+	@for m in $(MODS); do (cd $$m && $(LINT) run $(LINTC) ./...) || exit 1; done
 
 lint-fix: ## Run golangci-lint with autofixes applied
-	golangci-lint run --fix ./...
+	@for m in $(MODS); do (cd $$m && $(LINT) run $(LINTC) --fix ./...) || exit 1; done
 
 fmt: ## Format code (gofmt + goimports via golangci-lint formatters)
-	golangci-lint fmt ./... -v
+	@for m in $(MODS); do (cd $$m && $(LINT) fmt $(LINTC) ./...) || exit 1; done
 
 vet: ## Run go vet
 	go vet ./...
