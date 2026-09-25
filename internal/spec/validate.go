@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -39,10 +40,10 @@ var PrimaryKeyTypes = map[string]struct{}{
 // Validate checks the spec for structural errors.
 func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Package) == "" {
-		return fmt.Errorf("missing package name")
+		return errors.New("missing package name")
 	}
 	if len(s.Entities) == 0 {
-		return fmt.Errorf("no entities defined")
+		return errors.New("no entities defined")
 	}
 
 	seen := make(map[string]bool, len(s.Entities))

@@ -23,22 +23,19 @@ type EntityOptions struct {
 }
 
 const (
-	TypeString   = "string"
-	TypeText     = "text"
-	TypeInt32    = "int32"
-	TypeInt64    = "int64"
-	TypeFloat    = "float"
-	TypeDecimal  = "decimal"
-	TypeBool     = "bool"
-	TypeDate     = "date"
-	TypeDatetime = "datetime"
-	TypeUUID     = "uuid"
-	TypeJSON     = "json"
+	TypeString     = "string"
+	TypeText       = "text"
+	TypeInt32      = "int32"
+	TypeInt64      = "int64"
+	TypeFloat      = "float"
+	TypeDecimal    = "decimal"
+	TypeBool       = "bool"
+	TypeDate       = "date"
+	TypeDatetime   = "datetime"
+	TypeUUID       = "uuid"
+	TypeJSON       = "json"
+	TypeReferences = "references"
 )
-
-// TypeReferences is the field Type value marking a belongs-to relation; the
-// field's Target names the referenced entity.
-const TypeReferences = "references"
 
 // Field is a single attribute of an entity.
 type Field struct {

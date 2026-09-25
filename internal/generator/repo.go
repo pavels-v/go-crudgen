@@ -21,25 +21,21 @@ type nullsData struct {
 	Package string
 }
 
-// Supported --driver choices.
 const (
 	DriverPgx = "pgx"
 	DriverPq  = "pq"
 )
 
-// database/sql driver names registered by each choice's blank import.
 const (
 	sqlDriverPgx = "pgx"
 	sqlDriverPq  = "postgres"
 )
 
-// Driver packages blank-imported to register the database/sql driver.
 const (
 	importDriverPgx = "github.com/jackc/pgx/v5/stdlib"
 	importDriverPq  = "github.com/lib/pq"
 )
 
-// Packages every generated repository imports.
 const (
 	importNetHTTP     = "net/http"
 	importContext     = "context"
@@ -62,28 +58,24 @@ func driverInfo(driver string) (name, imp string, ok bool) {
 	return "", "", false
 }
 
-// Column names injected by entity options (timestamps and soft-delete).
 const (
 	colCreatedAt = "created_at"
 	colUpdatedAt = "updated_at"
 	colDeletedAt = "deleted_at"
 )
 
-// fmt.Sprintf templates for the struct tags emitted on row/model fields.
 const (
 	tagDB       = "db:%q"
 	tagJSON     = "json:%q"
 	tagValidate = " validate:%q"
 )
 
-// clauseReturning is appended to an INSERT/UPDATE to scan DB-populated columns back.
 const clauseReturning = " RETURNING %s"
 
-// fmt.Sprintf templates for the Go expressions emitted into repository code.
 const (
-	exprNull     = "sql.Null[%s]" // nullable row-field type wrapping a base type
-	exprToNull   = "toNull(%s)"   // model field -> sql.Null (write path)
-	exprFromNull = "fromNull(%s)" // sql.Null -> model field (scan path)
+	exprNull     = "sql.Null[%s]"
+	exprToNull   = "toNull(%s)"
+	exprFromNull = "fromNull(%s)"
 )
 
 const (
@@ -208,7 +200,10 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// column contributes a row-struct field and a model<->row conversion; nullable
 	// columns become sql.Null[T] on the row (pointer on the model), bridged by the
 	// generic toNull/fromNull helpers.
-	type col struct{ Column, GoName string }
+	type col struct {
+		Column string
+		GoName string
+	}
 	var specCols, update []col
 	var rowFields []rowField
 	var toRow, toModel []assign
