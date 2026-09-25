@@ -92,7 +92,7 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	if !toStdout {
 		if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
-			return fmt.Errorf("creating output dir: %w", err)
+			return fmt.Errorf("create output dir: %w", err)
 		}
 	}
 
@@ -120,11 +120,11 @@ func Generate(s *spec.Spec, opts Options) error {
 		path := filepath.Join(opts.OutDir, file)
 		if dir := filepath.Dir(path); dir != opts.OutDir {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return fmt.Errorf("creating %s: %w", dir, err)
+				return fmt.Errorf("create %s: %w", dir, err)
 			}
 		}
 		if err := os.WriteFile(path, src, 0o644); err != nil {
-			return fmt.Errorf("writing %s: %w", path, err)
+			return fmt.Errorf("write %s: %w", path, err)
 		}
 		fmt.Fprintf(os.Stderr, "  wrote %s\n", path)
 		return nil
@@ -138,7 +138,7 @@ func Generate(s *spec.Spec, opts Options) error {
 
 		src, err := renderModel(s, e, byName)
 		if err != nil {
-			return fmt.Errorf("generating model for %q: %w", e.Name, err)
+			return fmt.Errorf("generate model for %q: %w", e.Name, err)
 		}
 		if err := emit(fmt.Sprintf(fileModel, base), src); err != nil {
 			return err
@@ -149,11 +149,11 @@ func Generate(s *spec.Spec, opts Options) error {
 		// migrationOrder) so foreign keys resolve when goose applies them.
 		md, err := migrationInfo(e, byName)
 		if err != nil {
-			return fmt.Errorf("generating migration for %q: %w", e.Name, err)
+			return fmt.Errorf("generate migration for %q: %w", e.Name, err)
 		}
 		msrc, err := renderMigration(md)
 		if err != nil {
-			return fmt.Errorf("generating migration for %q: %w", e.Name, err)
+			return fmt.Errorf("generate migration for %q: %w", e.Name, err)
 		}
 		migFile := fmt.Sprintf(fileMigration, migNum[e.Name], plural(e.Name, e.Plural))
 		if err := emit(migFile, msrc); err != nil {
@@ -162,11 +162,11 @@ func Generate(s *spec.Spec, opts Options) error {
 
 		hd, err := handlerInfo(s, e, byName)
 		if err != nil {
-			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
+			return fmt.Errorf("generate handlers for %q: %w", e.Name, err)
 		}
 		hsrc, err := renderHandler(hd)
 		if err != nil {
-			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
+			return fmt.Errorf("generate handlers for %q: %w", e.Name, err)
 		}
 		if err := emit(fmt.Sprintf(fileHandler, base), hsrc); err != nil {
 			return err
@@ -174,11 +174,11 @@ func Generate(s *spec.Spec, opts Options) error {
 
 		rd, err := repoInfo(s, e, byName)
 		if err != nil {
-			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
+			return fmt.Errorf("generate repository for %q: %w", e.Name, err)
 		}
 		rsrc, err := renderRepo(rd)
 		if err != nil {
-			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
+			return fmt.Errorf("generate repository for %q: %w", e.Name, err)
 		}
 		if err := emit(fmt.Sprintf(fileRepo, base), rsrc); err != nil {
 			return err
@@ -195,7 +195,7 @@ func Generate(s *spec.Spec, opts Options) error {
 	if len(serveable) > 0 {
 		ssrc, err := renderShared(sharedData{Package: s.Package, Entities: serveable})
 		if err != nil {
-			return fmt.Errorf("generating router: %w", err)
+			return fmt.Errorf("generate router: %w", err)
 		}
 		if err := emit(fileHTTP, ssrc); err != nil {
 			return err
@@ -203,7 +203,7 @@ func Generate(s *spec.Spec, opts Options) error {
 
 		dbsrc, err := renderDB(dbData{Package: s.Package, DriverName: driverName, DriverImport: driverImp})
 		if err != nil {
-			return fmt.Errorf("generating db connection: %w", err)
+			return fmt.Errorf("generate db connection: %w", err)
 		}
 		if err := emit(fileDB, dbsrc); err != nil {
 			return err
@@ -214,7 +214,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		if anyNullable {
 			nsrc, err := renderNulls(nullsData{Package: s.Package})
 			if err != nil {
-				return fmt.Errorf("generating null helpers: %w", err)
+				return fmt.Errorf("generate null helpers: %w", err)
 			}
 			if err := emit(fileNulls, nsrc); err != nil {
 				return err
@@ -348,11 +348,11 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 func renderTemplate(name string, data any) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
-		return nil, fmt.Errorf("rendering %s: %w", name, err)
+		return nil, fmt.Errorf("render %s: %w", name, err)
 	}
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
-		return nil, fmt.Errorf("formatting generated source: %w", err)
+		return nil, fmt.Errorf("format generated source: %w", err)
 	}
 	return formatted, nil
 }
@@ -362,7 +362,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 func renderMigration(data migrationData) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, tmplMigration, data); err != nil {
-		return nil, fmt.Errorf("rendering migration: %w", err)
+		return nil, fmt.Errorf("render migration: %w", err)
 	}
 	return buf.Bytes(), nil
 }

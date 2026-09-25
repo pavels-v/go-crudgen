@@ -40,12 +40,12 @@ func runGenerate(args []string) int {
 
 	s, err := spec.Load(*specPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "generate: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to load spec: %v\n", err)
 		return 1
 	}
 
 	if err := generator.Generate(s, generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver}); err != nil {
-		fmt.Fprintf(os.Stderr, "generate: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to generate: %v\n", err)
 		return 1
 	}
 	return 0
