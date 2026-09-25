@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"example.com/blog/internal/blog"
+	"example.com/blogservice/internal/blog"
 	"github.com/go-playground/validator/v10"
 )
 

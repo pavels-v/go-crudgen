@@ -1,5 +1,5 @@
 // Package integration holds Docker-backed integration tests that drive the
-// generated example service (example.com/blog) against a real PostgreSQL
+// generated example service (example.com/blogservice) against a real PostgreSQL
 // instance via testcontainers, applying the generated goose migrations.
 //
 // It is a separate Go module so the heavy testcontainers/goose dependency tree

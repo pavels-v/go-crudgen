@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"example.com/blog/internal/blog"
+	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )

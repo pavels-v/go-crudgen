@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/blog/internal/blog"
+	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )

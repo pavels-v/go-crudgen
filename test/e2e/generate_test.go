@@ -37,21 +37,21 @@ func run(t *testing.T, dir, name string, args ...string) {
 }
 
 // TestGenerateBlogExample drives the real CLI end to end: it regenerates the
-// blog example from examples/blog.yaml into examples/blog/internal/blog, then
-// builds and tests that (separate) module to prove the generated code compiles
-// and behaves.
+// blog example from examples/blog.yaml into examples/blogservice/internal/blog,
+// then builds and tests that (separate) module to prove the generated code
+// compiles and behaves.
 //
 // It regenerates in place, so the committed examples stay the source of truth;
 // `make verify-examples` checks git status afterwards to catch a stale
 // commit where the generator output drifted from what's checked in.
 func TestGenerateBlogExample(t *testing.T) {
 	root := repoRoot(t)
-	blogDir := filepath.Join(root, "examples", "blog")
+	blogDir := filepath.Join(root, "examples", "blogservice")
 	outDir := filepath.Join(blogDir, "internal", "blog")
 
 	// Regenerate the example with the default (pgx) driver.
 	run(t, root, "go", "run", "./cmd/go-crudgen", "generate",
-		"--spec", "examples/blog.yaml", "--out", "examples/blog/internal/blog")
+		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog")
 
 	for _, f := range []string{
 		"post.gen.go", "author.gen.go", "comment.gen.go", "tag.gen.go",

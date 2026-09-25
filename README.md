@@ -88,7 +88,7 @@ Errors: `404` not found, `409` unique violation or deleting a referenced row, `4
 
 ## Spec
 
-Full example: [examples/blog.yaml](examples/blog.yaml), generated output: [examples/blog/internal/blog](examples/blog/internal/blog).
+Full example: [examples/blog.yaml](examples/blog.yaml), generated output: [examples/blogservice/internal/blog](examples/blogservice/internal/blog).
 
 ```yaml
 package: blog

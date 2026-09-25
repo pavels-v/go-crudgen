@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"example.com/blog/internal/blog"
+	"example.com/blogservice/internal/blog"
 	"github.com/jmoiron/sqlx"
 )
 

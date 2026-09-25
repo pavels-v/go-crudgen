@@ -1,5 +1,5 @@
-package: blog                          # root package name of the generated code
-module: example.com/blog/internal/blog # import path of the --out directory
+package: blog                                 # root package name of the generated code
+module: example.com/blogservice/internal/blog # import path of the --out directory
 
 entities:
   - name: Post

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"example.com/blog/internal/blog"
+	"example.com/blogservice/internal/blog"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 )

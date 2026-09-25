@@ -1,9 +1,9 @@
-module example.com/blog/integration
+module example.com/blogservice/integration
 
 go 1.27.0
 
 require (
-	example.com/blog v0.0.0
+	example.com/blogservice v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/stretchr/testify v1.11.1
@@ -77,4 +77,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace example.com/blog => ../
+replace example.com/blogservice => ../

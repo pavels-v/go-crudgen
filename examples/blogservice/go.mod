@@ -1,4 +1,4 @@
-module example.com/blog
+module example.com/blogservice
 
 go 1.27.0
 

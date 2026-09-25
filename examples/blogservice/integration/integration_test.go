@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"example.com/blog/internal/blog"
-	"example.com/blog/internal/blog/postgres"
-	"example.com/blog/internal/blog/restapi"
+	"example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/postgres"
+	"example.com/blogservice/internal/blog/restapi"
 
 	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"

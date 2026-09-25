@@ -4,7 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"net/http"
 
-	"example.com/blog/internal/blog"
+	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
 )
 

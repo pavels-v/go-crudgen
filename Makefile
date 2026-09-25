@@ -5,7 +5,7 @@ CMD    := ./cmd/go-crudgen
 TOOL   := go tool -modfile="$(CURDIR)/tools/go.mod"
 LINT   := $(TOOL) golangci-lint
 LINTC  := -c "$(CURDIR)/.golangci.yml"
-MODS   := . examples/blog examples/blog/integration
+MODS   := . examples/blogservice examples/blogservice/integration
 
 .DEFAULT_GOAL := help
 
@@ -21,15 +21,15 @@ build: ## Build the CLI binary (named go-crudgen)
 test: ## Run tests
 	go test ./...
 
-e2e: ## Run end-to-end tests (regenerates examples/blog from its spec, then builds & tests it)
+e2e: ## Run end-to-end tests (regenerates examples/blogservice from its spec, then builds & tests it)
 	go test -tags e2e -count=1 -v ./test/e2e
 
-integration: ## Run examples/blog integration tests against real Postgres via testcontainers (requires Docker)
-	cd examples/blog/integration && go test -count=1 -v ./...
+integration: ## Run examples/blogservice integration tests against real Postgres via testcontainers (requires Docker)
+	cd examples/blogservice/integration && go test -count=1 -v ./...
 
 verify-examples: e2e ## Regenerate examples via e2e and fail if the committed output is stale (CI gate)
-	@git status --short examples/blog
-	@test -z "$$(git status --porcelain examples/blog)"
+	@git status --short examples/blogservice
+	@test -z "$$(git status --porcelain examples/blogservice)"
 
 lint: ## Run golangci-lint (pinned in tools/go.mod) on every module
 	@for m in $(MODS); do (cd $$m && $(LINT) run $(LINTC) ./...) || exit 1; done
