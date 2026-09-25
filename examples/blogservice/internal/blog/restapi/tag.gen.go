@@ -42,12 +42,12 @@ func RegisterTagRoutes(mux *http.ServeMux, h *TagHandler) {
 
 func (h *TagHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateTagRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeValidationError(w, r, err)
 		return
 	}
 	m := blog.Tag{
@@ -60,7 +60,7 @@ func (h *TagHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, m)
+	writeBody(w, http.StatusCreated, m)
 }
 
 func (h *TagHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -70,28 +70,32 @@ func (h *TagHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeBody(w, http.StatusOK, m)
 }
 
 func (h *TagHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset := parsePage(r)
+	limit, offset, details := parsePage(r)
+	if details != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", details)
+		return
+	}
 	items, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	writeBody(w, http.StatusOK, page[blog.Tag]{Items: items, Limit: limit, Offset: offset})
 }
 
 func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue(pathParamID)
 	var req UpdateTagRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeValidationError(w, r, err)
 		return
 	}
 	m := blog.Tag{
@@ -104,7 +108,7 @@ func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeBody(w, http.StatusOK, m)
 }
 
 func (h *TagHandler) Delete(w http.ResponseWriter, r *http.Request) {

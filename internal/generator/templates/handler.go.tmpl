@@ -41,12 +41,12 @@ func Register{{ .Struct }}Routes(mux *http.ServeMux, h *{{ .Struct }}Handler) {
 
 func (h *{{ .Struct }}Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req {{ .CreateName }}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeValidationError(w, r, err)
 		return
 	}
 	m := {{ .Model }}{
@@ -58,7 +58,7 @@ func (h *{{ .Struct }}Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, m)
+	writeBody(w, http.StatusCreated, m)
 }
 
 func (h *{{ .Struct }}Handler) Get(w http.ResponseWriter, r *http.Request) {
@@ -68,28 +68,32 @@ func (h *{{ .Struct }}Handler) Get(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeBody(w, http.StatusOK, m)
 }
 
 func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset := parsePage(r)
+	limit, offset, details := parsePage(r)
+	if details != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", details)
+		return
+	}
 	items, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	writeBody(w, http.StatusOK, page[{{ .Model }}]{Items: items, Limit: limit, Offset: offset})
 }
 
 func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
 	{{ template "parseID" . }}
 	var req {{ .UpdateName }}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeValidationError(w, r, err)
 		return
 	}
 	m := {{ .Model }}{
@@ -102,7 +106,7 @@ func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeBody(w, http.StatusOK, m)
 }
 
 func (h *{{ .Struct }}Handler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -117,12 +121,12 @@ func (h *{{ .Struct }}Handler) Delete(w http.ResponseWriter, r *http.Request) {
 {{- define "parseID" -}}
 {{ if not .PK.NeedsErr }}id := {{ .PK.Expr }}{{ else if .PK.Cast }}idRaw, err := {{ .PK.Expr }}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeInvalidID(w)
 		return
 	}
 	id := {{ .PK.Cast }}(idRaw){{ else }}id, err := {{ .PK.Expr }}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeInvalidID(w)
 		return
 	}{{ end }}
 {{- end -}}

@@ -3,6 +3,7 @@ package restapi
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"io"
 	"net/http"
@@ -99,8 +100,8 @@ func newServer() *httptest.Server {
 	}))
 }
 
-// do issues a request, asserts the status code, and decodes the response into
-// out when out is non-nil.
+// do issues a request, asserts the status code, and decodes the envelope body
+// into out when out is non-nil.
 func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, wantStatus int) {
 	t.Helper()
 	var r io.Reader
@@ -122,8 +123,43 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 			"%s %s: status = %d, want %d (body: %s)", method, path, resp.StatusCode, wantStatus, b)
 	}
 	if out != nil {
-		require.NoError(t, json.UnmarshalRead(resp.Body, out), "decode response")
+		var env bodyResponse[jsontext.Value]
+		require.NoError(t, json.UnmarshalRead(resp.Body, &env), "decode response")
+		require.NoError(t, json.Unmarshal(env.Body, out), "decode body")
 	}
+}
+
+// doError sends a raw body, asserts the status code and returns the decoded
+// error envelope after checking it carries exactly the error object.
+func doError(t *testing.T, srv *httptest.Server, method, path, body string, wantStatus int) apiError {
+	t.Helper()
+	req, err := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+	require.NoError(t, err, "new request")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoErrorf(t, err, "%s %s", method, path)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	require.Equal(t, wantStatus, resp.StatusCode)
+	require.Equal(t, contentTypeJSON, resp.Header.Get("Content-Type")) //nolint:testifylint // compares a header, not JSON
+
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	var shape map[string]map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(raw, &shape), "decode envelope")
+	require.Len(t, shape, 1, "envelope carries only error")
+	require.ElementsMatch(t, []string{"code", "message", "details"}, keys(shape["error"]))
+
+	var env errorResponse
+	require.NoError(t, json.Unmarshal(raw, &env))
+	return env.Error
+}
+
+func keys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func TestPostCRUD(t *testing.T) {
@@ -148,9 +184,11 @@ func TestPostCRUD(t *testing.T) {
 	do(t, srv, http.MethodGet, idPath, nil, &got, http.StatusOK)
 	require.Equal(t, "Hello", got.Title)
 
-	var list []blog.Post
-	do(t, srv, http.MethodGet, "/posts", nil, &list, http.StatusOK)
-	require.Len(t, list, 1)
+	var list page[blog.Post]
+	do(t, srv, http.MethodGet, "/posts?limit=500", nil, &list, http.StatusOK)
+	require.Len(t, list.Items, 1)
+	require.Equal(t, maxLimit, list.Limit, "limit is clamped")
+	require.Zero(t, list.Offset)
 
 	var updated blog.Post
 	do(t, srv, http.MethodPut, idPath,
@@ -163,25 +201,119 @@ func TestPostCRUD(t *testing.T) {
 	do(t, srv, http.MethodGet, idPath, nil, nil, http.StatusNotFound)
 }
 
-func TestPostCreateValidationFails(t *testing.T) {
+func TestErrorResponses(t *testing.T) {
 	t.Parallel()
 
 	srv := newServer()
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
-	// Title is required; omitting it must fail validation with 400.
-	do(t, srv, http.MethodPost, "/posts",
-		CreatePostRequest{Author: new(uuid.New())},
-		nil, http.StatusBadRequest)
+	const tagPath = "/tags"
+	do(t, srv, http.MethodPost, tagPath, CreateTagRequest{Slug: "taken", Label: "Taken"}, nil, http.StatusCreated)
+
+	cases := []struct {
+		name        string
+		method      string
+		path        string
+		body        string
+		wantStatus  int
+		wantCode    string
+		wantDetails []errorDetail
+	}{
+		{
+			"missing required field", http.MethodPost, "/posts", `{}`,
+			http.StatusUnprocessableEntity, codeValidationFailed,
+			[]errorDetail{{Field: "/title", Reason: "required"}},
+		},
+		{
+			"rule with parameter", http.MethodPost, "/posts", `{"title":"` + strings.Repeat("x", 201) + `"}`,
+			http.StatusUnprocessableEntity, codeValidationFailed,
+			[]errorDetail{{Field: "/title", Reason: "max=200"}},
+		},
+		{
+			"missing reference key", http.MethodPost, "/comments", `{"body":"Orphan"}`,
+			http.StatusUnprocessableEntity, codeValidationFailed,
+			[]errorDetail{{Field: "/post", Reason: "required"}},
+		},
+		{
+			"unknown member", http.MethodPost, "/posts", `{"title":"Hello","extra":1}`,
+			http.StatusBadRequest, codeMalformedBody,
+			[]errorDetail{{Field: "/extra", Reason: reasonUnknownField}},
+		},
+		{
+			"duplicate member", http.MethodPost, "/posts", `{"title":"Hello","title":"Bye"}`,
+			http.StatusBadRequest, codeMalformedBody,
+			[]errorDetail{{Field: "/title", Reason: reasonDuplicateField}},
+		},
+		{
+			"wrong value type", http.MethodPost, "/posts", `{"title":1}`,
+			http.StatusBadRequest, codeMalformedBody,
+			[]errorDetail{{Field: "/title", Reason: reasonInvalidValue}},
+		},
+		{
+			"syntax error", http.MethodPost, "/posts", `{"title":`,
+			http.StatusBadRequest, codeMalformedBody,
+			[]errorDetail{{Field: "/title", Reason: reasonSyntax}},
+		},
+		{
+			"body too large", http.MethodPost, "/posts", `{"title":"` + strings.Repeat("x", maxBodyBytes) + `"}`,
+			http.StatusRequestEntityTooLarge, codeBodyTooLarge, nil,
+		},
+		{
+			"invalid id", http.MethodGet, "/posts/not-a-uuid", "",
+			http.StatusBadRequest, codeInvalidID, nil,
+		},
+		{
+			"invalid page", http.MethodGet, "/posts?limit=abc&offset=-1", "",
+			http.StatusBadRequest, codeInvalidQuery,
+			[]errorDetail{{Field: queryLimit, Reason: reasonInvalidValue}, {Field: queryOffset, Reason: reasonInvalidValue}},
+		},
+		{
+			"entity not found", http.MethodGet, "/posts/" + uuid.NewString(), "",
+			http.StatusNotFound, codeNotFound, nil,
+		},
+		{
+			"unknown route", http.MethodGet, "/nope", "",
+			http.StatusNotFound, codeNotFound, nil,
+		},
+		{
+			"method not allowed", http.MethodPatch, "/posts", "",
+			http.StatusMethodNotAllowed, codeMethodNotAllowed, nil,
+		},
+		{
+			"duplicate key", http.MethodPost, tagPath, `{"slug":"taken","label":"Again"}`,
+			http.StatusConflict, codeAlreadyExists, nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := doError(t, srv, tc.method, tc.path, tc.body, tc.wantStatus)
+			require.Equal(t, tc.wantCode, got.Code)
+			require.NotEmpty(t, got.Message)
+			if tc.wantDetails == nil {
+				require.Empty(t, got.Details)
+				return
+			}
+			require.Equal(t, tc.wantDetails, got.Details)
+		})
+	}
 }
 
-func TestGetInvalidIDIsBadRequest(t *testing.T) {
+func TestMethodNotAllowedListsAllowedMethods(t *testing.T) {
 	t.Parallel()
 
 	srv := newServer()
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
-	do(t, srv, http.MethodGet, "/posts/not-a-uuid", nil, nil, http.StatusBadRequest)
+	req, err := http.NewRequest(http.MethodPatch, srv.URL+"/posts", http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Allow"), http.MethodPost)
 }
 
 func TestCreateRejectsMalformedBody(t *testing.T) {
@@ -208,10 +340,8 @@ func TestCreateRejectsMalformedBody(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			resp, err := http.Post(srv.URL+"/posts", contentTypeJSON, strings.NewReader(tc.body))
-			require.NoError(t, err)
-			defer func() { require.NoError(t, resp.Body.Close()) }()
-			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			got := doError(t, srv, http.MethodPost, "/posts", tc.body, http.StatusBadRequest)
+			require.Equal(t, codeMalformedBody, got.Code)
 		})
 	}
 }
@@ -264,15 +394,6 @@ func TestCommentDefaults(t *testing.T) {
 	require.Equal(t, created.Body, got.Body)
 }
 
-func TestCommentRequiresPost(t *testing.T) {
-	t.Parallel()
-
-	srv := newServer()
-	defer srv.Close()
-
-	do(t, srv, http.MethodPost, "/comments", CreateCommentRequest{Body: "Orphan"}, nil, http.StatusBadRequest)
-}
-
 func TestTagClientKey(t *testing.T) {
 	t.Parallel()
 
@@ -286,7 +407,7 @@ func TestTagClientKey(t *testing.T) {
 	require.Equal(t, blog.Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1}, created)
 
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Again"}, nil, http.StatusConflict)
-	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Label: "No slug"}, nil, http.StatusBadRequest)
+	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Label: "No slug"}, nil, http.StatusUnprocessableEntity)
 
 	var updated blog.Tag
 	do(t, srv, http.MethodPut, "/tags/"+slug, UpdateTagRequest{Label: "Golang", Color: new("blue")}, &updated, http.StatusOK)
@@ -316,17 +437,20 @@ func TestAuthorDateWireFormat(t *testing.T) {
 			t.Parallel()
 
 			body := `{"email":"ada@example.com","born_on":"` + tc.bornOn + `"}`
+			if tc.wantStatus != http.StatusCreated {
+				got := doError(t, srv, http.MethodPost, "/authors", body, tc.wantStatus)
+				require.Equal(t, []errorDetail{{Field: "/born_on", Reason: reasonInvalidValue}}, got.Details)
+				return
+			}
+
 			resp, err := http.Post(srv.URL+"/authors", contentTypeJSON, strings.NewReader(body))
 			require.NoError(t, err)
 			defer func() { require.NoError(t, resp.Body.Close()) }()
 			require.Equal(t, tc.wantStatus, resp.StatusCode)
-			if tc.wantStatus != http.StatusCreated {
-				return
-			}
 
-			var got map[string]any
+			var got bodyResponse[map[string]any]
 			require.NoError(t, json.UnmarshalRead(resp.Body, &got))
-			require.Equal(t, bornOn, got["born_on"])
+			require.Equal(t, bornOn, got.Body["born_on"])
 		})
 	}
 }

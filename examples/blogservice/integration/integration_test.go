@@ -107,9 +107,10 @@ func TestIntegration(t *testing.T) {
 	})
 
 	t.Run("list returns persisted posts", func(t *testing.T) {
-		var list []blog.Post
+		var list page[blog.Post]
 		do(t, srv, http.MethodGet, "/posts?limit=10", nil, &list, http.StatusOK)
-		require.GreaterOrEqual(t, len(list), 1)
+		require.NotEmpty(t, list.Items)
+		require.Equal(t, 10, list.Limit)
 	})
 
 	t.Run("constraint violations map to client errors", func(t *testing.T) {
@@ -138,9 +139,10 @@ func TestIntegration(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				var got map[string]string
+				var got apiError
 				do(t, srv, tc.method, tc.path, tc.body, &got, tc.status)
-				require.Equal(t, map[string]string{"error": tc.wantErr.Error()}, got)
+				require.NotEmpty(t, got.Code)
+				require.Equal(t, tc.wantErr.Error(), got.Message)
 			})
 		}
 	})
@@ -186,10 +188,10 @@ func TestIntegration(t *testing.T) {
 		do(t, srv, http.MethodGet, firstPath, nil, nil, http.StatusNotFound)
 		do(t, srv, http.MethodDelete, firstPath, nil, nil, http.StatusNotFound)
 
-		var list []blog.Comment
+		var list page[blog.Comment]
 		do(t, srv, http.MethodGet, "/comments", nil, &list, http.StatusOK)
-		require.Len(t, list, 1)
-		require.Equal(t, second.ID, list[0].ID)
+		require.Len(t, list.Items, 1)
+		require.Equal(t, second.ID, list.Items[0].ID)
 
 		do(t, srv, http.MethodDelete, "/posts/"+post.ID.String(), nil, nil, http.StatusConflict)
 	})
@@ -239,8 +241,24 @@ func startPostgres(t *testing.T) string {
 	return dsn
 }
 
-// do issues a request, asserts the status code, and decodes the response into
-// out when out is non-nil.
+type envelope struct {
+	Body  jsontext.Value `json:"body"`
+	Error jsontext.Value `json:"error"`
+}
+
+type page[T any] struct {
+	Items  []T `json:"items"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// do issues a request, asserts the status code, and decodes the envelope into
+// out when out is non-nil: its body on success, its error otherwise.
 func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, wantStatus int) {
 	t.Helper()
 	var r io.Reader
@@ -261,7 +279,14 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 		require.Failf(t, "unexpected status",
 			"%s %s: status = %d, want %d (body: %s)", method, path, resp.StatusCode, wantStatus, b)
 	}
-	if out != nil {
-		require.NoError(t, json.UnmarshalRead(resp.Body, out), "decode response")
+	if out == nil {
+		return
 	}
+	var env envelope
+	require.NoError(t, json.UnmarshalRead(resp.Body, &env), "decode response")
+	payload := env.Body
+	if wantStatus >= http.StatusBadRequest {
+		payload = env.Error
+	}
+	require.NoError(t, json.Unmarshal(payload, out), "decode payload")
 }

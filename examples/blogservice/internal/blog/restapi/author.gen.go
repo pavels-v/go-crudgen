@@ -43,12 +43,12 @@ func RegisterAuthorRoutes(mux *http.ServeMux, h *AuthorHandler) {
 
 func (h *AuthorHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateAuthorRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeValidationError(w, r, err)
 		return
 	}
 	m := blog.Author{
@@ -60,13 +60,13 @@ func (h *AuthorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, m)
+	writeBody(w, http.StatusCreated, m)
 }
 
 func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeInvalidID(w)
 		return
 	}
 	m, err := h.repo.Get(r.Context(), id)
@@ -74,32 +74,36 @@ func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeBody(w, http.StatusOK, m)
 }
 
 func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset := parsePage(r)
+	limit, offset, details := parsePage(r)
+	if details != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", details)
+		return
+	}
 	items, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	writeBody(w, http.StatusOK, page[blog.Author]{Items: items, Limit: limit, Offset: offset})
 }
 
 func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeInvalidID(w)
 		return
 	}
 	var req UpdateAuthorRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeValidationError(w, r, err)
 		return
 	}
 	m := blog.Author{
@@ -112,13 +116,13 @@ func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeBody(w, http.StatusOK, m)
 }
 
 func (h *AuthorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeInvalidID(w)
 		return
 	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {

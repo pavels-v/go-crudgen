@@ -360,10 +360,13 @@ func routerInfo(s *spec.Spec, entities []routerEntity) routerData {
 		Package: pkgREST,
 		Imports: groupImports(map[string]struct{}{
 			importJSONv2:    {},
+			importJSON:      {},
 			importErrors:    {},
 			importSlog:      {},
 			importNetHTTP:   {},
+			importReflect:   {},
 			importStrconv:   {},
+			importStrings:   {},
 			importValidator: {},
 			s.Module:        {},
 		}, s.Module),
