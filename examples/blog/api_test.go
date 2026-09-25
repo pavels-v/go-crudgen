@@ -3,7 +3,7 @@ package blog
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,7 +121,7 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 			"%s %s: status = %d, want %d (body: %s)", method, path, resp.StatusCode, wantStatus, b)
 	}
 	if out != nil {
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(out), "decode response")
+		require.NoError(t, json.UnmarshalRead(resp.Body, out), "decode response")
 	}
 }
 
@@ -197,6 +197,10 @@ func TestCreateRejectsMalformedBody(t *testing.T) {
 		{"trailing object", valid + `{}`},
 		{"trailing garbage", valid + `x`},
 		{"second value", valid + valid},
+		{"duplicate member", `{"title":"Hello","title":"Bye"}`},
+		{"member name case mismatch", `{"Title":"Hello"}`},
+		{"unknown member", `{"title":"Hello","extra":1}`},
+		{"invalid unicode", `{"title":"\ud800"}`},
 	}
 
 	for _, tc := range cases {

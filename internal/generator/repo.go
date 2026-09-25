@@ -67,6 +67,7 @@ const (
 	tagDB       = "db:%q"
 	tagJSON     = "json:%q"
 	tagValidate = " validate:%q"
+	jsonOmit    = ",omitzero"
 )
 
 const clauseReturning = " RETURNING %s"
@@ -113,7 +114,7 @@ func optionColumns(o spec.EntityOptions) []optionColumn {
 		)
 	}
 	if o.SoftDelete {
-		cols = append(cols, optionColumn{colDeletedAt, pascalCase(colDeletedAt), fmt.Sprintf(exprPointer, goTime), fmt.Sprintf(tagJSON, colDeletedAt+",omitempty")})
+		cols = append(cols, optionColumn{colDeletedAt, pascalCase(colDeletedAt), fmt.Sprintf(exprPointer, goTime), fmt.Sprintf(tagJSON, colDeletedAt+jsonOmit)})
 	}
 	return cols
 }

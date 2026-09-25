@@ -13,7 +13,7 @@ type Comment struct {
 	Body      string     `json:"body" validate:"required,max=2000"`
 	Likes     int32      `json:"likes"`
 	PostedAt  time.Time  `json:"posted_at"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	DeletedAt *time.Time `json:"deleted_at,omitzero"`
 }
 
 // CreateCommentRequest is the request body for creating a comment.

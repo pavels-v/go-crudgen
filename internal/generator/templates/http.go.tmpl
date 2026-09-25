@@ -1,9 +1,8 @@
 package {{ .Package }}
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -24,10 +23,7 @@ var (
 	ErrStillReferenced   = errors.New("entity is still referenced")
 )
 
-var (
-	errTrailingJSON = errors.New("request body must contain a single JSON value")
-	errInternal     = errors.New(http.StatusText(http.StatusInternalServerError))
-)
+var errInternal = errors.New(http.StatusText(http.StatusInternalServerError))
 
 var repoErrorStatus = map[error]int{
 	ErrNotFound:          http.StatusNotFound,
@@ -64,21 +60,13 @@ type errorResponse struct {
 }
 
 func decodeJSON(r *http.Request, v any) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	if err := dec.Decode(&json.RawMessage{}); !errors.Is(err, io.EOF) {
-		return errTrailingJSON
-	}
-	return nil
+	return json.UnmarshalRead(r.Body, v, json.RejectUnknownMembers(true))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.MarshalWrite(w, v)
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {
