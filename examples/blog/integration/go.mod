@@ -1,6 +1,6 @@
 module example.com/blog/integration
 
-go 1.26.2
+go 1.27.0
 
 require (
 	example.com/blog v0.0.0
