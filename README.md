@@ -2,6 +2,43 @@
 
 Generates a RESTful Go service (models, DTOs, handlers, router, PostgreSQL repositories, goose migrations) from a YAML entity spec.
 
+## Why
+
+Every backend re-implements the same layer: entity, table, five CRUD handlers, validation, serialization. Other ecosystems generate it:
+
+- Ruby: [Rails scaffold](https://rails.devcamp.com/trails/learn-ruby-on-rails-from-scratch/campsites/building-your-first-rails-application/guides/rails-scaffold-generator-guide) (`rails g scaffold Post title:string`).
+- Python: Django REST Framework.
+- JavaScript: [NestJS](https://docs.nestjs.com/recipes/crud-generator) (`nest generate resource <name>`) scaffolds module, controller, service, DTOs and entity as editable code.
+
+**Scope:** `go-crudgen` takes the routine out of writing plain CRUD for a set of entities. It is not a replacement for writing code: routes, handlers, the data layer and any service layer are yours to change after generation.
+
+### Why a new spec format
+
+Existing Go tools each cover part of the layer:
+
+- OpenAPI ([oapi-codegen](https://github.com/oapi-codegen/oapi-codegen), [ogen](https://github.com/ogen-go/ogen)): API-shaped and verbose; server stubs only, no storage, migrations or relations.
+- Go-code schema ([Ent](https://entgo.io/blog/2021/07/29/generate-a-fully-working-go-crud-http-api-with-ent/) + [ogent](https://github.com/ariga/ogent)): full CRUD, but generated code depends on the Ent ORM and the ogen router.
+- API DSL + SQL DDL ([go-zero goctl](https://github.com/zeromicro/go-zero)): two separate inputs, the logic layer is left as stubs, code is tied to go-zero.
+- Database introspection ([gofromdb](https://dev.to/alzhi_f93e67fa45b972/i-got-tired-of-writing-crud-by-hand-so-i-built-a-go-code-generator-from-a-database-1h52), [sqlboiler](https://github.com/aarondl/sqlboiler), [xo/dbtpl](https://github.com/xo/dbtpl)): needs an existing database; no migrations or input validation.
+- SQL-first ([sqlc](https://github.com/sqlc-dev/sqlc)): queries only, no HTTP layer.
+- Framework scaffold ([Buffalo](https://github.com/gobuffalo/buffalo) `generate resource`): full scaffold with migrations, tied to Buffalo and the Pop ORM; archived in February 2024.
+
+Among the tools we found, none generates every layer (validation, handlers, routes, SQL repository, migrations) from one declarative entity spec without a framework or ORM dependency. The `go-crudgen` spec does:
+
+- One YAML file drives model, DTOs, validation, handlers, routes, repository SQL and migrations; no second source of truth.
+- Input validation rules (go-playground/validator) sit next to the field they check.
+- `references` becomes a foreign key typed from the target's key; migrations are numbered in dependency order.
+- Routes use the standard `net/http.ServeMux` (Go 1.22+ patterns), no framework.
+- Generated code depends on neither the generator nor an ORM: plain Go plus `sqlx`.
+- Repository SQL is explicit in constants, readable and reviewable.
+- Storage is driver-agnostic via `database/sql`; `pgx` or `pq` is a flag.
+- Nullability flows from the spec: `*T` in the model, `sql.Null[T]` in the repository, no `NOT NULL` in the migration.
+- Migrations are goose SQL files, applied with standard tooling.
+- Per-entity options: `timestamps`, `soft_delete`.
+- Spec-first: works for greenfield projects; the spec is versioned and diff-friendly.
+- Plain YAML syntax familiar from OpenAPI and Kubernetes; the generator validates its own rules on top (required fields, known types, exactly one primary key, existing reference targets).
+- Handlers depend on a repository interface, so storage can be swapped or faked in tests.
+
 ## Usage
 
 ```bash
