@@ -84,7 +84,7 @@ func TestIntegration(t *testing.T) {
 		id := uuid.New()
 
 		// Body and Author are omitted, so they must be stored and returned as NULL
-		// (nil pointers) — the sql.Null[T] round-trip on the repository row.
+		// (nil pointers) - the sql.Null[T] round-trip on the repository row.
 		var created blog.Post
 		do(t, srv, http.MethodPost, "/posts",
 			blog.CreatePostRequest{ID: id, Title: "No body"},

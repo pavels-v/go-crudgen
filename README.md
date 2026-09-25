@@ -1,208 +1,73 @@
 # go-crudgen
 
-A code generator that turns a declarative **entity model specification** into a
-fully-working, RESTful Go HTTP service — handlers, routing, data models,
-validation, and persistence — so you spend your time on business logic instead
-of CRUD boilerplate.
+Generates a RESTful Go service (models, DTOs, handlers, router, PostgreSQL repositories, goose migrations) from a YAML entity spec.
 
-> Status: in progress. Models, DTOs, CRUD handlers, `net/http` router wiring,
-> PostgreSQL repositories (via `sqlx`/`database/sql`), and goose SQL migrations
-> are generated today; OpenAPI export is still on the roadmap.
-
-## Why
-
-Every backend project re-implements the same layer: an entity, a table, five
-HTTP handlers (`Create`, `Read`, `List`, `Update`, `Delete`), request
-validation, and serialization. Frameworks in other ecosystems automate this —
-Rails scaffolding, Django REST Framework, and in JavaScript:
-
-- **[NestJS](https://docs.nestjs.com/recipes/crud-generator)** —
-  `nest generate resource <name>` scaffolds a module, a controller (or a
-  resolver for GraphQL), a service, DTOs, and an entity with CRUD stubs as
-  editable code — the same generate-and-own model `go-crudgen` uses.
-
-Go has no single, idiomatic equivalent. `go-crudgen` aims to be that: describe your
-entities once, generate idiomatic Go you own and can edit.
-
-## What it generates
-
-From a single spec describing one or more entities, `go-crudgen` produces:
-
-- **Models** — Go structs with field tags (JSON, validation).
-- **Request/response DTOs** — `Create`/`Update` bodies with validation derived
-  from the spec.
-- **HTTP handlers** — full CRUD per entity following REST conventions.
-- **Router wiring** — routes registered on a standard `net/http` mux.
-- **Repository interfaces + a PostgreSQL implementation** — the storage seam
-  each handler depends on, plus a generated `sqlx`-backed repository that
-  satisfies it. The repository talks to `database/sql`, so it binds to no
-  specific driver.
-- **Database connection constructor** — a `NewDB` helper that opens the pool
-  through your chosen driver (`pgx` by default, `pq` via `--driver`), with that
-  driver blank-imported for you.
-- **Migrations** — a [goose](https://github.com/pressly/goose) SQL migration per
-  entity (`migrations/NNNNN_create_<table>.sql`) with `-- +goose Up`/`Down`
-  sections, written for every entity. `references` fields become `REFERENCES`
-  foreign keys, and migrations are numbered in dependency order so a referenced
-  table is always created before the table whose key points at it.
-
-Still planned:
-
-- **OpenAPI document** — generated from the same spec for client tooling.
-
-### REST surface per entity
-
-| Method   | Path             | Action           |
-| -------- | ---------------- | ---------------- |
-| `POST`   | `/{plural}`      | Create           |
-| `GET`    | `/{plural}`      | List (paginated) |
-| `GET`    | `/{plural}/{id}` | Read one         |
-| `PUT`    | `/{plural}/{id}` | Update           |
-| `DELETE` | `/{plural}/{id}` | Delete           |
-
-## Specification format
-
-The spec format is the heart of the tool. We surveyed common approaches:
-
-- **Rails** uses a terse CLI shorthand — `rails g scaffold Post title:string
-  body:text published:boolean post:references`. Fast to type, but it lives in
-  shell history rather than a checked-in, reviewable file, and struggles to
-  express rich constraints.
-- **Prisma** uses a dedicated schema DSL with `model` blocks and field
-  attributes (`@id`, `@unique`, `@default`, `@relation`). Very expressive, but
-  requires learning (and us writing) a custom parser.
-- **OpenAPI** uses YAML/JSON and is the industry standard for describing REST
-  APIs; the Go tool `oapi-codegen` generates server and client code directly
-  from an OpenAPI document. Portable, but verbose and API-shaped rather than
-  entity-shaped.
-
-**Decision: the format is YAML.** It is declarative, diff-friendly,
-checked into the repo, needs no custom parser, and reads naturally to anyone
-who has touched OpenAPI, Prisma, or Kubernetes manifests. OpenAPI export is on
-the roadmap for interop.
-
-### Example: YAML spec
-
-```yaml
-package: blog            # Go package name for generated code
-module: example.com/blog # import path
-
-entities:
-  - name: Post
-    plural: posts         # optional; defaults to a naive pluralization
-    fields:
-      - name: id
-        type: uuid
-        primary: true     # every entity needs exactly one primary field
-      - name: title
-        type: string
-        required: true
-        validate: "min=1,max=200"
-      - name: body
-        type: text
-      - name: published
-        type: bool
-        default: false
-      - name: author
-        type: references   # belongs-to relation
-        target: Author
-    options:
-      timestamps: true     # adds created_at / updated_at
-      soft_delete: false
-
-  - name: Author
-    fields:
-      - name: id
-        type: uuid
-        primary: true
-      - name: email
-        type: string
-        required: true
-        unique: true
-        validate: "email"
-      - name: name
-        type: string
-```
-
-### Supported field types (initial)
-
-`string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`,
-`datetime`, `uuid`, `json`, and `references` (relations). Per-field modifiers:
-`primary` (marks the single primary-key field every entity must have),
-`required`, `unique`, `default`, `index`, and `validate` (validation tag rules).
-
-A field that is neither `primary` nor `required` is **nullable**. Nullable fields
-become pointers (`*T`, with `json:",omitempty"`) in the model and request DTOs,
-and `sql.Null[T]` columns in the generated repository's row type, so a SQL `NULL`
-round-trips as a `nil` pointer rather than a zero value.
-
-> Note: each entity must have exactly one primary-key field, and its type must be
-> one the generator can parse from a `/{id}` path segment: `string`, `text`,
-> `int32`, `int64`, `uuid`, or a `references` to such a key. Composite keys and
-> non-addressable key types (`decimal`, `float`, `bool`, `date`, `datetime`,
-> `json`) are rejected.
-
-## Planned usage
+## Usage
 
 ```bash
-# install the go-crudgen binary onto your PATH
-go install go-crudgen/cmd/go-crudgen@latest
-
-# or build it locally from the CLI entrypoint
-go build -o go-crudgen ./cmd/go-crudgen
-
-# preview generated code on stdout (default when --out is omitted)
-go-crudgen generate --spec ./api.yaml
-
-# generate a service from a spec into a directory
-go-crudgen generate --spec ./api.yaml --out ./internal/api
-
-# the generated code imports third-party packages (sqlx, the driver, uuid, ...),
-# so resolve them in the output module afterwards
+go install ./cmd/go-crudgen                                         # from a clone of this repo
+go-crudgen generate --spec ./api.yaml                               # preview on stdout
+go-crudgen generate --spec ./api.yaml --out ./internal/api          # write files
+go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
 cd ./internal/api && go mod tidy
 ```
-
-By default the generator emits a `NewDB` constructor wired to the **pgx**
-driver. Pass `--driver pq` to use `lib/pq` instead:
-
-```bash
-go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
-```
-
-The driver only affects the generated `NewDB` constructor; the repositories
-themselves stay driver-agnostic (they depend on `*sqlx.DB`, not a driver).
-Re-run `go mod tidy` in the output module after switching drivers so the new
-driver dependency is fetched. `NewDB` applies sane connection-pool defaults
-(max-open/idle conns, conn lifetime) you can tune in the generated file.
-
-### Wiring the generated service
-
-Handlers depend on the repository *interface*; the generated Postgres
-repository implements it. The generated `NewDB` opens the pool (the chosen
-driver is blank-imported for you); you inject the repositories into the router:
 
 ```go
 db, err := blog.NewDB(dsn)
 if err != nil {
-  log.Fatal(err)
+	log.Fatal(err)
 }
 router := blog.NewRouter(blog.Deps{
-  Posts:   blog.NewPostgresPostRepository(db),
-  Authors: blog.NewPostgresAuthorRepository(db),
+	Posts:   blog.NewPostgresPostRepository(db),
+	Authors: blog.NewPostgresAuthorRepository(db),
 })
 http.ListenAndServe(":8080", router)
 ```
 
-## Design principles
+Developer tasks: `make help`.
 
-- **Idiomatic, readable Go** — output looks hand-written, not magic.
-- **You own the code** — generate once into your repo; edit freely. No runtime
-  framework lock-in.
-- **Standard library first** — `net/http` routing, minimal dependencies.
-- **Spec is the source of truth** — re-running the generator is safe and
-  predictable.
-- **Pluggable storage** — repository interfaces keep the DB swappable, and the
-  generated Postgres repository targets `database/sql`, so any driver works.
+## Output
+
+- `<entity>.gen.go` - model and `Create`/`Update` request DTOs.
+- `<entity>_handler.gen.go` - repository interface and CRUD handlers.
+- `<entity>_repo.gen.go` - `sqlx` PostgreSQL repository.
+- `http.gen.go` - `NewRouter`, `Deps`, JSON and pagination helpers.
+- `db.gen.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
+- `nulls.gen.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
+- `migrations/NNNNN_create_<table>.sql` - goose migrations, numbered in foreign-key order.
+
+| Method   | Path             | Action                           |
+| -------- | ---------------- | -------------------------------- |
+| `POST`   | `/{plural}`      | Create                           |
+| `GET`    | `/{plural}`      | List (`?limit`, `?offset`)       |
+| `GET`    | `/{plural}/{id}` | Read                             |
+| `PUT`    | `/{plural}/{id}` | Update                           |
+| `DELETE` | `/{plural}/{id}` | Delete                           |
+
+## Spec
+
+Full example: [examples/blog.yaml](examples/blog.yaml), generated output: [examples/blog](examples/blog).
+
+```yaml
+package: blog
+module: example.com/blog
+entities:
+  - name: Post
+    plural: posts
+    fields:
+      - { name: id, type: uuid, primary: true }
+      - { name: title, type: string, required: true, validate: "min=1,max=200" }
+      - { name: author, type: references, target: Author }
+    options:
+      timestamps: true
+      soft_delete: false
+```
+
+- Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
+- Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules).
+- Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
+- Fields that are neither `primary` nor `required` are nullable: `*T` in the model, `sql.Null[T]` in the repository.
+- `references` becomes a column typed from the target's key with a `REFERENCES` constraint.
 
 ## Roadmap
 
@@ -215,21 +80,23 @@ http.ListenAndServe(":8080", router)
 - [ ] List endpoint: filtering
 - [ ] List endpoint: sorting
 - [~] Relations (`belongs_to` / `has_many`)
-  - [x] `belongs_to`: `references` fields generate a foreign-key column typed
-    from the target's primary key, with a SQL `REFERENCES` constraint;
-    migrations are ordered so the referenced table is created first
+  - [x] `belongs_to` via `references` fields
   - [ ] `has_many`, nested/relation routes, and JOIN-based loading
 - [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)
 - [ ] Auth/middleware hooks
 
-## References
+## Known issues
 
-- [Rails Scaffold Generator Guide](https://rails.devcamp.com/trails/learn-ruby-on-rails-from-scratch/campsites/building-your-first-rails-application/guides/rails-scaffold-generator-guide)
-- [NestJS CRUD generator](https://docs.nestjs.com/recipes/crud-generator)
-- [Prisma schema documentation](https://www.prisma.io/docs/orm/prisma-schema/overview)
-- [OpenAPI code generation in Go with oapi-codegen](https://dev.to/nikita_rykhlov/go-tools-code-generation-from-openapi-specs-in-go-with-oapi-codegen-3jc1)
-- [Generate a Go CRUD HTTP API with Ent + elk](https://entgo.io/blog/2021/07/29/generate-a-fully-working-go-crudgen-http-api-with-ent/)
+Each line is removed when its fix lands.
+
+- [ ] **[remove when fixed]** `PUT` returns zero `created_at`: Update SQL returns only `updated_at`; fix by `RETURNING created_at, updated_at`.
+- [ ] **[remove when fixed]** `default` never applies to nullable fields: the repository inserts an explicit `NULL`; fix by making a field with `default` `NOT NULL` and filling the default in the DTO (alternatives: skip nil columns in `INSERT`, or `COALESCE`).
+- [ ] **[remove when fixed]** Primary key is optional in Create: an omitted `id` is stored as the zero value and the next one fails with 500; fix by `required` on the key in the Create DTO, or DB-generated keys (`gen_random_uuid()` / `IDENTITY`) with `id` dropped from the DTO.
+- [ ] **[remove when fixed]** Constraint violations return 500 with raw Postgres text: map `23505` (unique) and `23503` (foreign key) to dedicated sentinels with their own status (409 / 422), and stop exposing internal error text in 500 responses.
+- [ ] **[remove when fixed]** `decodeJSON` accepts trailing data after the JSON body: fix by rejecting when `dec.More()` or a second `Decode` does not return `io.EOF`.
+- [ ] **[remove when fixed]** Unknown spec keys are ignored silently (`requried`, `softdelete`): fix by decoding with `yaml.Decoder.KnownFields(true)`.
+- [ ] **[remove when fixed]** Duplicate field names and fields colliding with option columns (`created_at`, `updated_at`, `deleted_at`) pass validation and produce uncompilable code: fix by rejecting duplicate snake_case column names in `Validate`.
 
 ## License
 

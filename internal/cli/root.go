@@ -9,7 +9,7 @@ import (
 // version is overridable at build time via -ldflags "-X go-crudgen/internal/cli.version=...".
 var version = "0.0.0-dev"
 
-const usage = `go-crudgen — generate RESTful Go services from an entity spec
+const usage = `go-crudgen - generate RESTful Go services from an entity spec
 
 Usage:
   go-crudgen <command> [flags]

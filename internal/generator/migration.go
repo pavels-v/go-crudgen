@@ -10,7 +10,7 @@ import (
 
 // migrationData is the template input for one entity's goose migration file. The
 // DDL is built here rather than in the template (mirroring repo.go) so the column
-// math — types, constraints, primary-key placement — stays testable. Each
+// math (types, constraints, primary-key placement) stays testable. Each
 // statement is rendered as its own goose StatementBegin/StatementEnd block.
 type migrationData struct {
 	Up   []string // CREATE TABLE, then any CREATE INDEX statements
@@ -104,7 +104,7 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 }
 
 // migrationInfo builds the goose migration for an entity. Unlike handlers and
-// repositories, a migration is generated for every entity — even one whose
+// repositories, a migration is generated for every entity, even one whose
 // primary-key type is not HTTP-serveable still needs its table.
 func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationData, error) {
 	table := plural(e.Name, e.Plural)
