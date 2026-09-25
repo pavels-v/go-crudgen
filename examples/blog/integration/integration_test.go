@@ -3,7 +3,8 @@ package integration
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -153,7 +154,7 @@ func TestIntegration(t *testing.T) {
 		do(t, srv, http.MethodGet, "/authors/"+author.ID.String(), nil, &gotAuthor, http.StatusOK)
 		require.True(t, bornOn.Equal(*gotAuthor.BornOn))
 
-		metadata := json.RawMessage(`{"tags":["go"]}`)
+		metadata := jsontext.Value(`{"tags":["go"]}`)
 		var post blog.Post
 		do(t, srv, http.MethodPost, "/posts",
 			blog.CreatePostRequest{Title: "Typed", Views: new(int64(7)), Metadata: &metadata},
@@ -259,6 +260,6 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 			"%s %s: status = %d, want %d (body: %s)", method, path, resp.StatusCode, wantStatus, b)
 	}
 	if out != nil {
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(out), "decode response")
+		require.NoError(t, json.UnmarshalRead(resp.Body, out), "decode response")
 	}
 }

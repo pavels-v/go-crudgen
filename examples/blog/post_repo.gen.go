@@ -3,7 +3,7 @@ package blog
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"time"
@@ -16,15 +16,15 @@ import (
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // newPostRow and toModel convert to and from the pointer fields on Post.
 type postRow struct {
-	ID        uuid.UUID                 `db:"id"`
-	Title     string                    `db:"title"`
-	Body      sql.Null[string]          `db:"body"`
-	Published bool                      `db:"published"`
-	Views     int64                     `db:"views"`
-	Metadata  sql.Null[json.RawMessage] `db:"metadata"`
-	Author    sql.Null[uuid.UUID]       `db:"author"`
-	CreatedAt time.Time                 `db:"created_at"`
-	UpdatedAt time.Time                 `db:"updated_at"`
+	ID        uuid.UUID                `db:"id"`
+	Title     string                   `db:"title"`
+	Body      sql.Null[string]         `db:"body"`
+	Published bool                     `db:"published"`
+	Views     int64                    `db:"views"`
+	Metadata  sql.Null[jsontext.Value] `db:"metadata"`
+	Author    sql.Null[uuid.UUID]      `db:"author"`
+	CreatedAt time.Time                `db:"created_at"`
+	UpdatedAt time.Time                `db:"updated_at"`
 }
 
 // newPostRow builds the row written by Create and Update. Option-managed

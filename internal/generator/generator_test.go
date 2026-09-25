@@ -73,7 +73,7 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		"package shop",
 		`"github.com/google/uuid"`,
 		`"github.com/shopspring/decimal"`,
-		`"encoding/json"`,
+		`"encoding/json/jsontext"`,
 		`"time"`,
 		"// Product represents a product.",
 		"ID uuid.UUID", // primary key -> non-null value type
@@ -82,9 +82,9 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		`json:"name" validate:"required,min=1"`, // required merged ahead of validate; no db tag on the API model
 		"Price *decimal.Decimal",                // nullable -> pointer
 		"InStock *bool",                         // snake_case -> PascalCase, nullable -> pointer
-		`json:"in_stock,omitempty"`,
+		`json:"in_stock,omitzero"`,
 		"ReleasedAt *time.Time",
-		"Metadata *json.RawMessage",
+		"Metadata *jsontext.Value",
 	} {
 		wantContains(t, got, want)
 	}
@@ -112,7 +112,7 @@ func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
 	// The foreign key takes the Go type of Author's primary key (int64), not uuid;
 	// it is not required, so it is nullable and rendered as a pointer.
 	wantContains(t, got, "Author *int64")
-	wantContains(t, got, `json:"author,omitempty"`)
+	wantContains(t, got, `json:"author,omitzero"`)
 }
 
 func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
@@ -132,7 +132,7 @@ func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
 	wantContains(t, got, `json:"created_at"`)
 	wantContains(t, got, "UpdatedAt time.Time")
 	wantContains(t, got, "DeletedAt *time.Time")
-	wantContains(t, got, `json:"deleted_at,omitempty"`)
+	wantContains(t, got, `json:"deleted_at,omitzero"`)
 }
 
 // renderHandlerSrc runs handlerInfo + renderHandler for the named entity and
@@ -800,7 +800,7 @@ func TestRenderShared_WiresEntities(t *testing.T) {
 		"ErrStillReferenced: http.StatusConflict,",
 		"writeError(w, http.StatusInternalServerError, errInternal)",
 		"func valueOr[T any](p *T, def T) T",
-		"return errTrailingJSON",
+		"json.UnmarshalRead(r.Body, v, json.RejectUnknownMembers(true))",
 		"Posts PostRepository",
 		"RegisterPostRoutes(mux, NewPostHandler(deps.Posts))",
 	} {

@@ -25,7 +25,7 @@ const (
 	goDecimal = "decimal.Decimal"
 	goTime    = "time.Time"
 	goUUID    = "uuid.UUID"
-	goJSON    = "json.RawMessage"
+	goJSON    = "jsontext.Value"
 )
 
 // Import paths the generated code needs for particular field types.
@@ -34,7 +34,7 @@ const (
 	importTime    = "time"
 	importUUID    = "github.com/google/uuid"
 	importDecimal = "github.com/shopspring/decimal"
-	importJSON    = "encoding/json"
+	importJSON    = "encoding/json/jsontext"
 )
 
 // PostgreSQL column types emitted for spec field types.

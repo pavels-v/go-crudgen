@@ -503,13 +503,13 @@ func modelType(f spec.Field, base string) string {
 	return base
 }
 
-// fieldTag builds the struct tag for a field: a json name (with omitempty for
+// fieldTag builds the struct tag for a field: a json name (with omitzero for
 // nullable fields, whose pointer is nil when absent) plus a validate rule that
 // merges the `required` modifier with any explicit `validate` string.
 func fieldTag(f spec.Field) string {
 	jsonName := f.Name
 	if isNullable(f) {
-		jsonName += ",omitempty"
+		jsonName += jsonOmit
 	}
 	tag := fmt.Sprintf(tagJSON, jsonName)
 
