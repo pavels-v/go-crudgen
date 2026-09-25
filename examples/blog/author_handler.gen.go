@@ -2,8 +2,9 @@ package blog
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 // AuthorRepository is the storage interface the Author handlers depend on.
@@ -58,7 +59,7 @@ func (h *AuthorHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -82,7 +83,7 @@ func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -109,7 +110,7 @@ func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthorHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

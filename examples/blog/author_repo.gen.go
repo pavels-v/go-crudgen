@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
@@ -69,11 +70,10 @@ func (r *PostgresAuthorRepository) Create(ctx context.Context, m *Author) error 
 
 func (r *PostgresAuthorRepository) Get(ctx context.Context, id uuid.UUID) (*Author, error) {
 	var row authorRow
-	err := r.db.GetContext(ctx, &row, getAuthorSQL, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
+	if err := r.db.GetContext(ctx, &row, getAuthorSQL, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get author: %w", err)
 	}
 	m := row.toModel()

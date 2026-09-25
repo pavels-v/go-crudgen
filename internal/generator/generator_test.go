@@ -218,7 +218,7 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		`mux.HandleFunc("PUT /posts/{id}", h.Update)`,
 		`mux.HandleFunc("DELETE /posts/{id}", h.Delete)`,
 		"Get(ctx context.Context, id uuid.UUID) (*Post, error)",
-		"id, err := uuid.Parse(r.PathValue(\"id\"))",
+		"id, err := uuid.Parse(r.PathValue(pathParamID))",
 		"writeJSON(w, http.StatusCreated, m)",
 		"w.WriteHeader(http.StatusNoContent)",
 	} {
@@ -238,7 +238,7 @@ func TestRenderHandler_StringPKNeedsNoParse(t *testing.T) {
 	}
 
 	got := renderHandlerSrc(t, s, "Tag")
-	wantContains(t, got, `id := r.PathValue("id")`)
+	wantContains(t, got, `id := r.PathValue(pathParamID)`)
 }
 
 func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
@@ -256,7 +256,7 @@ func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
 
 	got := renderHandlerSrc(t, s, "Widget")
 	for _, want := range []string{
-		`idRaw, err := strconv.ParseInt(r.PathValue("id"), 10, 32)`,
+		`idRaw, err := strconv.ParseInt(r.PathValue(pathParamID), 10, 32)`,
 		"id := int32(idRaw)",
 		"Get(ctx context.Context, id int32) (*Widget, error)",
 	} {
@@ -810,6 +810,37 @@ func TestSnakeCase(t *testing.T) {
 			t.Parallel()
 
 			require.Equal(t, tc.want, snakeCase(tc.in))
+		})
+	}
+}
+
+func TestGroupImports(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "empty", in: nil, want: nil},
+		{name: "stdlib only", in: []string{importTime, importContext}, want: []string{importContext, importTime}},
+		{name: "third-party only", in: []string{importUUID, importDecimal}, want: []string{importUUID, importDecimal}},
+		{
+			name: "mixed split by blank entry",
+			in:   []string{importSQLx, importTime, importUUID, importContext},
+			want: []string{importContext, importTime, "", importUUID, importSQLx},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			set := make(map[string]struct{}, len(tc.in))
+			for _, imp := range tc.in {
+				set[imp] = struct{}{}
+			}
+			require.Equal(t, tc.want, groupImports(set))
 		})
 	}
 }

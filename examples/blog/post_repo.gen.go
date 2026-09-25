@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"time"
 )
 
 const (
@@ -80,11 +81,10 @@ func (r *PostgresPostRepository) Create(ctx context.Context, m *Post) error {
 
 func (r *PostgresPostRepository) Get(ctx context.Context, id uuid.UUID) (*Post, error) {
 	var row postRow
-	err := r.db.GetContext(ctx, &row, getPostSQL, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
+	if err := r.db.GetContext(ctx, &row, getPostSQL, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get post: %w", err)
 	}
 	m := row.toModel()
@@ -105,11 +105,10 @@ func (r *PostgresPostRepository) List(ctx context.Context, limit, offset int) ([
 
 func (r *PostgresPostRepository) Update(ctx context.Context, m *Post) error {
 	row := newPostRow(m)
-	err := r.db.QueryRowContext(ctx, updatePostSQL, row.Title, row.Body, row.Published, row.Author, row.ID).Scan(&m.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
+	if err := r.db.QueryRowContext(ctx, updatePostSQL, row.Title, row.Body, row.Published, row.Author, row.ID).Scan(&m.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("update post: %w", err)
 	}
 	return nil

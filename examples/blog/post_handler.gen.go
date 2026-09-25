@@ -2,8 +2,9 @@ package blog
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 // PostRepository is the storage interface the Post handlers depend on.
@@ -60,7 +61,7 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -84,7 +85,7 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -113,7 +114,7 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PostHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	id, err := uuid.Parse(r.PathValue(pathParamID))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

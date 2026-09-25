@@ -94,8 +94,7 @@ func scalarType(t string) (goType, bool) {
 }
 
 const (
-	pathParamID   = "id"
-	exprPathValue = "r.PathValue(%q)"
+	exprPathValue = "r.PathValue(pathParamID)"
 	exprParseInt  = "strconv.ParseInt(%s, 10, %d)"
 	exprParseUUID = "uuid.Parse(%s)"
 )
@@ -112,7 +111,7 @@ type pkParse struct {
 // pkParser returns how to parse a path id into the given Go primary-key type.
 // ok is false for types we do not generate handlers for (decimal, time, json).
 func pkParser(goExpr string) (pkParse, bool) {
-	id := fmt.Sprintf(exprPathValue, pathParamID)
+	id := exprPathValue
 	switch goExpr {
 	case goString:
 		return pkParse{expr: id}, true

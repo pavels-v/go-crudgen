@@ -30,6 +30,13 @@ func NewRouter(deps Deps) *http.ServeMux {
 	return mux
 }
 
+const (
+	pathParamID     = "id"
+	queryLimit      = "limit"
+	queryOffset     = "offset"
+	contentTypeJSON = "application/json"
+)
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -41,7 +48,7 @@ func decodeJSON(r *http.Request, v any) error {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
@@ -67,7 +74,7 @@ const (
 // to sane defaults. Filtering and sorting are a later milestone.
 func parsePage(r *http.Request) (limit, offset int) {
 	limit, offset = defaultLimit, 0
-	if v := r.URL.Query().Get("limit"); v != "" {
+	if v := r.URL.Query().Get(queryLimit); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			limit = n
 		}
@@ -75,7 +82,7 @@ func parsePage(r *http.Request) (limit, offset int) {
 	if limit > maxLimit {
 		limit = maxLimit
 	}
-	if v := r.URL.Query().Get("offset"); v != "" {
+	if v := r.URL.Query().Get(queryOffset); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			offset = n
 		}

@@ -2,7 +2,6 @@ package generator
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"go-crudgen/internal/spec"
@@ -332,11 +331,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed
 	// context/database/sql/errors/fmt/sqlx packages.
-	imports := make([]string, 0, len(impSet))
-	for imp := range impSet {
-		imports = append(imports, imp)
-	}
-	sort.Strings(imports)
+	imports := groupImports(impSet)
 
 	return repoData{
 		Package:         s.Package,

@@ -46,6 +46,11 @@ const (
 )
 
 const (
+	importPathSep = "/"
+	importHostDot = "."
+)
+
+const (
 	ruleRequired = "required"
 	ruleSep      = ","
 )
@@ -337,10 +342,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	if pp.imp != "" {
 		imports[pp.imp] = struct{}{}
 	}
-	for imp := range imports {
-		data.Imports = append(data.Imports, imp)
-	}
-	sort.Strings(data.Imports)
+	data.Imports = groupImports(imports)
 	return data, nil
 }
 
@@ -418,10 +420,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		add(oc.Column, oc.GoType, importTime, oc.JSONTag)
 	}
 
-	for imp := range imports {
-		data.Imports = append(data.Imports, imp)
-	}
-	sort.Strings(data.Imports)
+	data.Imports = groupImports(imports)
 
 	return renderTemplate(tmplModel, data)
 }
@@ -457,6 +456,24 @@ func fieldTag(f spec.Field) string {
 		tag += fmt.Sprintf(tagValidate, strings.Join(rules, ruleSep))
 	}
 	return tag
+}
+
+func groupImports(set map[string]struct{}) []string {
+	var std, ext []string
+	for imp := range set {
+		host, _, _ := strings.Cut(imp, importPathSep)
+		if strings.Contains(host, importHostDot) {
+			ext = append(ext, imp)
+			continue
+		}
+		std = append(std, imp)
+	}
+	sort.Strings(std)
+	sort.Strings(ext)
+	if len(std) == 0 || len(ext) == 0 {
+		return append(std, ext...)
+	}
+	return append(append(std, ""), ext...)
 }
 
 func entityWord(n int) string {

@@ -1,8 +1,9 @@
 package blog
 
 import (
-	"github.com/google/uuid"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Post represents a post.

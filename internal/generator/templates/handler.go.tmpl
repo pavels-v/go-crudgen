@@ -2,7 +2,7 @@ package {{ .Package }}
 
 import (
 {{- range .Imports }}
-	{{ printf "%q" . }}
+	{{ if . }}{{ printf "%q" . }}{{ end }}
 {{- end }}
 )
 
