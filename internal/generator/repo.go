@@ -23,8 +23,8 @@ type nullsData struct {
 
 // Supported --driver choices.
 const (
-	driverPgx = "pgx"
-	driverPq  = "pq"
+	DriverPgx = "pgx"
+	DriverPq  = "pq"
 )
 
 // database/sql driver names registered by each choice's blank import.
@@ -54,9 +54,9 @@ const (
 // to pgx. ok is false for unsupported drivers.
 func driverInfo(driver string) (name, imp string, ok bool) {
 	switch driver {
-	case "", driverPgx:
+	case "", DriverPgx:
 		return sqlDriverPgx, importDriverPgx, true
-	case driverPq:
+	case DriverPq:
 		return sqlDriverPq, importDriverPq, true
 	}
 	return "", "", false
@@ -71,8 +71,9 @@ const (
 
 // fmt.Sprintf templates for the struct tags emitted on row/model fields.
 const (
-	tagDB   = "db:%q"
-	tagJSON = "json:%q"
+	tagDB       = "db:%q"
+	tagJSON     = "json:%q"
+	tagValidate = " validate:%q"
 )
 
 // clauseReturning is appended to an INSERT/UPDATE to scan DB-populated columns back.
@@ -83,6 +84,21 @@ const (
 	exprNull     = "sql.Null[%s]" // nullable row-field type wrapping a base type
 	exprToNull   = "toNull(%s)"   // model field -> sql.Null (write path)
 	exprFromNull = "fromNull(%s)" // sql.Null -> model field (scan path)
+)
+
+const (
+	exprPointer    = "*%s"
+	exprModelField = "m.%s"
+	exprRowField   = "row.%s"
+	exprScanTarget = "&m.%s"
+	argSep         = ", "
+)
+
+const (
+	namePostgresRepo     = "Postgres%sRepository"
+	namePostgresRepoCtor = "NewPostgres%sRepository"
+	nameRow              = "%sRow"
+	nameNewRow           = "new%sRow"
 )
 
 // optionColumn describes a column injected by an EntityOptions toggle.
@@ -101,12 +117,12 @@ func optionColumns(o spec.EntityOptions) []optionColumn {
 	var cols []optionColumn
 	if o.Timestamps {
 		cols = append(cols,
-			optionColumn{colCreatedAt, "CreatedAt", goTime, fmt.Sprintf(tagJSON, colCreatedAt)},
-			optionColumn{colUpdatedAt, "UpdatedAt", goTime, fmt.Sprintf(tagJSON, colUpdatedAt)},
+			optionColumn{colCreatedAt, pascalCase(colCreatedAt), goTime, fmt.Sprintf(tagJSON, colCreatedAt)},
+			optionColumn{colUpdatedAt, pascalCase(colUpdatedAt), goTime, fmt.Sprintf(tagJSON, colUpdatedAt)},
 		)
 	}
 	if o.SoftDelete {
-		cols = append(cols, optionColumn{colDeletedAt, "DeletedAt", "*" + goTime, fmt.Sprintf(tagJSON, colDeletedAt+",omitempty")})
+		cols = append(cols, optionColumn{colDeletedAt, pascalCase(colDeletedAt), fmt.Sprintf(exprPointer, goTime), fmt.Sprintf(tagJSON, colDeletedAt+",omitempty")})
 	}
 	return cols
 }
@@ -117,9 +133,9 @@ func optionColumns(o spec.EntityOptions) []optionColumn {
 func scanList(cols []string) string {
 	out := make([]string, len(cols))
 	for i, c := range cols {
-		out[i] = "&m." + pascalCase(c)
+		out[i] = fmt.Sprintf(exprScanTarget, pascalCase(c))
 	}
-	return strings.Join(out, ", ")
+	return strings.Join(out, argSep)
 }
 
 // repoData is the template input for one entity's PostgreSQL repository file.
@@ -212,12 +228,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 			impSet[ft.imp] = struct{}{}
 		}
 		rowType := ft.expr
-		toRowExpr := "m." + c.GoName
-		toModelExpr := "row." + c.GoName
+		toRowExpr := fmt.Sprintf(exprModelField, c.GoName)
+		toModelExpr := fmt.Sprintf(exprRowField, c.GoName)
 		if isNullable(f) {
 			rowType = fmt.Sprintf(exprNull, ft.expr)
-			toRowExpr = fmt.Sprintf(exprToNull, "m."+c.GoName)
-			toModelExpr = fmt.Sprintf(exprFromNull, "row."+c.GoName)
+			toRowExpr = fmt.Sprintf(exprToNull, toRowExpr)
+			toModelExpr = fmt.Sprintf(exprFromNull, toModelExpr)
 			hasNullable = true
 		}
 		rowFields = append(rowFields, rowField{GoName: c.GoName, GoType: rowType, Tag: fmt.Sprintf(tagDB, c.Column)})
@@ -232,12 +248,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		impSet[importTime] = struct{}{}
 		if oc.Column == colDeletedAt {
 			rowFields = append(rowFields, rowField{GoName: gn, GoType: fmt.Sprintf(exprNull, goTime), Tag: fmt.Sprintf(tagDB, oc.Column)})
-			toModel = append(toModel, assign{Field: gn, Expr: fmt.Sprintf(exprFromNull, "row."+gn)})
+			toModel = append(toModel, assign{Field: gn, Expr: fmt.Sprintf(exprFromNull, fmt.Sprintf(exprRowField, gn))})
 			hasNullable = true
 			continue
 		}
 		rowFields = append(rowFields, rowField{GoName: gn, GoType: goTime, Tag: fmt.Sprintf(tagDB, oc.Column)})
-		toModel = append(toModel, assign{Field: gn, Expr: "row." + gn})
+		toModel = append(toModel, assign{Field: gn, Expr: fmt.Sprintf(exprRowField, gn)})
 	}
 
 	selectCols := make([]string, 0, len(specCols)+2)
@@ -255,7 +271,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	for i, c := range specCols {
 		insCols[i] = c.Column
 		insPh[i] = fmt.Sprintf("$%d", i+1)
-		insArgs[i] = "row." + c.GoName
+		insArgs[i] = fmt.Sprintf(exprRowField, c.GoName)
 	}
 	var createScan string
 	if ts {
@@ -289,12 +305,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	updArgs := make([]string, 0, len(update)+1)
 	for i, c := range update {
 		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.Column, i+1))
-		updArgs = append(updArgs, "row."+c.GoName)
+		updArgs = append(updArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
 	if ts {
 		setClauses = append(setClauses, fmt.Sprintf("%s = now()", colUpdatedAt))
 	}
-	updArgs = append(updArgs, "row."+pkGoName)
+	updArgs = append(updArgs, fmt.Sprintf(exprRowField, pkGoName))
 
 	var updateSQL, updateScan string
 	noUpdateColumns := len(setClauses) == 0
@@ -331,15 +347,15 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		Package:         s.Package,
 		Struct:          name,
 		LowerStruct:     strings.ToLower(name),
-		Repo:            name + "Repository",
-		Receiver:        "Postgres" + name + "Repository",
-		Constructor:     "NewPostgres" + name + "Repository",
+		Repo:            fmt.Sprintf(nameRepo, name),
+		Receiver:        fmt.Sprintf(namePostgresRepo, name),
+		Constructor:     fmt.Sprintf(namePostgresRepoCtor, name),
 		PKGoType:        gt.expr,
 		HasTimestamps:   ts,
 		NoUpdateColumns: noUpdateColumns,
 		HasNullable:     hasNullable,
-		RowStruct:       unexport(name) + "Row",
-		NewRowFunc:      "new" + name + "Row",
+		RowStruct:       fmt.Sprintf(nameRow, unexport(name)),
+		NewRowFunc:      fmt.Sprintf(nameNewRow, name),
 		RowFields:       rowFields,
 		ToRow:           toRow,
 		ToModel:         toModel,
@@ -348,8 +364,8 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		ListSQL:         listSQL,
 		UpdateSQL:       updateSQL,
 		DeleteSQL:       deleteSQL,
-		InsertArgs:      strings.Join(insArgs, ", "),
-		UpdateArgs:      strings.Join(updArgs, ", "),
+		InsertArgs:      strings.Join(insArgs, argSep),
+		UpdateArgs:      strings.Join(updArgs, argSep),
 		CreateScan:      createScan,
 		UpdateScan:      updateScan,
 		Imports:         imports,

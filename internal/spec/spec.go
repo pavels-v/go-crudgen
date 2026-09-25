@@ -22,6 +22,20 @@ type EntityOptions struct {
 	SoftDelete bool `yaml:"soft_delete"`
 }
 
+const (
+	TypeString   = "string"
+	TypeText     = "text"
+	TypeInt32    = "int32"
+	TypeInt64    = "int64"
+	TypeFloat    = "float"
+	TypeDecimal  = "decimal"
+	TypeBool     = "bool"
+	TypeDate     = "date"
+	TypeDatetime = "datetime"
+	TypeUUID     = "uuid"
+	TypeJSON     = "json"
+)
+
 // TypeReferences is the field Type value marking a belongs-to relation; the
 // field's Target names the referenced entity.
 const TypeReferences = "references"

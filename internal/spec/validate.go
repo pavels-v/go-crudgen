@@ -7,17 +7,17 @@ import (
 
 // KnownTypes is the set of field types the generator understands.
 var KnownTypes = map[string]struct{}{
-	"string":       {},
-	"text":         {},
-	"int32":        {},
-	"int64":        {},
-	"float":        {},
-	"decimal":      {},
-	"bool":         {},
-	"date":         {},
-	"datetime":     {},
-	"uuid":         {},
-	"json":         {},
+	TypeString:     {},
+	TypeText:       {},
+	TypeInt32:      {},
+	TypeInt64:      {},
+	TypeFloat:      {},
+	TypeDecimal:    {},
+	TypeBool:       {},
+	TypeDate:       {},
+	TypeDatetime:   {},
+	TypeUUID:       {},
+	TypeJSON:       {},
 	TypeReferences: {},
 }
 
@@ -28,11 +28,11 @@ var KnownTypes = map[string]struct{}{
 // it resolves to the target's primary key, which this same rule guarantees is
 // path-addressable.)
 var PrimaryKeyTypes = map[string]struct{}{
-	"string":       {},
-	"text":         {},
-	"int32":        {},
-	"int64":        {},
-	"uuid":         {},
+	TypeString:     {},
+	TypeText:       {},
+	TypeInt32:      {},
+	TypeInt64:      {},
+	TypeUUID:       {},
 	TypeReferences: {},
 }
 

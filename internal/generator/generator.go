@@ -18,7 +18,39 @@ import (
 //go:embed templates/*.tmpl
 var templates embed.FS
 
-var tmpl = template.Must(template.ParseFS(templates, "templates/*.tmpl"))
+const (
+	templatesGlob = "templates/*.tmpl"
+	tmplModel     = "model.go.tmpl"
+	tmplHandler   = "handler.go.tmpl"
+	tmplRepo      = "repo.go.tmpl"
+	tmplNulls     = "nulls.go.tmpl"
+	tmplDB        = "db.go.tmpl"
+	tmplHTTP      = "http.go.tmpl"
+	tmplMigration = "migration.sql.tmpl"
+)
+
+const (
+	fileModel     = "%s.gen.go"
+	fileHandler   = "%s_handler.gen.go"
+	fileRepo      = "%s_repo.gen.go"
+	fileHTTP      = "http.gen.go"
+	fileDB        = "db.gen.go"
+	fileNulls     = "nulls.gen.go"
+	fileMigration = "migrations/%05d_create_%s.sql"
+)
+
+const (
+	nameRepo          = "%sRepository"
+	nameCreateRequest = "Create%sRequest"
+	nameUpdateRequest = "Update%sRequest"
+)
+
+const (
+	ruleRequired = "required"
+	ruleSep      = ","
+)
+
+var tmpl = template.Must(template.ParseFS(templates, templatesGlob))
 
 // Options controls generation output.
 type Options struct {
@@ -108,7 +140,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generating model for %q: %w", e.Name, err)
 		}
-		if err := emit(base+".gen.go", src); err != nil {
+		if err := emit(fmt.Sprintf(fileModel, base), src); err != nil {
 			return err
 		}
 
@@ -123,7 +155,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generating migration for %q: %w", e.Name, err)
 		}
-		migFile := fmt.Sprintf("migrations/%05d_create_%s.sql", migNum[e.Name], plural(e.Name, e.Plural))
+		migFile := fmt.Sprintf(fileMigration, migNum[e.Name], plural(e.Name, e.Plural))
 		if err := emit(migFile, msrc); err != nil {
 			return err
 		}
@@ -136,7 +168,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
 		}
-		if err := emit(base+"_handler.gen.go", hsrc); err != nil {
+		if err := emit(fmt.Sprintf(fileHandler, base), hsrc); err != nil {
 			return err
 		}
 
@@ -148,7 +180,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
 		}
-		if err := emit(base+"_repo.gen.go", rsrc); err != nil {
+		if err := emit(fmt.Sprintf(fileRepo, base), rsrc); err != nil {
 			return err
 		}
 		anyNullable = anyNullable || rd.HasNullable
@@ -165,7 +197,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generating router: %w", err)
 		}
-		if err := emit("http.gen.go", ssrc); err != nil {
+		if err := emit(fileHTTP, ssrc); err != nil {
 			return err
 		}
 
@@ -173,7 +205,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generating db connection: %w", err)
 		}
-		if err := emit("db.gen.go", dbsrc); err != nil {
+		if err := emit(fileDB, dbsrc); err != nil {
 			return err
 		}
 
@@ -184,7 +216,7 @@ func Generate(s *spec.Spec, opts Options) error {
 			if err != nil {
 				return fmt.Errorf("generating null helpers: %w", err)
 			}
-			if err := emit("nulls.gen.go", nsrc); err != nil {
+			if err := emit(fileNulls, nsrc); err != nil {
 				return err
 			}
 		}
@@ -281,10 +313,10 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	data := handlerData{
 		Package:    s.Package,
 		Struct:     name,
-		Repo:       name + "Repository",
+		Repo:       fmt.Sprintf(nameRepo, name),
 		Plural:     plural(e.Name, e.Plural),
-		CreateName: "Create" + name + "Request",
-		UpdateName: "Update" + name + "Request",
+		CreateName: fmt.Sprintf(nameCreateRequest, name),
+		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 		PK: pkData{
 			GoName:   pascalCase(pk.Name),
 			GoType:   gt.expr,
@@ -329,17 +361,17 @@ func renderTemplate(name string, data any) ([]byte, error) {
 // templates it skips gofmt: the output is SQL, not Go source.
 func renderMigration(data migrationData) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "migration.sql.tmpl", data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, tmplMigration, data); err != nil {
 		return nil, fmt.Errorf("rendering migration: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-func renderHandler(data handlerData) ([]byte, error) { return renderTemplate("handler.go.tmpl", data) }
-func renderRepo(data repoData) ([]byte, error)       { return renderTemplate("repo.go.tmpl", data) }
-func renderNulls(data nullsData) ([]byte, error)     { return renderTemplate("nulls.go.tmpl", data) }
-func renderDB(data dbData) ([]byte, error)           { return renderTemplate("db.go.tmpl", data) }
-func renderShared(data sharedData) ([]byte, error)   { return renderTemplate("http.go.tmpl", data) }
+func renderHandler(data handlerData) ([]byte, error) { return renderTemplate(tmplHandler, data) }
+func renderRepo(data repoData) ([]byte, error)       { return renderTemplate(tmplRepo, data) }
+func renderNulls(data nullsData) ([]byte, error)     { return renderTemplate(tmplNulls, data) }
+func renderDB(data dbData) ([]byte, error)           { return renderTemplate(tmplDB, data) }
+func renderShared(data sharedData) ([]byte, error)   { return renderTemplate(tmplHTTP, data) }
 
 // renderModel builds, executes, and gofmt-formats the model file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
@@ -348,8 +380,8 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		Package:    s.Package,
 		Struct:     name,
 		Lower:      strings.ToLower(name),
-		CreateName: "Create" + name + "Request",
-		UpdateName: "Update" + name + "Request",
+		CreateName: fmt.Sprintf(nameCreateRequest, name),
+		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 	}
 	imports := make(map[string]struct{})
 
@@ -391,7 +423,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	}
 	sort.Strings(data.Imports)
 
-	return renderTemplate("model.go.tmpl", data)
+	return renderTemplate(tmplModel, data)
 }
 
 // modelType returns a field's Go type in the API model and DTOs: a pointer for
@@ -399,7 +431,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 // value, and the bare type otherwise.
 func modelType(f spec.Field, base string) string {
 	if isNullable(f) {
-		return "*" + base
+		return fmt.Sprintf(exprPointer, base)
 	}
 	return base
 }
@@ -415,14 +447,14 @@ func fieldTag(f spec.Field) string {
 	tag := fmt.Sprintf(tagJSON, jsonName)
 
 	var rules []string
-	if f.Required && !strings.Contains(f.Validate, "required") {
-		rules = append(rules, "required")
+	if f.Required && !strings.Contains(f.Validate, ruleRequired) {
+		rules = append(rules, ruleRequired)
 	}
 	if f.Validate != "" {
 		rules = append(rules, f.Validate)
 	}
 	if len(rules) > 0 {
-		tag += fmt.Sprintf(" validate:%q", strings.Join(rules, ","))
+		tag += fmt.Sprintf(tagValidate, strings.Join(rules, ruleSep))
 	}
 	return tag
 }
