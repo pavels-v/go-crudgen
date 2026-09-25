@@ -37,32 +37,42 @@ func run(t *testing.T, dir, name string, args ...string) {
 }
 
 // TestGenerateBlogExample drives the real CLI end to end: it regenerates the
-// blog example from examples/blog.yaml into examples/blog, then builds and tests
-// that (separate) module to prove the generated code compiles and behaves.
+// blog example from examples/blog.yaml into examples/blog/internal/blog, then
+// builds and tests that (separate) module to prove the generated code compiles
+// and behaves.
 //
 // It regenerates in place, so the committed examples stay the source of truth;
-// CI can run `git diff --exit-code examples/blog` afterwards to catch a stale
+// `make verify-examples` checks git status afterwards to catch a stale
 // commit where the generator output drifted from what's checked in.
 func TestGenerateBlogExample(t *testing.T) {
 	root := repoRoot(t)
 	blogDir := filepath.Join(root, "examples", "blog")
+	outDir := filepath.Join(blogDir, "internal", "blog")
 
 	// Regenerate the example with the default (pgx) driver.
 	run(t, root, "go", "run", "./cmd/go-crudgen", "generate",
-		"--spec", "examples/blog.yaml", "--out", "examples/blog")
+		"--spec", "examples/blog.yaml", "--out", "examples/blog/internal/blog")
 
 	for _, f := range []string{
-		"post.gen.go", "post_handler.gen.go", "post_repo.gen.go",
-		"author.gen.go", "author_handler.gen.go", "author_repo.gen.go",
-		"comment.gen.go", "comment_handler.gen.go", "comment_repo.gen.go",
-		"tag.gen.go", "tag_handler.gen.go", "tag_repo.gen.go",
-		"http.gen.go", "db.gen.go", "nulls.gen.go", "date.gen.go",
+		"post.gen.go", "author.gen.go", "comment.gen.go", "tag.gen.go",
+		"errors.gen.go", "date.gen.go",
+		filepath.Join("restapi", "post.gen.go"),
+		filepath.Join("restapi", "author.gen.go"),
+		filepath.Join("restapi", "comment.gen.go"),
+		filepath.Join("restapi", "tag.gen.go"),
+		filepath.Join("restapi", "router.gen.go"),
+		filepath.Join("postgres", "post.gen.go"),
+		filepath.Join("postgres", "author.gen.go"),
+		filepath.Join("postgres", "comment.gen.go"),
+		filepath.Join("postgres", "tag.gen.go"),
+		filepath.Join("postgres", "db.gen.go"),
+		filepath.Join("postgres", "nulls.gen.go"),
 		filepath.Join("migrations", "00001_create_authors.sql"),
 		filepath.Join("migrations", "00002_create_posts.sql"),
 		filepath.Join("migrations", "00003_create_comments.sql"),
 		filepath.Join("migrations", "00004_create_tags.sql"),
 	} {
-		require.FileExists(t, filepath.Join(blogDir, f), "expected generated file")
+		require.FileExists(t, filepath.Join(outDir, f), "expected generated file")
 	}
 
 	// Prove the freshly generated module compiles and its handler tests pass.

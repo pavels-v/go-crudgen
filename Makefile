@@ -28,7 +28,8 @@ integration: ## Run examples/blog integration tests against real Postgres via te
 	cd examples/blog/integration && go test -count=1 -v ./...
 
 verify-examples: e2e ## Regenerate examples via e2e and fail if the committed output is stale (CI gate)
-	git diff --exit-code examples/blog
+	@git status --short examples/blog
+	@test -z "$$(git status --porcelain examples/blog)"
 
 lint: ## Run golangci-lint (pinned in tools/go.mod) on every module
 	@for m in $(MODS); do (cd $$m && $(LINT) run $(LINTC) ./...) || exit 1; done

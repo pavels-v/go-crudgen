@@ -1,29 +1,40 @@
-package blog
+package restapi
 
 import (
-	"context"
+	"encoding/json/jsontext"
 	"net/http"
 
+	"example.com/blog/internal/blog"
 	"github.com/google/uuid"
 )
 
-// PostRepository is the storage interface the Post handlers depend on.
-// The concrete implementation is provided by the caller.
-type PostRepository interface {
-	Create(ctx context.Context, m *Post) error
-	Get(ctx context.Context, id uuid.UUID) (*Post, error)
-	List(ctx context.Context, limit, offset int) ([]Post, error)
-	Update(ctx context.Context, m *Post) error
-	Delete(ctx context.Context, id uuid.UUID) error
+// CreatePostRequest is the request body for creating the post entity.
+type CreatePostRequest struct {
+	Title     string          `json:"title" validate:"required,min=1,max=200"`
+	Body      *string         `json:"body,omitzero"`
+	Published *bool           `json:"published"`
+	Views     *int64          `json:"views"`
+	Metadata  *jsontext.Value `json:"metadata,omitzero"`
+	Author    *uuid.UUID      `json:"author,omitzero"`
+}
+
+// UpdatePostRequest is the request body for replacing the post entity.
+type UpdatePostRequest struct {
+	Title     string          `json:"title" validate:"required,min=1,max=200"`
+	Body      *string         `json:"body,omitzero"`
+	Published *bool           `json:"published"`
+	Views     *int64          `json:"views"`
+	Metadata  *jsontext.Value `json:"metadata,omitzero"`
+	Author    *uuid.UUID      `json:"author,omitzero"`
 }
 
 // PostHandler serves the CRUD endpoints for Post.
 type PostHandler struct {
-	repo PostRepository
+	repo blog.PostRepository
 }
 
 // NewPostHandler returns a handler backed by repo.
-func NewPostHandler(repo PostRepository) *PostHandler {
+func NewPostHandler(repo blog.PostRepository) *PostHandler {
 	return &PostHandler{repo: repo}
 }
 
@@ -46,7 +57,7 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Post{
+	m := blog.Post{
 		Title:     req.Title,
 		Body:      req.Body,
 		Published: valueOr(req.Published, false),
@@ -100,7 +111,7 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Post{
+	m := blog.Post{
 		ID:        id,
 		Title:     req.Title,
 		Body:      req.Body,

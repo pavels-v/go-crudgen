@@ -1,5 +1,5 @@
-package: blog            # Go package name for generated code
-module: example.com/blog # import path
+package: blog                          # root package name of the generated code
+module: example.com/blog/internal/blog # import path of the --out directory
 
 entities:
   - name: Post

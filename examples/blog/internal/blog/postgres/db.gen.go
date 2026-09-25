@@ -1,10 +1,11 @@
-package blog
+package postgres
 
 import (
 	"errors"
 	"fmt"
 	"time"
 
+	"example.com/blog/internal/blog"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 )
@@ -55,16 +56,16 @@ func sqlState(err error) string {
 func mapWriteError(err error) error {
 	switch sqlState(err) {
 	case sqlStateUniqueViolation:
-		return fmt.Errorf("%w: %v", ErrAlreadyExists, err)
+		return fmt.Errorf("%w: %v", blog.ErrAlreadyExists, err)
 	case sqlStateForeignKeyViolation:
-		return fmt.Errorf("%w: %v", ErrReferenceNotFound, err)
+		return fmt.Errorf("%w: %v", blog.ErrReferenceNotFound, err)
 	}
 	return err
 }
 
 func mapDeleteError(err error) error {
 	if sqlState(err) == sqlStateForeignKeyViolation {
-		return fmt.Errorf("%w: %v", ErrStillReferenced, err)
+		return fmt.Errorf("%w: %v", blog.ErrStillReferenced, err)
 	}
 	return err
 }

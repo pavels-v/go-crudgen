@@ -21,28 +21,36 @@ var templates embed.FS
 const (
 	templatesGlob = "templates/*.tmpl"
 	tmplModel     = "model.go.tmpl"
+	tmplErrors    = "errors.go.tmpl"
 	tmplHandler   = "handler.go.tmpl"
+	tmplRouter    = "router.go.tmpl"
 	tmplRepo      = "repo.go.tmpl"
 	tmplNulls     = "nulls.go.tmpl"
 	tmplDate      = "date.go.tmpl"
 	tmplDB        = "db.go.tmpl"
-	tmplHTTP      = "http.go.tmpl"
 	tmplMigration = "migration.sql.tmpl"
 )
 
 const (
+	pkgREST     = "restapi"
+	pkgPostgres = "postgres"
+)
+
+const (
 	fileModel     = "%s.gen.go"
-	fileHandler   = "%s_handler.gen.go"
-	fileRepo      = "%s_repo.gen.go"
-	fileHTTP      = "http.gen.go"
-	fileDB        = "db.gen.go"
-	fileNulls     = "nulls.gen.go"
+	fileErrors    = "errors.gen.go"
 	fileDate      = "date.gen.go"
+	fileHandler   = pkgREST + "/%s.gen.go"
+	fileRouter    = pkgREST + "/router.gen.go"
+	fileRepo      = pkgPostgres + "/%s.gen.go"
+	fileDB        = pkgPostgres + "/db.gen.go"
+	fileNulls     = pkgPostgres + "/nulls.gen.go"
 	fileMigration = "migrations/%05d_create_%s.sql"
 )
 
 const (
 	nameRepo          = "%sRepository"
+	nameRepoCtor      = "New%sRepository"
 	nameCreateRequest = "Create%sRequest"
 	nameUpdateRequest = "Update%sRequest"
 )
@@ -71,14 +79,18 @@ type Options struct {
 	Driver string // database driver for the connection constructor: "pgx" (default) or "pq"
 }
 
-// Generate produces a Go service from the spec. It emits a model file per
-// entity, a CRUD handler file for each serveable entity, and a package-wide
-// http.gen.go with the router and shared helpers (see the roadmap in README.md
-// for what's next).
+type genFile struct {
+	Path string
+	Src  []byte
+}
+
+// Generate produces a Go service from the spec: the domain package (models,
+// repository interfaces, errors) in the output root, the HTTP layer in restapi/,
+// the PostgreSQL repositories in postgres/ and goose migrations in migrations/.
 //
 // When opts.OutDir is empty the generated code is written to stdout; otherwise
-// one file per entity is written into that directory. Progress and diagnostics
-// always go to stderr so stdout carries only generated code.
+// the files are written under that directory. Progress and diagnostics always go
+// to stderr so stdout carries only generated code.
 func Generate(s *spec.Spec, opts Options) error {
 	driverName, driverImp, ok := driverInfo(opts.Driver)
 	if !ok {
@@ -108,156 +120,17 @@ func Generate(s *spec.Spec, opts Options) error {
 		return nil
 	}
 
-	if !toStdout {
-		if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
-			return fmt.Errorf("create output dir: %w", err)
-		}
-	}
-
-	byName := make(map[string]*spec.Entity, len(s.Entities))
-	for i := range s.Entities {
-		byName[s.Entities[i].Name] = &s.Entities[i]
-	}
-
-	// Migrations are numbered so that a referenced table is created before the
-	// table whose foreign key points at it, regardless of declaration order.
-	order, err := migrationOrder(s.Entities, byName)
+	files, err := renderFiles(s, driverName, driverImp)
 	if err != nil {
 		return err
 	}
-	migNum := make(map[string]int, len(order))
-	for i, e := range order {
-		migNum[e.Name] = i + 1
+	if err := checkCollisions(files); err != nil {
+		return err
 	}
 
-	emit := func(file string, src []byte) error {
-		if toStdout {
-			if _, err := fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", file, src); err != nil {
-				return fmt.Errorf("write %s: %w", file, err)
-			}
-			return nil
-		}
-		path := filepath.Join(opts.OutDir, file)
-		if dir := filepath.Dir(path); dir != opts.OutDir {
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return fmt.Errorf("create %s: %w", dir, err)
-			}
-		}
-		if err := os.WriteFile(path, src, 0o644); err != nil { //nolint:gosec // generated source is world-readable
-			return fmt.Errorf("write %s: %w", path, err)
-		}
-		fmt.Fprintf(os.Stderr, "  wrote %s\n", path)
-		return nil
-	}
-
-	var serveable []sharedEntity
-	var anyNullable, anyDate bool
-	for i := range s.Entities {
-		e := &s.Entities[i]
-		base := snakeCase(e.Name)
-
-		src, err := renderModel(s, e, byName)
-		if err != nil {
-			return fmt.Errorf("generate model for %q: %w", e.Name, err)
-		}
-		err = emit(fmt.Sprintf(fileModel, base), src)
-		if err != nil {
+	for _, f := range files {
+		if err := emit(opts.OutDir, f); err != nil {
 			return err
-		}
-
-		// Every entity needs a table, including ones whose primary-key type gets no
-		// handler or repository. Migrations are numbered in dependency order (see
-		// migrationOrder) so foreign keys resolve when goose applies them.
-		md, err := migrationInfo(e, byName)
-		if err != nil {
-			return fmt.Errorf("generate migration for %q: %w", e.Name, err)
-		}
-		msrc, err := renderMigration(md)
-		if err != nil {
-			return fmt.Errorf("generate migration for %q: %w", e.Name, err)
-		}
-		migFile := fmt.Sprintf(fileMigration, migNum[e.Name], plural(e.Name, e.Plural))
-		err = emit(migFile, msrc)
-		if err != nil {
-			return err
-		}
-
-		hd, err := handlerInfo(s, e, byName)
-		if err != nil {
-			return fmt.Errorf("generate handlers for %q: %w", e.Name, err)
-		}
-		hsrc, err := renderHandler(hd)
-		if err != nil {
-			return fmt.Errorf("generate handlers for %q: %w", e.Name, err)
-		}
-		err = emit(fmt.Sprintf(fileHandler, base), hsrc)
-		if err != nil {
-			return err
-		}
-
-		rd, err := repoInfo(s, e, byName)
-		if err != nil {
-			return fmt.Errorf("generate repository for %q: %w", e.Name, err)
-		}
-		rsrc, err := renderRepo(rd)
-		if err != nil {
-			return fmt.Errorf("generate repository for %q: %w", e.Name, err)
-		}
-		err = emit(fmt.Sprintf(fileRepo, base), rsrc)
-		if err != nil {
-			return err
-		}
-		anyNullable = anyNullable || rd.HasNullable
-		anyDate = anyDate || hasFieldType(e, spec.TypeDate)
-
-		serveable = append(serveable, sharedEntity{
-			Struct:    hd.Struct,
-			Repo:      hd.Repo,
-			DepsField: pascalCase(hd.Plural),
-		})
-	}
-
-	if len(serveable) > 0 {
-		ssrc, err := renderShared(sharedData{Package: s.Package, Entities: serveable})
-		if err != nil {
-			return fmt.Errorf("generate router: %w", err)
-		}
-		err = emit(fileHTTP, ssrc)
-		if err != nil {
-			return err
-		}
-
-		dbsrc, err := renderDB(dbData{Package: s.Package, DriverName: driverName, DriverImport: driverImp})
-		if err != nil {
-			return fmt.Errorf("generate db connection: %w", err)
-		}
-		err = emit(fileDB, dbsrc)
-		if err != nil {
-			return err
-		}
-
-		// The sql.Null[T] conversion helpers are only needed when at least one
-		// repository has a nullable column to round-trip.
-		if anyNullable {
-			nsrc, err := renderNulls(nullsData{Package: s.Package})
-			if err != nil {
-				return fmt.Errorf("generate null helpers: %w", err)
-			}
-			err = emit(fileNulls, nsrc)
-			if err != nil {
-				return err
-			}
-		}
-
-		if anyDate {
-			dsrc, err := renderDate(dateData{Package: s.Package})
-			if err != nil {
-				return fmt.Errorf("generate date type: %w", err)
-			}
-			err = emit(fileDate, dsrc)
-			if err != nil {
-				return err
-			}
 		}
 	}
 
@@ -269,18 +142,168 @@ func Generate(s *spec.Spec, opts Options) error {
 	return nil
 }
 
-// modelData is the template input for a single entity's model file: the model
-// struct plus the create/update request DTOs derived from the spec fields.
+func emit(outDir string, f genFile) error {
+	if outDir == "" {
+		if _, err := fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", f.Path, f.Src); err != nil {
+			return fmt.Errorf("write %s: %w", f.Path, err)
+		}
+		return nil
+	}
+	path := filepath.Join(outDir, filepath.FromSlash(f.Path))
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := os.WriteFile(path, f.Src, 0o644); err != nil { //nolint:gosec // generated source is world-readable
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	fmt.Fprintf(os.Stderr, "  wrote %s\n", path)
+	return nil
+}
+
+func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) {
+	byName := make(map[string]*spec.Entity, len(s.Entities))
+	for i := range s.Entities {
+		byName[s.Entities[i].Name] = &s.Entities[i]
+	}
+
+	// Migrations are numbered so that a referenced table is created before the
+	// table whose foreign key points at it, regardless of declaration order.
+	order, err := migrationOrder(s.Entities, byName)
+	if err != nil {
+		return nil, err
+	}
+	migNum := make(map[string]int, len(order))
+	for i, e := range order {
+		migNum[e.Name] = i + 1
+	}
+
+	var files []genFile
+	var shared sharedFiles
+	for i := range s.Entities {
+		e := &s.Entities[i]
+		ef, hd, rd, err := renderEntity(s, e, byName, migNum[e.Name])
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, ef...)
+
+		shared.Nullable = shared.Nullable || rd.HasNullable
+		shared.Date = shared.Date || hasFieldType(e, spec.TypeDate)
+		shared.Routes = append(shared.Routes, routerEntity{
+			Struct:    hd.Struct,
+			Repo:      hd.Repo,
+			DepsField: pascalCase(hd.Plural),
+		})
+	}
+
+	return appendShared(files, s, driverName, driverImp, shared)
+}
+
+type sharedFiles struct {
+	Routes   []routerEntity
+	Nullable bool
+	Date     bool
+}
+
+func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, shared sharedFiles) ([]genFile, error) {
+	add := func(path string, src []byte) {
+		files = append(files, genFile{Path: path, Src: src})
+	}
+
+	esrc, err := renderErrors(packageData{Package: s.Package})
+	if err != nil {
+		return nil, fmt.Errorf("generate errors: %w", err)
+	}
+	add(fileErrors, esrc)
+
+	ssrc, err := renderRouter(routerInfo(s, shared.Routes))
+	if err != nil {
+		return nil, fmt.Errorf("generate router: %w", err)
+	}
+	add(fileRouter, ssrc)
+
+	dbsrc, err := renderDB(dbInfo(s, driverName, driverImp))
+	if err != nil {
+		return nil, fmt.Errorf("generate db connection: %w", err)
+	}
+	add(fileDB, dbsrc)
+
+	// The sql.Null[T] conversion helpers are only needed when at least one
+	// repository has a nullable column to round-trip.
+	if shared.Nullable {
+		nsrc, err := renderNulls(packageData{Package: pkgPostgres})
+		if err != nil {
+			return nil, fmt.Errorf("generate null helpers: %w", err)
+		}
+		add(fileNulls, nsrc)
+	}
+
+	if shared.Date {
+		dsrc, err := renderDate(packageData{Package: s.Package})
+		if err != nil {
+			return nil, fmt.Errorf("generate date type: %w", err)
+		}
+		add(fileDate, dsrc)
+	}
+
+	return files, nil
+}
+
+func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, migNum int) ([]genFile, handlerData, repoData, error) {
+	base := snakeCase(e.Name)
+
+	src, err := renderModel(s, e, byName)
+	if err != nil {
+		return nil, handlerData{}, repoData{}, fmt.Errorf("generate model for %q: %w", e.Name, err)
+	}
+
+	md, err := migrationInfo(e, byName)
+	if err != nil {
+		return nil, handlerData{}, repoData{}, fmt.Errorf("generate migration for %q: %w", e.Name, err)
+	}
+	msrc, err := renderMigration(md)
+	if err != nil {
+		return nil, handlerData{}, repoData{}, fmt.Errorf("generate migration for %q: %w", e.Name, err)
+	}
+
+	hd, err := handlerInfo(s, e, byName)
+	if err != nil {
+		return nil, handlerData{}, repoData{}, fmt.Errorf("generate handlers for %q: %w", e.Name, err)
+	}
+	hsrc, err := renderHandler(hd)
+	if err != nil {
+		return nil, handlerData{}, repoData{}, fmt.Errorf("generate handlers for %q: %w", e.Name, err)
+	}
+
+	rd, err := repoInfo(s, e, byName)
+	if err != nil {
+		return nil, handlerData{}, repoData{}, fmt.Errorf("generate repository for %q: %w", e.Name, err)
+	}
+	rsrc, err := renderRepo(rd)
+	if err != nil {
+		return nil, handlerData{}, repoData{}, fmt.Errorf("generate repository for %q: %w", e.Name, err)
+	}
+
+	files := []genFile{
+		{Path: fmt.Sprintf(fileModel, base), Src: src},
+		{Path: fmt.Sprintf(fileMigration, migNum, plural(e.Name, e.Plural)), Src: msrc},
+		{Path: fmt.Sprintf(fileHandler, base), Src: hsrc},
+		{Path: fmt.Sprintf(fileRepo, base), Src: rsrc},
+	}
+	return files, hd, rd, nil
+}
+
+// modelData is the template input for a single entity's domain file: the model
+// struct and its repository interface.
 type modelData struct {
-	Package    string
-	Imports    []string
-	Struct     string
-	Lower      string // struct name lower-cased, for the doc comment
-	Fields     []modelField
-	CreateName string       // e.g. "CreatePostRequest"
-	UpdateName string       // e.g. "UpdatePostRequest"
-	CreateBody []modelField // all writable fields (includes a client-supplied primary key)
-	UpdateBody []modelField // writable fields minus the primary key (it comes from the path)
+	Package  string
+	Imports  []string
+	Struct   string
+	Lower    string // struct name lower-cased, for the doc comment
+	Repo     string // e.g. "PostRepository"
+	PKGoType string
+	Fields   []modelField
 }
 
 type modelField struct {
@@ -289,15 +312,20 @@ type modelField struct {
 	Tag    string
 }
 
-// handlerData is the template input for one entity's handler file.
+// handlerData is the template input for one entity's restapi file: the request
+// DTOs and the CRUD handlers.
 type handlerData struct {
 	Package      string
 	Imports      []string
 	Struct       string
-	Repo         string // e.g. "PostRepository"
+	Lower        string
+	Model        string // qualified domain model, e.g. "blog.Post"
+	Repo         string // qualified repository interface, e.g. "blog.PostRepository"
 	Plural       string // route segment, e.g. "posts"
 	CreateName   string
 	UpdateName   string
+	CreateBody   []modelField // all writable fields (includes a client-supplied primary key)
+	UpdateBody   []modelField // writable fields minus the primary key (it comes from the path)
 	PK           pkData
 	CreateAssign []assign // fields assigned from the create request
 	UpdateAssign []assign // fields assigned from the update request (PK excluded)
@@ -305,26 +333,47 @@ type handlerData struct {
 
 type pkData struct {
 	GoName   string
-	GoType   string
 	Expr     string // parse expression for the {id} path value
 	NeedsErr bool
 	Cast     string // Go type to convert the parsed value to ("" when none needed)
 }
 
-// sharedData is the template input for the package-wide http.gen.go file.
-type sharedData struct {
-	Package  string
-	Entities []sharedEntity
+type packageData struct {
+	Package string
 }
 
-type sharedEntity struct {
+type routerData struct {
+	Package  string
+	Imports  []string
+	Domain   string
+	Entities []routerEntity
+}
+
+type routerEntity struct {
 	Struct    string
-	Repo      string
+	Repo      string // qualified repository interface
 	DepsField string // field name in Deps, e.g. "Posts"
 }
 
-type dateData struct {
-	Package string
+func routerInfo(s *spec.Spec, entities []routerEntity) routerData {
+	return routerData{
+		Package: pkgREST,
+		Imports: groupImports(map[string]struct{}{
+			importJSONv2:    {},
+			importErrors:    {},
+			importSlog:      {},
+			importNetHTTP:   {},
+			importStrconv:   {},
+			importValidator: {},
+			s.Module:        {},
+		}),
+		Domain:   s.Package,
+		Entities: entities,
+	}
+}
+
+func qualified(s *spec.Spec, name string) string {
+	return fmt.Sprintf(exprQualified, s.Package, name)
 }
 
 func checkColumns(e *spec.Entity) error {
@@ -369,34 +418,45 @@ func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt
 	return pk, gt, pp, nil
 }
 
-// handlerInfo builds the handler template data for an entity.
+// handlerInfo builds the restapi template data for an entity.
 func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, error) {
-	pk, gt, pp, err := serveKey(e, byName)
+	pk, _, pp, err := serveKey(e, byName)
 	if err != nil {
 		return handlerData{}, err
 	}
 
 	name := pascalCase(e.Name)
 	data := handlerData{
-		Package:    s.Package,
+		Package:    pkgREST,
 		Struct:     name,
-		Repo:       fmt.Sprintf(nameRepo, name),
+		Lower:      strings.ToLower(name),
+		Model:      qualified(s, name),
+		Repo:       qualified(s, fmt.Sprintf(nameRepo, name)),
 		Plural:     plural(e.Name, e.Plural),
 		CreateName: fmt.Sprintf(nameCreateRequest, name),
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 		PK: pkData{
 			GoName:   pascalCase(pk.Name),
-			GoType:   gt.expr,
 			Expr:     pp.expr,
 			NeedsErr: pp.needsErr,
 			Cast:     pp.cast,
 		},
 	}
-	imports := map[string]struct{}{importContext: {}, importNetHTTP: {}}
+	imports := map[string]struct{}{importNetHTTP: {}, s.Module: {}}
 	for _, f := range e.Fields {
 		gn := pascalCase(f.Name)
+		gt, err := fieldType(f, byName)
+		if err != nil {
+			return handlerData{}, err
+		}
+		gt = gt.outside(s)
+
+		// The create body accepts every writable field; the update body omits the
+		// primary key because it is addressed by the request path.
+		mf := modelField{GoName: gn, GoType: modelType(f, gt.expr), Tag: fieldTag(f)}
 		expr := fmt.Sprintf(exprReqField, gn)
 		if hasRequestDefault(f) {
+			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
 			lit, err := goDefault(f)
 			if err != nil {
 				return handlerData{}, fmt.Errorf("field %q: %w", f.Name, err)
@@ -407,11 +467,26 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			}
 		}
 		a := assign{Field: gn, Expr: expr}
-		if _, generated := keyGenerator(f); !generated {
-			data.CreateAssign = append(data.CreateAssign, a)
-		}
+
 		if !f.Primary {
+			if gt.imp != "" {
+				imports[gt.imp] = struct{}{}
+			}
+			data.CreateBody = append(data.CreateBody, mf)
+			data.UpdateBody = append(data.UpdateBody, mf)
+			data.CreateAssign = append(data.CreateAssign, a)
 			data.UpdateAssign = append(data.UpdateAssign, a)
+			continue
+		}
+		if _, generated := keyGenerator(f); !generated {
+			if gt.imp != "" {
+				imports[gt.imp] = struct{}{}
+			}
+			key := f
+			key.Required = true
+			mf.Tag = fieldTag(key)
+			data.CreateBody = append(data.CreateBody, mf)
+			data.CreateAssign = append(data.CreateAssign, a)
 		}
 	}
 
@@ -447,25 +522,31 @@ func renderMigration(data migrationData) ([]byte, error) {
 
 func renderHandler(data handlerData) ([]byte, error) { return renderTemplate(tmplHandler, data) }
 func renderRepo(data repoData) ([]byte, error)       { return renderTemplate(tmplRepo, data) }
-func renderNulls(data nullsData) ([]byte, error)     { return renderTemplate(tmplNulls, data) }
+func renderNulls(data packageData) ([]byte, error)   { return renderTemplate(tmplNulls, data) }
 func renderDB(data dbData) ([]byte, error)           { return renderTemplate(tmplDB, data) }
-func renderShared(data sharedData) ([]byte, error)   { return renderTemplate(tmplHTTP, data) }
-func renderDate(data dateData) ([]byte, error)       { return renderTemplate(tmplDate, data) }
+func renderRouter(data routerData) ([]byte, error)   { return renderTemplate(tmplRouter, data) }
+func renderDate(data packageData) ([]byte, error)    { return renderTemplate(tmplDate, data) }
+func renderErrors(data packageData) ([]byte, error)  { return renderTemplate(tmplErrors, data) }
 
-// renderModel builds, executes, and gofmt-formats the model file for one entity.
+// renderModel builds, executes, and gofmt-formats the domain file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
+	_, pkType, _, err := serveKey(e, byName)
+	if err != nil {
+		return nil, err
+	}
+
 	name := pascalCase(e.Name)
 	data := modelData{
-		Package:    s.Package,
-		Struct:     name,
-		Lower:      strings.ToLower(name),
-		CreateName: fmt.Sprintf(nameCreateRequest, name),
-		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
+		Package:  s.Package,
+		Struct:   name,
+		Lower:    strings.ToLower(name),
+		Repo:     fmt.Sprintf(nameRepo, name),
+		PKGoType: pkType.expr,
 	}
-	imports := make(map[string]struct{})
+	imports := map[string]struct{}{importContext: {}}
 
-	// The API model carries only json/validate tags; sqlx column mapping lives on
-	// the repository's row struct, so the model stays a pure transport type.
+	// The model carries only json tags: request validation lives on the restapi
+	// DTOs and sqlx column mapping on the postgres row struct.
 	add := func(name, goExpr, imp string, tag string) {
 		if imp != "" {
 			imports[imp] = struct{}{}
@@ -478,27 +559,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		if err != nil {
 			return nil, err
 		}
-		mt := modelType(f, gt.expr)
-		add(f.Name, mt, gt.imp, fieldTag(f))
-
-		// DTOs carry only spec fields (not the option-injected timestamp fields).
-		// The create body accepts every field; the update body omits primary-key
-		// fields because they are addressed by the request path.
-		mf := modelField{GoName: pascalCase(f.Name), GoType: mt, Tag: fieldTag(f)}
-		if hasRequestDefault(f) {
-			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
-		}
-		if !f.Primary {
-			data.CreateBody = append(data.CreateBody, mf)
-			data.UpdateBody = append(data.UpdateBody, mf)
-			continue
-		}
-		if _, generated := keyGenerator(f); !generated {
-			key := f
-			key.Required = true
-			mf.Tag = fieldTag(key)
-			data.CreateBody = append(data.CreateBody, mf)
-		}
+		add(f.Name, modelType(f, gt.expr), gt.imp, jsonTag(f))
 	}
 
 	// Option-injected columns (timestamps, soft-delete) share one definition
@@ -522,15 +583,20 @@ func modelType(f spec.Field, base string) string {
 	return base
 }
 
-// fieldTag builds the struct tag for a field: a json name (with omitzero for
-// nullable fields, whose pointer is nil when absent) plus a validate rule that
-// merges the `required` modifier with any explicit `validate` string.
-func fieldTag(f spec.Field) string {
+// jsonTag builds a field's json struct tag, with omitzero for nullable fields,
+// whose pointer is nil when absent.
+func jsonTag(f spec.Field) string {
 	jsonName := f.Name
 	if isNullable(f) {
 		jsonName += jsonOmit
 	}
-	tag := fmt.Sprintf(tagJSON, jsonName)
+	return fmt.Sprintf(tagJSON, jsonName)
+}
+
+// fieldTag builds a DTO field's struct tag: the json tag plus a validate rule
+// that merges the `required` modifier with any explicit `validate` string.
+func fieldTag(f spec.Field) string {
+	tag := jsonTag(f)
 
 	var rules []string
 	if f.Required && !strings.Contains(f.Validate, ruleRequired) {

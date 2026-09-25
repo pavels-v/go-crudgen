@@ -55,6 +55,7 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "shop",
+		Module:  "example.com/shop",
 		Entities: []spec.Entity{{
 			Name: "Product",
 			Fields: []spec.Field{
@@ -79,19 +80,21 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		"// Product is the API model of the product entity.",
 		"ID uuid.UUID", // primary key -> non-null value type
 		`json:"id"`,
-		"Name string",                           // required -> non-null value type
-		`json:"name" validate:"required,min=1"`, // required merged ahead of validate; no db tag on the API model
-		"Price *decimal.Decimal",                // nullable -> pointer
-		"InStock *bool",                         // snake_case -> PascalCase, nullable -> pointer
+		"Name string",            // required -> non-null value type
+		`json:"name"`,            // the model carries no validate tag
+		"Price *decimal.Decimal", // nullable -> pointer
+		"InStock *bool",          // snake_case -> PascalCase, nullable -> pointer
 		`json:"in_stock,omitzero"`,
 		"ReleasedAt *time.Time",
 		"LaunchedOn *Date",
 		"Metadata *jsontext.Value",
+		"type ProductRepository interface {",
+		"Get(ctx context.Context, id uuid.UUID) (*Product, error)",
 	} {
 		wantContains(t, got, want)
 	}
-	// The API model carries no db tags; column mapping lives on the repository row.
 	require.NotContains(t, got, `db:"`, "API model should not carry db struct tags")
+	require.NotContains(t, got, `validate:"`, "API model should not carry validate tags")
 }
 
 func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
@@ -99,6 +102,7 @@ func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "blog",
+		Module:  "example.com/blog",
 		Entities: []spec.Entity{
 			{Name: "Author", Fields: []spec.Field{
 				{Name: "id", Type: spec.TypeInt64, Primary: true},
@@ -122,6 +126,7 @@ func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "app",
+		Module:  "example.com/app",
 		Entities: []spec.Entity{{
 			Name:    "Session",
 			Fields:  []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}},
@@ -164,11 +169,12 @@ func renderHandlerSrc(t *testing.T, s *spec.Spec, entity string) string {
 	return string(src)
 }
 
-func TestRenderModel_DTOs(t *testing.T) {
+func TestRenderHandler_DTOs(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{
 		Package: "blog",
+		Module:  "example.com/blog",
 		Entities: []spec.Entity{{
 			Name: "Post",
 			Fields: []spec.Field{
@@ -179,7 +185,7 @@ func TestRenderModel_DTOs(t *testing.T) {
 		}},
 	}
 
-	got := render(t, s, "Post")
+	got := renderHandlerSrc(t, s, "Post")
 	for _, want := range []string{
 		"type CreatePostRequest struct {",
 		"type UpdatePostRequest struct {",
@@ -204,6 +210,7 @@ func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "cat",
+		Module:  "example.com/cat",
 		Entities: []spec.Entity{{
 			Name: "Tag",
 			Fields: []spec.Field{
@@ -213,17 +220,12 @@ func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
 		}},
 	}
 
-	got := render(t, s, "Tag")
-	for _, want := range []string{
-		"type Tag struct { Slug string `json:\"slug\"` Published bool `json:\"published\"` }",
-		"type CreateTagRequest struct { Slug string `json:\"slug\" validate:\"required\"` Published *bool `json:\"published\"` }",
-		"type UpdateTagRequest struct { Published *bool `json:\"published\"` }",
-	} {
-		wantContains(t, got, want)
-	}
+	wantContains(t, render(t, s, "Tag"), "type Tag struct { Slug string `json:\"slug\"` Published bool `json:\"published\"` }")
 
 	handler := renderHandlerSrc(t, s, "Tag")
 	for _, want := range []string{
+		"type CreateTagRequest struct { Slug string `json:\"slug\" validate:\"required\"` Published *bool `json:\"published\"` }",
+		"type UpdateTagRequest struct { Published *bool `json:\"published\"` }",
 		"Slug: req.Slug,",
 		"Published: valueOr(req.Published, false),",
 	} {
@@ -239,6 +241,7 @@ func TestRenderHandler_GeneratedKeyNotAssigned(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "blog",
+		Module:  "example.com/blog",
 		Entities: []spec.Entity{{
 			Name: "Post",
 			Fields: []spec.Field{
@@ -258,6 +261,7 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "blog",
+		Module:  "example.com/blog",
 		Entities: []spec.Entity{{
 			Name:   "Post",
 			Plural: "posts",
@@ -275,7 +279,9 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		`mux.HandleFunc("GET /posts/{id}", h.Get)`,
 		`mux.HandleFunc("PUT /posts/{id}", h.Update)`,
 		`mux.HandleFunc("DELETE /posts/{id}", h.Delete)`,
-		"Get(ctx context.Context, id uuid.UUID) (*Post, error)",
+		`"example.com/blog"`,
+		"repo blog.PostRepository",
+		"m := blog.Post{",
 		"id, err := uuid.Parse(r.PathValue(pathParamID))",
 		"writeJSON(w, http.StatusCreated, m)",
 		"w.WriteHeader(http.StatusNoContent)",
@@ -289,6 +295,7 @@ func TestRenderHandler_StringPKNeedsNoParse(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "cat",
+		Module:  "example.com/cat",
 		Entities: []spec.Entity{{
 			Name:   "Tag",
 			Fields: []spec.Field{{Name: "slug", Type: spec.TypeString, Primary: true}},
@@ -306,6 +313,7 @@ func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
 	// 32-bit size and casts the int64 result down to the int32 key type.
 	s := &spec.Spec{
 		Package: "shop",
+		Module:  "example.com/shop",
 		Entities: []spec.Entity{{
 			Name:   "Widget",
 			Fields: []spec.Field{{Name: "id", Type: spec.TypeInt32, Primary: true}},
@@ -316,10 +324,10 @@ func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
 	for _, want := range []string{
 		`idRaw, err := strconv.ParseInt(r.PathValue(pathParamID), 10, 32)`,
 		"id := int32(idRaw)",
-		"Get(ctx context.Context, id int32) (*Widget, error)",
 	} {
 		wantContains(t, got, want)
 	}
+	wantContains(t, render(t, s, "Widget"), "Get(ctx context.Context, id int32) (*Widget, error)")
 }
 
 // renderRepoSrc runs repoInfo + renderRepo for the named entity and returns the
@@ -353,6 +361,7 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "blog",
+		Module:  "example.com/blog",
 		Entities: []spec.Entity{{
 			Name:   "Post",
 			Plural: "posts",
@@ -368,15 +377,19 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 	got := renderRepoSrc(t, s, "Post")
 	for _, want := range []string{
 		// compile-time check that the concrete type implements the interface
-		"var _ PostRepository = (*PostgresPostRepository)(nil)",
-		"func NewPostgresPostRepository(db *sqlx.DB) *PostgresPostRepository",
+		"package postgres",
+		`"example.com/blog"`,
+		"var _ blog.PostRepository = (*PostRepository)(nil)",
+		"func NewPostRepository(db *sqlx.DB) *PostRepository",
+		"func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, error)",
+		"return nil, blog.ErrNotFound",
 		// the primary-key type's package is imported for the Get/Delete signatures
 		`"github.com/google/uuid"`,
 		`"github.com/jmoiron/sqlx"`,
 		// the row struct carries db tags; nullable body becomes sql.Null[T]
 		"type postRow struct {",
 		"Body sql.Null[string]",
-		"func newPostRow(m *Post) postRow",
+		"func newPostRow(m *blog.Post) postRow",
 		"Body: toNull(m.Body)",
 		"Body: fromNull(row.Body)",
 		// sqlx scans into the row, which is then converted to the API model
@@ -402,6 +415,7 @@ func TestRenderRepo_SoftDeleteFiltersAndUpdates(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "app",
+		Module:  "example.com/app",
 		Entities: []spec.Entity{{
 			Name: "Account",
 			Fields: []spec.Field{
@@ -435,6 +449,7 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 	// degrade to an existence check by primary key.
 	s := &spec.Spec{
 		Package: "cat",
+		Module:  "example.com/cat",
 		Entities: []spec.Entity{{
 			Name:   "Tag",
 			Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}},
@@ -444,7 +459,7 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 	got := renderRepoSrc(t, s, "Tag")
 	for _, want := range []string{
 		"r.db.GetContext(ctx, &exists, `SELECT 1 FROM tags WHERE id = $1`, row.ID)",
-		"return ErrNotFound",
+		"return cat.ErrNotFound",
 	} {
 		wantContains(t, got, want)
 	}
@@ -490,7 +505,7 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			s := &spec.Spec{Package: "app", Entities: []spec.Entity{{Name: "Thing", Fields: tc.fields}}}
+			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: []spec.Entity{{Name: "Thing", Fields: tc.fields}}}
 			rd, err := repoInfo(s, &s.Entities[0], byNameOf(s))
 			require.NoError(t, err)
 			require.Equal(t, tc.want, rd.HasNullable)
@@ -500,7 +515,7 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 	t.Run("soft delete makes deleted_at nullable", func(t *testing.T) {
 		t.Parallel()
 
-		s := &spec.Spec{Package: "app", Entities: []spec.Entity{{
+		s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: []spec.Entity{{
 			Name:    "Thing",
 			Fields:  []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "value", Type: spec.TypeString, Required: true}},
 			Options: spec.EntityOptions{SoftDelete: true},
@@ -524,13 +539,13 @@ func mustRenderRepo(t *testing.T, rd repoData) string {
 func TestRenderNulls_GenericHelpers(t *testing.T) {
 	t.Parallel()
 
-	src, err := renderNulls(nullsData{Package: "blog"})
+	src, err := renderNulls(packageData{Package: pkgPostgres})
 	require.NoError(t, err)
 	requireParses(t, src)
 
 	got := string(src)
 	for _, want := range []string{
-		"package blog",
+		"package postgres",
 		`import "database/sql"`,
 		"func toNull[T any](p *T) sql.Null[T]",
 		"func fromNull[T any](n sql.Null[T]) *T",
@@ -566,7 +581,7 @@ func renderMigrationSrc(t *testing.T, s *spec.Spec, entity string) string {
 func TestRenderDate_TextAndSQLRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	src, err := renderDate(dateData{Package: "blog"})
+	src, err := renderDate(packageData{Package: "blog"})
 	require.NoError(t, err)
 	requireParses(t, src)
 
@@ -589,6 +604,7 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "blog",
+		Module:  "example.com/blog",
 		Entities: []spec.Entity{
 			{Name: "Author", Fields: []spec.Field{
 				{Name: "id", Type: spec.TypeUUID, Primary: true},
@@ -780,7 +796,8 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			name, imp, ok := driverInfo(tc.driver)
 			require.Truef(t, ok, "driverInfo(%q) ok", tc.driver)
 
-			src, err := renderDB(dbData{Package: "blog", DriverName: name, DriverImport: imp})
+			s := &spec.Spec{Package: "blog", Module: "example.com/blog"}
+			src, err := renderDB(dbInfo(s, name, imp))
 			require.NoError(t, err)
 			requireParses(t, src)
 
@@ -791,8 +808,10 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			wantContains(t, got, "db, err := sqlx.Open(driverName, dsn)")
 			wantContains(t, got, "db.SetMaxOpenConns(maxOpenConns)")
 			wantContains(t, got, `sqlStateUniqueViolation = "23505"`)
-			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", ErrAlreadyExists, err)")
-			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", ErrStillReferenced, err)")
+			wantContains(t, got, "package postgres")
+			wantContains(t, got, `"example.com/blog"`)
+			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", blog.ErrAlreadyExists, err)")
+			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", blog.ErrStillReferenced, err)")
 		})
 	}
 }
@@ -804,28 +823,28 @@ func TestDriverInfo_RejectsUnknown(t *testing.T) {
 	require.False(t, ok, "unknown driver should be rejected")
 }
 
-func TestRenderShared_WiresEntities(t *testing.T) {
+func TestRenderRouter_WiresEntities(t *testing.T) {
 	t.Parallel()
 
-	src, err := renderShared(sharedData{
-		Package: "blog",
-		Entities: []sharedEntity{
-			{Struct: "Post", Repo: "PostRepository", DepsField: "Posts"},
-		},
-	})
+	s := &spec.Spec{Package: "blog", Module: "example.com/blog"}
+	src, err := renderRouter(routerInfo(s, []routerEntity{
+		{Struct: "Post", Repo: "blog.PostRepository", DepsField: "Posts"},
+	}))
 	require.NoError(t, err)
 	requireParses(t, src)
 
 	got := string(src)
 	for _, want := range []string{
-		"var ErrNotFound = errors.New(\"not found\")",
-		"ErrAlreadyExists: http.StatusConflict,",
-		"ErrReferenceNotFound: http.StatusUnprocessableEntity,",
-		"ErrStillReferenced: http.StatusConflict,",
+		"package restapi",
+		`"example.com/blog"`,
+		"blog.ErrNotFound: http.StatusNotFound,",
+		"blog.ErrAlreadyExists: http.StatusConflict,",
+		"blog.ErrReferenceNotFound: http.StatusUnprocessableEntity,",
+		"blog.ErrStillReferenced: http.StatusConflict,",
 		"writeError(w, http.StatusInternalServerError, errInternal)",
 		"func valueOr[T any](p *T, def T) T",
 		"json.UnmarshalRead(r.Body, v, json.RejectUnknownMembers(true))",
-		"Posts PostRepository",
+		"Posts blog.PostRepository",
 		"RegisterPostRoutes(mux, NewPostHandler(deps.Posts))",
 	} {
 		wantContains(t, got, want)
@@ -988,6 +1007,7 @@ func TestRenderMigration_KeyGeneration(t *testing.T) {
 
 			s := &spec.Spec{
 				Package: "app",
+				Module:  "example.com/app",
 				Entities: []spec.Entity{{
 					Name:   "Item",
 					Fields: []spec.Field{{Name: "id", Type: tc.keyType, Primary: true}},
@@ -1028,6 +1048,7 @@ func TestNowDefault(t *testing.T) {
 
 	s := &spec.Spec{
 		Package: "app",
+		Module:  "example.com/app",
 		Entities: []spec.Entity{{
 			Name: "Event",
 			Fields: []spec.Field{
@@ -1070,6 +1091,7 @@ func TestRenderRepo_KeyGeneration(t *testing.T) {
 
 			s := &spec.Spec{
 				Package: "app",
+				Module:  "example.com/app",
 				Entities: []spec.Entity{{
 					Name: "Item",
 					Fields: []spec.Field{
@@ -1083,6 +1105,148 @@ func TestRenderRepo_KeyGeneration(t *testing.T) {
 				wantContains(t, got, want)
 			}
 			require.NotContains(t, got, tc.notWant)
+		})
+	}
+}
+
+func TestDomainTypesQualifiedOutsideRoot(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Module:  "example.com/blog",
+		Entities: []spec.Entity{{
+			Name: "Author",
+			Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "born_on", Type: spec.TypeDate},
+			},
+		}},
+	}
+
+	wantContains(t, render(t, s, "Author"), "BornOn *Date")
+	wantContains(t, renderHandlerSrc(t, s, "Author"), "BornOn *blog.Date")
+	wantContains(t, renderRepoSrc(t, s, "Author"), "BornOn sql.Null[blog.Date]")
+}
+
+func TestRenderErrors_Sentinels(t *testing.T) {
+	t.Parallel()
+
+	src, err := renderErrors(packageData{Package: "blog"})
+	require.NoError(t, err)
+	requireParses(t, src)
+
+	got := string(src)
+	for _, want := range []string{
+		"package blog",
+		`ErrNotFound = errors.New("not found")`,
+		`ErrAlreadyExists = errors.New("already exists")`,
+		`ErrReferenceNotFound = errors.New("referenced entity not found")`,
+		`ErrStillReferenced = errors.New("entity is still referenced")`,
+	} {
+		wantContains(t, got, want)
+	}
+}
+
+func TestCheckCollisions(t *testing.T) {
+	t.Parallel()
+
+	goFile := func(path, src string) genFile {
+		return genFile{Path: path, Src: []byte(src)}
+	}
+
+	cases := []struct {
+		name    string
+		files   []genFile
+		wantErr bool
+	}{
+		{"distinct names", []genFile{
+			goFile("a.gen.go", "package blog\ntype A struct{}"),
+			goFile("b.gen.go", "package blog\ntype B struct{}"),
+		}, false},
+		{"same name in different packages", []genFile{
+			goFile("post.gen.go", "package blog\ntype PostRepository interface{}"),
+			goFile("postgres/post.gen.go", "package postgres\ntype PostRepository struct{}"),
+		}, false},
+		{"methods and blank identifiers are not declarations", []genFile{
+			goFile("a.gen.go", "package blog\ntype A struct{}\nfunc (A) M() {}\nvar _ = 1"),
+			goFile("b.gen.go", "package blog\ntype B struct{}\nfunc (B) M() {}\nvar _ = 2"),
+		}, false},
+		{"non-Go files are not parsed", []genFile{
+			goFile("migrations/00001_create_dates.sql", "CREATE TABLE dates ();"),
+		}, false},
+		{"duplicate type in one package", []genFile{
+			goFile("date.gen.go", "package blog\ntype Date struct{}"),
+			goFile("calendar_date.gen.go", "package blog\ntype Date int"),
+		}, true},
+		{"duplicate func and var in one package", []genFile{
+			goFile("postgres/a.gen.go", "package postgres\nfunc NewDB() {}"),
+			goFile("postgres/b.gen.go", "package postgres\nvar NewDB = 1"),
+		}, true},
+		{"duplicate path", []genFile{
+			goFile("date.gen.go", "package blog\ntype Date struct{}"),
+			goFile("date.gen.go", "package blog\ntype Other struct{}"),
+		}, true},
+		{"paths differing only in case", []genFile{
+			goFile("migrations/00001_create_Posts.sql", ""),
+			goFile("migrations/00001_create_posts.sql", ""),
+		}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := checkCollisions(tc.files)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
+	t.Parallel()
+
+	id := spec.Field{Name: "id", Type: spec.TypeUUID, Primary: true}
+	cases := []struct {
+		name     string
+		entities []spec.Entity
+		wantErr  bool
+	}{
+		{"entity Date without date fields", []spec.Entity{
+			{Name: "Date", Fields: []spec.Field{id}},
+		}, false},
+		{"entity Date next to a date field", []spec.Entity{
+			{Name: "Date", Fields: []spec.Field{id, {Name: "on", Type: spec.TypeDate}}},
+		}, true},
+		{"entity Errors", []spec.Entity{
+			{Name: "Errors", Fields: []spec.Field{id}},
+		}, true},
+		{"entity Router", []spec.Entity{
+			{Name: "Router", Fields: []spec.Field{id}},
+		}, true},
+		{"entity NewPost next to Post", []spec.Entity{
+			{Name: "Post", Fields: []spec.Field{id}},
+			{Name: "NewPost", Fields: []spec.Field{id}},
+		}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: tc.entities}
+			files, err := renderFiles(s, sqlDriverPgx, importDriverPgx)
+			require.NoError(t, err)
+			err = checkCollisions(files)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 		})
 	}
 }

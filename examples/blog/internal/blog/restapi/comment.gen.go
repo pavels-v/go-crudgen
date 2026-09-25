@@ -1,29 +1,37 @@
-package blog
+package restapi
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 	"time"
+
+	"example.com/blog/internal/blog"
+	"github.com/google/uuid"
 )
 
-// CommentRepository is the storage interface the Comment handlers depend on.
-// The concrete implementation is provided by the caller.
-type CommentRepository interface {
-	Create(ctx context.Context, m *Comment) error
-	Get(ctx context.Context, id int64) (*Comment, error)
-	List(ctx context.Context, limit, offset int) ([]Comment, error)
-	Update(ctx context.Context, m *Comment) error
-	Delete(ctx context.Context, id int64) error
+// CreateCommentRequest is the request body for creating the comment entity.
+type CreateCommentRequest struct {
+	Post     uuid.UUID  `json:"post" validate:"required"`
+	Body     string     `json:"body" validate:"required,max=2000"`
+	Likes    *int32     `json:"likes"`
+	PostedAt *time.Time `json:"posted_at"`
+}
+
+// UpdateCommentRequest is the request body for replacing the comment entity.
+type UpdateCommentRequest struct {
+	Post     uuid.UUID  `json:"post" validate:"required"`
+	Body     string     `json:"body" validate:"required,max=2000"`
+	Likes    *int32     `json:"likes"`
+	PostedAt *time.Time `json:"posted_at"`
 }
 
 // CommentHandler serves the CRUD endpoints for Comment.
 type CommentHandler struct {
-	repo CommentRepository
+	repo blog.CommentRepository
 }
 
 // NewCommentHandler returns a handler backed by repo.
-func NewCommentHandler(repo CommentRepository) *CommentHandler {
+func NewCommentHandler(repo blog.CommentRepository) *CommentHandler {
 	return &CommentHandler{repo: repo}
 }
 
@@ -46,7 +54,7 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Comment{
+	m := blog.Comment{
 		Post:     req.Post,
 		Body:     req.Body,
 		Likes:    valueOr(req.Likes, 0),
@@ -98,7 +106,7 @@ func (h *CommentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Comment{
+	m := blog.Comment{
 		ID:       id,
 		Post:     req.Post,
 		Body:     req.Body,

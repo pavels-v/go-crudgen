@@ -42,6 +42,9 @@ func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Package) == "" {
 		return errors.New("missing package name")
 	}
+	if strings.TrimSpace(s.Module) == "" {
+		return errors.New("missing module import path")
+	}
 	if len(s.Entities) == 0 {
 		return errors.New("no entities defined")
 	}

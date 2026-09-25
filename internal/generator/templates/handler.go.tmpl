@@ -6,14 +6,18 @@ import (
 {{- end }}
 )
 
-// {{ .Repo }} is the storage interface the {{ .Struct }} handlers depend on.
-// The concrete implementation is provided by the caller.
-type {{ .Repo }} interface {
-	Create(ctx context.Context, m *{{ .Struct }}) error
-	Get(ctx context.Context, id {{ .PK.GoType }}) (*{{ .Struct }}, error)
-	List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error)
-	Update(ctx context.Context, m *{{ .Struct }}) error
-	Delete(ctx context.Context, id {{ .PK.GoType }}) error
+// {{ .CreateName }} is the request body for creating the {{ .Lower }} entity.
+type {{ .CreateName }} struct {
+{{- range .CreateBody }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
+{{- end }}
+}
+
+// {{ .UpdateName }} is the request body for replacing the {{ .Lower }} entity.
+type {{ .UpdateName }} struct {
+{{- range .UpdateBody }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
+{{- end }}
 }
 
 // {{ .Struct }}Handler serves the CRUD endpoints for {{ .Struct }}.
@@ -45,7 +49,7 @@ func (h *{{ .Struct }}Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := {{ .Struct }}{
+	m := {{ .Model }}{
 {{- range .CreateAssign }}
 		{{ .Field }}: {{ .Expr }},
 {{- end }}
@@ -88,7 +92,7 @@ func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := {{ .Struct }}{
+	m := {{ .Model }}{
 		{{ .PK.GoName }}: id,
 {{- range .UpdateAssign }}
 		{{ .Field }}: {{ .Expr }},

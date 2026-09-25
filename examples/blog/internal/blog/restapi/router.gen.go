@@ -1,4 +1,4 @@
-package {{ .Package }}
+package restapi
 
 import (
 	"encoding/json/v2"
@@ -7,44 +7,37 @@ import (
 	"net/http"
 	"strconv"
 
+	"example.com/blog/internal/blog"
 	"github.com/go-playground/validator/v10"
 )
 
 // validate is the shared validator used to check request DTOs.
 var validate = validator.New()
 
-// ErrNotFound is returned by a repository when an entity does not exist; the
-// HTTP layer maps it to a 404 response.
-var ErrNotFound = errors.New("not found")
-
-var (
-	ErrAlreadyExists     = errors.New("already exists")
-	ErrReferenceNotFound = errors.New("referenced entity not found")
-	ErrStillReferenced   = errors.New("entity is still referenced")
-)
-
 var errInternal = errors.New(http.StatusText(http.StatusInternalServerError))
 
 var repoErrorStatus = map[error]int{
-	ErrNotFound:          http.StatusNotFound,
-	ErrAlreadyExists:     http.StatusConflict,
-	ErrReferenceNotFound: http.StatusUnprocessableEntity,
-	ErrStillReferenced:   http.StatusConflict,
+	blog.ErrNotFound:          http.StatusNotFound,
+	blog.ErrAlreadyExists:     http.StatusConflict,
+	blog.ErrReferenceNotFound: http.StatusUnprocessableEntity,
+	blog.ErrStillReferenced:   http.StatusConflict,
 }
 
 // Deps holds the repository implementation for each entity.
 type Deps struct {
-{{- range .Entities }}
-	{{ .DepsField }} {{ .Repo }}
-{{- end }}
+	Posts    blog.PostRepository
+	Authors  blog.AuthorRepository
+	Comments blog.CommentRepository
+	Tags     blog.TagRepository
 }
 
 // NewRouter wires every entity's routes onto a fresh ServeMux.
 func NewRouter(deps Deps) *http.ServeMux {
 	mux := http.NewServeMux()
-{{- range .Entities }}
-	Register{{ .Struct }}Routes(mux, New{{ .Struct }}Handler(deps.{{ .DepsField }}))
-{{- end }}
+	RegisterPostRoutes(mux, NewPostHandler(deps.Posts))
+	RegisterAuthorRoutes(mux, NewAuthorHandler(deps.Authors))
+	RegisterCommentRoutes(mux, NewCommentHandler(deps.Comments))
+	RegisterTagRoutes(mux, NewTagHandler(deps.Tags))
 	return mux
 }
 
