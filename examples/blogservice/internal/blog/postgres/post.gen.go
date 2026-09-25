@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"time"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // postRow is the database representation of blog.Post. Nullable

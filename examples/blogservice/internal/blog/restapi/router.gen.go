@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/go-playground/validator/v10"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // validate is the shared validator used to check request DTOs.

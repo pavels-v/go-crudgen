@@ -2,9 +2,8 @@ package {{ .Package }}
 
 import (
 {{- range .Imports }}
-	{{ if . }}{{ printf "%q" . }}{{ end }}
+	{{ if eq . $.DriverImport }}_ {{ end }}{{ if . }}{{ printf "%q" . }}{{ end }}
 {{- end }}
-	_ {{ printf "%q" .DriverImport }}
 )
 
 // Connection-pool defaults. Tune these for your workload, or replace NewDB with

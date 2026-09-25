@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"time"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // CreateCommentRequest is the request body for creating the comment entity.

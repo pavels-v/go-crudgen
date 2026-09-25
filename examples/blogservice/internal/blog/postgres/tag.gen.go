@@ -6,8 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/jmoiron/sqlx"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // tagRow is the database representation of blog.Tag. Nullable

@@ -809,7 +809,7 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			wantContains(t, got, "db.SetMaxOpenConns(maxOpenConns)")
 			wantContains(t, got, `sqlStateUniqueViolation = "23505"`)
 			wantContains(t, got, "package postgres")
-			wantContains(t, got, `"example.com/blog"`)
+			wantContains(t, got, `"example.com/blog" )`)
 			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", blog.ErrAlreadyExists, err)")
 			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", blog.ErrStillReferenced, err)")
 		})
@@ -926,10 +926,13 @@ func TestSnakeCase(t *testing.T) {
 func TestGroupImports(t *testing.T) {
 	t.Parallel()
 
+	const testModule = "example.com/blog"
+
 	cases := []struct {
-		name string
-		in   []string
-		want []string
+		name   string
+		module string
+		in     []string
+		want   []string
 	}{
 		{name: "empty", in: nil, want: nil},
 		{name: "stdlib only", in: []string{importTime, importContext}, want: []string{importContext, importTime}},
@@ -938,6 +941,22 @@ func TestGroupImports(t *testing.T) {
 			name: "mixed split by blank entry",
 			in:   []string{importSQLx, importTime, importUUID, importContext},
 			want: []string{importContext, importTime, "", importUUID, importSQLx},
+		},
+		{
+			name: "own module in its own group",
+			in:   []string{importNetHTTP, testModule, importUUID},
+			want: []string{importNetHTTP, "", importUUID, "", testModule},
+		},
+		{
+			name: "own subpackage in its own group",
+			in:   []string{testModule + "/restapi", importContext},
+			want: []string{importContext, "", testModule + "/restapi"},
+		},
+		{
+			name:   "dotless module is not grouped with stdlib",
+			module: "blogservice/internal/blog",
+			in:     []string{importNetHTTP, "blogservice/internal/blog", importUUID},
+			want:   []string{importNetHTTP, "", importUUID, "", "blogservice/internal/blog"},
 		},
 	}
 
@@ -949,7 +968,11 @@ func TestGroupImports(t *testing.T) {
 			for _, imp := range tc.in {
 				set[imp] = struct{}{}
 			}
-			require.Equal(t, tc.want, groupImports(set))
+			module := tc.module
+			if module == "" {
+				module = testModule
+			}
+			require.Equal(t, tc.want, groupImports(set, module))
 		})
 	}
 }

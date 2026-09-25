@@ -24,8 +24,9 @@ func dbInfo(s *spec.Spec, driverName, driverImp string) dbData {
 			importFmt:    {},
 			importTime:   {},
 			importSQLx:   {},
+			driverImp:    {},
 			s.Module:     {},
-		}),
+		}, s.Module),
 		Domain:       s.Package,
 		DriverName:   driverName,
 		DriverImport: driverImp,
@@ -358,7 +359,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed
 	// context/database/sql/errors/fmt/sqlx packages.
-	imports := groupImports(impSet)
+	imports := groupImports(impSet, s.Module)
 
 	return repoData{
 		Package:         pkgPostgres,

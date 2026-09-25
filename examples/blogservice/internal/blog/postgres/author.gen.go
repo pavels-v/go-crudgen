@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // authorRow is the database representation of blog.Author. Nullable

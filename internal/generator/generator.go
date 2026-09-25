@@ -366,7 +366,7 @@ func routerInfo(s *spec.Spec, entities []routerEntity) routerData {
 			importStrconv:   {},
 			importValidator: {},
 			s.Module:        {},
-		}),
+		}, s.Module),
 		Domain:   s.Package,
 		Entities: entities,
 	}
@@ -493,7 +493,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	if pp.imp != "" {
 		imports[pp.imp] = struct{}{}
 	}
-	data.Imports = groupImports(imports)
+	data.Imports = groupImports(imports, s.Module)
 	return data, nil
 }
 
@@ -568,7 +568,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		add(oc.Column, oc.GoType, importTime, oc.JSONTag)
 	}
 
-	data.Imports = groupImports(imports)
+	data.Imports = groupImports(imports, s.Module)
 
 	return renderTemplate(tmplModel, data)
 }
@@ -611,22 +611,32 @@ func fieldTag(f spec.Field) string {
 	return tag
 }
 
-func groupImports(set map[string]struct{}) []string {
-	var std, ext []string
+func groupImports(set map[string]struct{}, module string) []string {
+	var std, ext, local []string
 	for imp := range set {
 		host, _, _ := strings.Cut(imp, importPathSep)
-		if strings.Contains(host, importHostDot) {
+		switch {
+		case imp == module || strings.HasPrefix(imp, module+importPathSep):
+			local = append(local, imp)
+		case strings.Contains(host, importHostDot):
 			ext = append(ext, imp)
+		default:
+			std = append(std, imp)
+		}
+	}
+
+	var out []string
+	for _, group := range [][]string{std, ext, local} {
+		if len(group) == 0 {
 			continue
 		}
-		std = append(std, imp)
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		sort.Strings(group)
+		out = append(out, group...)
 	}
-	sort.Strings(std)
-	sort.Strings(ext)
-	if len(std) == 0 || len(ext) == 0 {
-		return append(std, ext...)
-	}
-	return append(append(std, ""), ext...)
+	return out
 }
 
 func hasFieldType(e *spec.Entity, typ string) bool {

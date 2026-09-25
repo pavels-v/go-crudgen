@@ -3,8 +3,9 @@ package restapi
 import (
 	"net/http"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // CreateAuthorRequest is the request body for creating the author entity.

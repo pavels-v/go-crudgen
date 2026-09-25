@@ -4,8 +4,9 @@ import (
 	"encoding/json/jsontext"
 	"net/http"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // CreatePostRequest is the request body for creating the post entity.
