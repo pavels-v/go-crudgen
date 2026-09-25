@@ -17,6 +17,11 @@ entities:
       - name: published
         type: bool
         default: false
+      - name: views
+        type: int64
+        default: 0
+      - name: metadata
+        type: json
       - name: author
         type: references   # belongs-to relation
         target: Author
@@ -36,3 +41,43 @@ entities:
         validate: "email"
       - name: name
         type: string
+      - name: born_on
+        type: date
+
+  - name: Comment
+    fields:
+      - name: id
+        type: int64
+        primary: true
+      - name: post
+        type: references
+        target: Post
+        required: true
+        index: true
+      - name: body
+        type: text
+        required: true
+        validate: "max=2000"
+      - name: likes
+        type: int32
+        default: 0
+      - name: posted_at
+        type: datetime
+        default: now
+    options:
+      soft_delete: true
+
+  - name: Tag
+    fields:
+      - name: slug
+        type: string
+        primary: true
+      - name: label
+        type: string
+        required: true
+      - name: color
+        type: string
+        default: gray
+      - name: weight
+        type: float
+        default: 1

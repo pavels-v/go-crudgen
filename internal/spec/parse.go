@@ -1,7 +1,10 @@
 package spec
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -14,8 +17,11 @@ func Load(path string) (*Spec, error) {
 		return nil, fmt.Errorf("read spec: %w", err)
 	}
 
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
 	var s Spec
-	if err := yaml.Unmarshal(data, &s); err != nil {
+	err = dec.Decode(&s)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse spec %s: %w", path, err)
 	}
 

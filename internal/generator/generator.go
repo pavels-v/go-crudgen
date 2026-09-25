@@ -55,6 +55,11 @@ const (
 	ruleSep      = ","
 )
 
+const (
+	exprReqField = "req.%s"
+	exprValueOr  = "valueOr(%s, %s)"
+)
+
 var tmpl = template.Must(template.ParseFS(templates, templatesGlob)) //nolint:gochecknoglobals // parsed once from embedded templates
 
 // Options controls generation output.
@@ -76,6 +81,12 @@ func Generate(s *spec.Spec, opts Options) error {
 	driverName, driverImp, ok := driverInfo(opts.Driver)
 	if !ok {
 		return fmt.Errorf("unknown driver %q (supported: pgx, pq)", opts.Driver)
+	}
+
+	for i := range s.Entities {
+		if err := checkColumns(&s.Entities[i]); err != nil {
+			return err
+		}
 	}
 
 	toStdout := opts.OutDir == ""
@@ -254,7 +265,7 @@ type modelData struct {
 	Fields     []modelField
 	CreateName string       // e.g. "CreatePostRequest"
 	UpdateName string       // e.g. "UpdatePostRequest"
-	CreateBody []modelField // all writable fields (includes the primary key)
+	CreateBody []modelField // all writable fields (includes a client-supplied primary key)
 	UpdateBody []modelField // writable fields minus the primary key (it comes from the path)
 }
 
@@ -274,8 +285,8 @@ type handlerData struct {
 	CreateName   string
 	UpdateName   string
 	PK           pkData
-	CreateAssign []string // field GoNames assigned from the create request
-	UpdateAssign []string // field GoNames assigned from the update request (PK excluded)
+	CreateAssign []assign // fields assigned from the create request
+	UpdateAssign []assign // fields assigned from the update request (PK excluded)
 }
 
 type pkData struct {
@@ -303,6 +314,30 @@ type sharedEntity struct {
 // path-addressable type, so the pkParser miss below is a defensive check against
 // an unvalidated spec, not a normal skip. handlerInfo and repoInfo share this so
 // their notion of the primary key can never drift apart.
+func checkColumns(e *spec.Entity) error {
+	names := make([]string, 0, len(e.Fields)+3)
+	for _, f := range e.Fields {
+		names = append(names, f.Name)
+	}
+	for _, oc := range optionColumns(e.Options) {
+		names = append(names, oc.Column)
+	}
+
+	columns := make(map[string]string, len(names))
+	goNames := make(map[string]string, len(names))
+	for _, n := range names {
+		col, goName := snakeCase(n), pascalCase(n)
+		if prev, ok := columns[col]; ok {
+			return fmt.Errorf("entity %q: %q and %q map to the same column %q", e.Name, prev, n, col)
+		}
+		if prev, ok := goNames[goName]; ok {
+			return fmt.Errorf("entity %q: %q and %q map to the same Go field %q", e.Name, prev, n, goName)
+		}
+		columns[col], goNames[goName] = n, n
+	}
+	return nil
+}
+
 func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, pp pkParse, err error) {
 	pk = e.PrimaryKey()[0]
 	gt, err = fieldType(pk, byName)
@@ -339,15 +374,29 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			Cast:     pp.cast,
 		},
 	}
+	imports := map[string]struct{}{importContext: {}, importNetHTTP: {}}
 	for _, f := range e.Fields {
 		gn := pascalCase(f.Name)
-		data.CreateAssign = append(data.CreateAssign, gn)
+		expr := fmt.Sprintf(exprReqField, gn)
+		if hasRequestDefault(f) {
+			lit, err := goDefault(f)
+			if err != nil {
+				return handlerData{}, fmt.Errorf("field %q: %w", f.Name, err)
+			}
+			expr = fmt.Sprintf(exprValueOr, expr, lit)
+			if isNowDefault(f) {
+				imports[importTime] = struct{}{}
+			}
+		}
+		a := assign{Field: gn, Expr: expr}
+		if _, generated := keyGenerator(f); !generated {
+			data.CreateAssign = append(data.CreateAssign, a)
+		}
 		if !f.Primary {
-			data.UpdateAssign = append(data.UpdateAssign, gn)
+			data.UpdateAssign = append(data.UpdateAssign, a)
 		}
 	}
 
-	imports := map[string]struct{}{importContext: {}, importNetHTTP: {}}
 	if pp.imp != "" {
 		imports[pp.imp] = struct{}{}
 	}
@@ -417,9 +466,19 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		// The create body accepts every field; the update body omits primary-key
 		// fields because they are addressed by the request path.
 		mf := modelField{GoName: pascalCase(f.Name), GoType: mt, Tag: fieldTag(f)}
-		data.CreateBody = append(data.CreateBody, mf)
+		if hasRequestDefault(f) {
+			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
+		}
 		if !f.Primary {
+			data.CreateBody = append(data.CreateBody, mf)
 			data.UpdateBody = append(data.UpdateBody, mf)
+			continue
+		}
+		if _, generated := keyGenerator(f); !generated {
+			key := f
+			key.Required = true
+			mf.Tag = fieldTag(key)
+			data.CreateBody = append(data.CreateBody, mf)
 		}
 	}
 

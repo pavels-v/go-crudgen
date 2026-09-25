@@ -70,6 +70,12 @@ func (s *Spec) Validate() error {
 			if f.Type == TypeReferences && f.Target == "" {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
+			if f.Default != nil && f.Primary {
+				return fmt.Errorf("entity %q primary key %q cannot have a default", e.Name, f.Name)
+			}
+			if f.Default != nil && !defaultFits(f.Type, f.Default) {
+				return fmt.Errorf("entity %q field %q has default %v that does not fit type %q", e.Name, f.Name, f.Default, f.Type)
+			}
 		}
 		switch pk := e.PrimaryKey(); len(pk) {
 		case 1:
@@ -102,4 +108,18 @@ func (s *Spec) Validate() error {
 		}
 	}
 	return nil
+}
+
+func defaultFits(fieldType string, v any) bool {
+	switch v.(type) {
+	case string:
+		return fieldType == TypeString || fieldType == TypeText || (fieldType == TypeDatetime && v == DefaultNow)
+	case int:
+		return fieldType == TypeInt32 || fieldType == TypeInt64 || fieldType == TypeFloat
+	case float64:
+		return fieldType == TypeFloat
+	case bool:
+		return fieldType == TypeBool
+	}
+	return false
 }

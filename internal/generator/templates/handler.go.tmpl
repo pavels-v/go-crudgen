@@ -47,11 +47,11 @@ func (h *{{ .Struct }}Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	m := {{ .Struct }}{
 {{- range .CreateAssign }}
-		{{ . }}: req.{{ . }},
+		{{ .Field }}: {{ .Expr }},
 {{- end }}
 	}
 	if err := h.repo.Create(r.Context(), &m); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, m)
@@ -61,7 +61,7 @@ func (h *{{ .Struct }}Handler) Get(w http.ResponseWriter, r *http.Request) {
 	{{ template "parseID" . }}
 	m, err := h.repo.Get(r.Context(), id)
 	if err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -71,7 +71,7 @@ func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePage(r)
 	items, err := h.repo.List(r.Context(), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -91,11 +91,11 @@ func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
 	m := {{ .Struct }}{
 		{{ .PK.GoName }}: id,
 {{- range .UpdateAssign }}
-		{{ . }}: req.{{ . }},
+		{{ .Field }}: {{ .Expr }},
 {{- end }}
 	}
 	if err := h.repo.Update(r.Context(), &m); err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -104,7 +104,7 @@ func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *{{ .Struct }}Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	{{ template "parseID" . }}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
-		writeRepoError(w, err)
+		writeRepoError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

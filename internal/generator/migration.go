@@ -115,15 +115,21 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 		if err != nil {
 			return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
 		}
-		def, err := sqlDefault(f.Default)
-		if err != nil {
-			return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
+		def := sqlNow
+		if !isNowDefault(f) {
+			def, err = sqlDefault(f.Default)
+			if err != nil {
+				return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
+			}
 		}
 
 		col := snakeCase(f.Name)
 		parts := []string{col, st}
 		if !isNullable(f) {
 			parts = append(parts, "NOT NULL")
+		}
+		if gen, ok := keyGenerator(f); ok {
+			parts = append(parts, gen)
 		}
 		if def != "" {
 			parts = append(parts, "DEFAULT "+def)

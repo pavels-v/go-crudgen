@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"strconv"
 
 	"go-crudgen/internal/spec"
 )
@@ -80,7 +81,60 @@ var scalarTypes = map[string]typeInfo{ //nolint:gochecknoglobals // read-only lo
 // column), and the migration (absence of a NOT NULL constraint): a column is
 // nullable unless it is required or part of the primary key.
 func isNullable(f spec.Field) bool {
-	return !f.Required && !f.Primary
+	return !f.Required && !f.Primary && f.Default == nil
+}
+
+func hasRequestDefault(f spec.Field) bool {
+	return !f.Required && !f.Primary && f.Default != nil
+}
+
+const (
+	sqlGenUUID     = "DEFAULT gen_random_uuid()"
+	sqlGenIdentity = "GENERATED ALWAYS AS IDENTITY"
+)
+
+var generatedKeys = map[string]string{ //nolint:gochecknoglobals // read-only lookup table
+	spec.TypeUUID:  sqlGenUUID,
+	spec.TypeInt32: sqlGenIdentity,
+	spec.TypeInt64: sqlGenIdentity,
+}
+
+func keyGenerator(f spec.Field) (string, bool) {
+	if !f.Primary {
+		return "", false
+	}
+	g, ok := generatedKeys[f.Type]
+	return g, ok
+}
+
+const (
+	sqlNow = "now()"
+	goNow  = "time.Now()"
+)
+
+func isNowDefault(f spec.Field) bool {
+	return f.Type == spec.TypeDatetime && f.Default == spec.DefaultNow
+}
+
+func goDefault(f spec.Field) (string, error) {
+	if isNowDefault(f) {
+		return goNow, nil
+	}
+	return goLiteral(f.Default)
+}
+
+func goLiteral(v any) (string, error) {
+	switch d := v.(type) {
+	case bool:
+		return strconv.FormatBool(d), nil
+	case int:
+		return strconv.Itoa(d), nil
+	case float64:
+		return strconv.FormatFloat(d, 'g', -1, 64), nil
+	case string:
+		return strconv.Quote(d), nil
+	}
+	return "", fmt.Errorf("unsupported default value %v (%T)", v, v)
 }
 
 // scalarType maps a non-reference field type to its Go representation, reading

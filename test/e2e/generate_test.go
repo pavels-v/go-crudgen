@@ -54,9 +54,13 @@ func TestGenerateBlogExample(t *testing.T) {
 	for _, f := range []string{
 		"post.gen.go", "post_handler.gen.go", "post_repo.gen.go",
 		"author.gen.go", "author_handler.gen.go", "author_repo.gen.go",
+		"comment.gen.go", "comment_handler.gen.go", "comment_repo.gen.go",
+		"tag.gen.go", "tag_handler.gen.go", "tag_repo.gen.go",
 		"http.gen.go", "db.gen.go", "nulls.gen.go",
 		filepath.Join("migrations", "00001_create_authors.sql"),
 		filepath.Join("migrations", "00002_create_posts.sql"),
+		filepath.Join("migrations", "00003_create_comments.sql"),
+		filepath.Join("migrations", "00004_create_tags.sql"),
 	} {
 		require.FileExists(t, filepath.Join(blogDir, f), "expected generated file")
 	}

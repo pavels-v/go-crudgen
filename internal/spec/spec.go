@@ -37,6 +37,8 @@ const (
 	TypeReferences = "references"
 )
 
+const DefaultNow = "now"
+
 // Field is a single attribute of an entity.
 type Field struct {
 	Name     string `yaml:"name"`

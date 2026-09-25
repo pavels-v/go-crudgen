@@ -81,6 +81,8 @@ Developer tasks: `make help`.
 | `PUT`    | `/{plural}/{id}` | Update                           |
 | `DELETE` | `/{plural}/{id}` | Delete                           |
 
+Errors: `404` not found, `409` unique violation or deleting a referenced row, `422` unknown reference, `500` without internal details.
+
 ## Spec
 
 Full example: [examples/blog.yaml](examples/blog.yaml), generated output: [examples/blog](examples/blog).
@@ -103,7 +105,9 @@ entities:
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules).
 - Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
-- Fields that are neither `primary` nor `required` are nullable: `*T` in the model, `sql.Null[T]` in the repository.
+- `uuid` keys are generated in Go (v4) with `gen_random_uuid()` as the column default; `int32` and `int64` keys use `IDENTITY`; other keys are required in Create.
+- `default` takes a literal of the field's type (`string`, `text`, `int32`, `int64`, `float`, `bool`) or `now` for `datetime`; the column is `NOT NULL DEFAULT` and the handler fills an omitted value.
+- Fields with none of `primary`, `required`, `default` are nullable: `*T` in the model, `sql.Null[T]` in the repository.
 - `references` becomes a column typed from the target's key with a `REFERENCES` constraint.
 
 ## Roadmap
@@ -122,18 +126,6 @@ entities:
 - [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)
 - [ ] Auth/middleware hooks
-
-## Known issues
-
-Each line is removed when its fix lands.
-
-- [ ] **[remove when fixed]** `PUT` returns zero `created_at`: Update SQL returns only `updated_at`; fix by `RETURNING created_at, updated_at`.
-- [ ] **[remove when fixed]** `default` never applies to nullable fields: the repository inserts an explicit `NULL`; fix by making a field with `default` `NOT NULL` and filling the default in the DTO (alternatives: skip nil columns in `INSERT`, or `COALESCE`).
-- [ ] **[remove when fixed]** Primary key is optional in Create: an omitted `id` is stored as the zero value and the next one fails with 500; fix by `required` on the key in the Create DTO, or DB-generated keys (`gen_random_uuid()` / `IDENTITY`) with `id` dropped from the DTO.
-- [ ] **[remove when fixed]** Constraint violations return 500 with raw Postgres text: map `23505` (unique) and `23503` (foreign key) to dedicated sentinels with their own status (409 / 422), and stop exposing internal error text in 500 responses.
-- [ ] **[remove when fixed]** `decodeJSON` accepts trailing data after the JSON body: fix by rejecting when `dec.More()` or a second `Decode` does not return `io.EOF`.
-- [ ] **[remove when fixed]** Unknown spec keys are ignored silently (`requried`, `softdelete`): fix by decoding with `yaml.Decoder.KnownFields(true)`.
-- [ ] **[remove when fixed]** Duplicate field names and fields colliding with option columns (`created_at`, `updated_at`, `deleted_at`) pass validation and produce uncompilable code: fix by rejecting duplicate snake_case column names in `Validate`.
 
 ## License
 
