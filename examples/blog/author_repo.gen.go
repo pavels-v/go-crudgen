@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -15,10 +14,10 @@ import (
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // newAuthorRow and toModel convert to and from the pointer fields on Author.
 type authorRow struct {
-	ID     uuid.UUID           `db:"id"`
-	Email  string              `db:"email"`
-	Name   sql.Null[string]    `db:"name"`
-	BornOn sql.Null[time.Time] `db:"born_on"`
+	ID     uuid.UUID        `db:"id"`
+	Email  string           `db:"email"`
+	Name   sql.Null[string] `db:"name"`
+	BornOn sql.Null[Date]   `db:"born_on"`
 }
 
 // newAuthorRow builds the row written by Create and Update. Option-managed
@@ -78,7 +77,7 @@ func (r *PostgresAuthorRepository) Get(ctx context.Context, id uuid.UUID) (*Auth
 }
 
 func (r *PostgresAuthorRepository) List(ctx context.Context, limit, offset int) ([]Author, error) {
-	rows := []authorRow{}
+	var rows []authorRow
 	if err := r.db.SelectContext(ctx, &rows, `SELECT id, email, name, born_on FROM authors ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list author: %w", err)
 	}

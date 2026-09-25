@@ -78,7 +78,7 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Str
 }
 
 func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error) {
-	rows := []{{ .RowStruct }}{}
+	var rows []{{ .RowStruct }}
 	if err := r.db.SelectContext(ctx, &rows, `{{ .ListSQL }}`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
 	}

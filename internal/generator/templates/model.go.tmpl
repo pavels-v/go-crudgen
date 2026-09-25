@@ -6,21 +6,21 @@ import (
 {{- end }}
 )
 {{ end }}
-// {{ .Struct }} represents a {{ .Lower }}.
+// {{ .Struct }} is the API model of the {{ .Lower }} entity.
 type {{ .Struct }} struct {
 {{- range .Fields }}
 	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
 {{- end }}
 }
 
-// {{ .CreateName }} is the request body for creating a {{ .Lower }}.
+// {{ .CreateName }} is the request body for creating the {{ .Lower }} entity.
 type {{ .CreateName }} struct {
 {{- range .CreateBody }}
 	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
 {{- end }}
 }
 
-// {{ .UpdateName }} is the request body for replacing a {{ .Lower }}.
+// {{ .UpdateName }} is the request body for replacing the {{ .Lower }} entity.
 type {{ .UpdateName }} struct {
 {{- range .UpdateBody }}
 	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`

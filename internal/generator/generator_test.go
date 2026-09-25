@@ -63,6 +63,7 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 				{Name: "price", Type: spec.TypeDecimal},
 				{Name: "in_stock", Type: spec.TypeBool},
 				{Name: "released_at", Type: spec.TypeDatetime},
+				{Name: "launched_on", Type: spec.TypeDate},
 				{Name: "metadata", Type: spec.TypeJSON},
 			},
 		}},
@@ -75,7 +76,7 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		`"github.com/shopspring/decimal"`,
 		`"encoding/json/jsontext"`,
 		`"time"`,
-		"// Product represents a product.",
+		"// Product is the API model of the product entity.",
 		"ID uuid.UUID", // primary key -> non-null value type
 		`json:"id"`,
 		"Name string",                           // required -> non-null value type
@@ -84,6 +85,7 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		"InStock *bool",                         // snake_case -> PascalCase, nullable -> pointer
 		`json:"in_stock,omitzero"`,
 		"ReleasedAt *time.Time",
+		"LaunchedOn *Date",
 		"Metadata *jsontext.Value",
 	} {
 		wantContains(t, got, want)
@@ -561,6 +563,27 @@ func renderMigrationSrc(t *testing.T, s *spec.Spec, entity string) string {
 	return string(src)
 }
 
+func TestRenderDate_TextAndSQLRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	src, err := renderDate(dateData{Package: "blog"})
+	require.NoError(t, err)
+	requireParses(t, src)
+
+	got := string(src)
+	for _, want := range []string{
+		"package blog",
+		"type Date time.Time",
+		"func (d Date) MarshalText() ([]byte, error)",
+		"func (d *Date) UnmarshalText(b []byte) error",
+		"func (d Date) Value() (driver.Value, error)",
+		"func (d *Date) Scan(src any) error",
+		"time.DateOnly",
+	} {
+		wantContains(t, got, want)
+	}
+}
+
 func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 	t.Parallel()
 
@@ -607,6 +630,7 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 	// and DROP TABLE (down) make three.
 	require.Equal(t, 3, strings.Count(got, "-- +goose StatementBegin"))
 	require.Equal(t, 3, strings.Count(got, "-- +goose StatementEnd"))
+	require.True(t, strings.HasPrefix(got, "-- +goose Up"), "migration starts with the goose Up annotation")
 }
 
 func TestMigrationOrder(t *testing.T) {

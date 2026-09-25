@@ -144,7 +144,7 @@ func TestIntegration(t *testing.T) {
 	})
 
 	t.Run("scalar types round-trip", func(t *testing.T) {
-		bornOn := time.Date(1815, time.December, 10, 0, 0, 0, 0, time.UTC)
+		bornOn := blog.Date(time.Date(1815, time.December, 10, 0, 0, 0, 0, time.UTC))
 		var author blog.Author
 		do(t, srv, http.MethodPost, "/authors",
 			blog.CreateAuthorRequest{Email: "lovelace@example.com", BornOn: &bornOn},
@@ -152,7 +152,7 @@ func TestIntegration(t *testing.T) {
 
 		var gotAuthor blog.Author
 		do(t, srv, http.MethodGet, "/authors/"+author.ID.String(), nil, &gotAuthor, http.StatusOK)
-		require.True(t, bornOn.Equal(*gotAuthor.BornOn))
+		require.True(t, time.Time(bornOn).Equal(time.Time(*gotAuthor.BornOn)))
 
 		metadata := jsontext.Value(`{"tags":["go"]}`)
 		var post blog.Post

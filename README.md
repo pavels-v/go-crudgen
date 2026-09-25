@@ -30,7 +30,7 @@ Among the tools we found, none generates every layer (validation, handlers, rout
 - `references` becomes a foreign key typed from the target's key; migrations are numbered in dependency order.
 - Routes use the standard `net/http.ServeMux` (Go 1.22+ patterns), no framework.
 - Generated code depends on neither the generator nor an ORM: plain Go plus `sqlx`.
-- Repository SQL is explicit in constants, readable and reviewable.
+- Repository SQL is written inline at each call, readable and reviewable.
 - Storage is driver-agnostic via `database/sql`; `pgx` or `pq` is a flag.
 - Nullability flows from the spec: `*T` in the model, `sql.Null[T]` in the repository, no `NOT NULL` in the migration.
 - Migrations are goose SQL files, applied with standard tooling.
@@ -71,6 +71,7 @@ Developer tasks: `make help`.
 - `http.gen.go` - `NewRouter`, `Deps`, JSON and pagination helpers.
 - `db.gen.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
 - `nulls.gen.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
+- `date.gen.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
 - `migrations/NNNNN_create_<table>.sql` - goose migrations, numbered in foreign-key order.
 
 | Method   | Path             | Action                           |

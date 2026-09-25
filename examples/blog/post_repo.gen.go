@@ -92,7 +92,7 @@ func (r *PostgresPostRepository) Get(ctx context.Context, id uuid.UUID) (*Post, 
 }
 
 func (r *PostgresPostRepository) List(ctx context.Context, limit, offset int) ([]Post, error) {
-	rows := []postRow{}
+	var rows []postRow
 	if err := r.db.SelectContext(ctx, &rows, `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list post: %w", err)
 	}
