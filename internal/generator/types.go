@@ -61,7 +61,7 @@ type typeInfo struct {
 // scalarTypes is the single source of truth mapping each non-reference spec field
 // type to its Go and SQL representations. scalarType and sqlType both read from
 // it, so a new field type is added in exactly one place.
-var scalarTypes = map[string]typeInfo{
+var scalarTypes = map[string]typeInfo{ //nolint:gochecknoglobals // read-only lookup table
 	spec.TypeString:   {goExpr: goString, sqlType: sqlText},
 	spec.TypeText:     {goExpr: goString, sqlType: sqlText},
 	spec.TypeInt32:    {goExpr: goInt32, sqlType: sqlInteger},

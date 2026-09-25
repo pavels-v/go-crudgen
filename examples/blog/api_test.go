@@ -146,7 +146,7 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoErrorf(t, err, "%s %s", method, path)
-	defer resp.Body.Close()
+	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	if resp.StatusCode != wantStatus {
 		b, _ := io.ReadAll(resp.Body)

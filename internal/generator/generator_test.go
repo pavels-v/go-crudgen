@@ -191,7 +191,8 @@ func TestRenderModel_DTOs(t *testing.T) {
 		"type UpdatePostRequest struct { ID uuid.UUID",
 		"UpdatePostRequest should not contain the primary key field")
 	// ...and DTOs never carry the option-injected timestamp fields.
-	create := got[strings.Index(got, "type CreatePostRequest"):]
+	_, create, ok := strings.Cut(got, "type CreatePostRequest")
+	require.True(t, ok, "CreatePostRequest should be generated")
 	require.NotContains(t, create, "CreatedAt", "DTOs should not contain timestamp fields")
 }
 

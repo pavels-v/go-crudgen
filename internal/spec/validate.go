@@ -7,7 +7,7 @@ import (
 )
 
 // KnownTypes is the set of field types the generator understands.
-var KnownTypes = map[string]struct{}{
+var KnownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	TypeString:     {},
 	TypeText:       {},
 	TypeInt32:      {},
@@ -28,7 +28,7 @@ var KnownTypes = map[string]struct{}{
 // datetime, json) have no path parser and are rejected. (references is allowed:
 // it resolves to the target's primary key, which this same rule guarantees is
 // path-addressable.)
-var PrimaryKeyTypes = map[string]struct{}{
+var PrimaryKeyTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	TypeString:     {},
 	TypeText:       {},
 	TypeInt32:      {},

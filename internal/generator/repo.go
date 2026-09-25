@@ -259,12 +259,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 
 	// INSERT: spec fields take placeholders; timestamps default to now().
-	insCols := make([]string, len(specCols))
-	insPh := make([]string, len(specCols))
+	insCols := make([]string, 0, len(specCols)+2)
+	insPh := make([]string, 0, len(specCols)+2)
 	insArgs := make([]string, len(specCols))
 	for i, c := range specCols {
-		insCols[i] = c.Column
-		insPh[i] = fmt.Sprintf("$%d", i+1)
+		insCols = append(insCols, c.Column)
+		insPh = append(insPh, fmt.Sprintf("$%d", i+1))
 		insArgs[i] = fmt.Sprintf(exprRowField, c.GoName)
 	}
 	var createScan string
@@ -302,7 +302,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		updArgs = append(updArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
 	if ts {
-		setClauses = append(setClauses, fmt.Sprintf("%s = now()", colUpdatedAt))
+		setClauses = append(setClauses, colUpdatedAt+" = now()")
 	}
 	updArgs = append(updArgs, fmt.Sprintf(exprRowField, pkGoName))
 

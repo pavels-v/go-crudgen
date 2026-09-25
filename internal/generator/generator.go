@@ -55,7 +55,7 @@ const (
 	ruleSep      = ","
 )
 
-var tmpl = template.Must(template.ParseFS(templates, templatesGlob))
+var tmpl = template.Must(template.ParseFS(templates, templatesGlob)) //nolint:gochecknoglobals // parsed once from embedded templates
 
 // Options controls generation output.
 type Options struct {
@@ -119,7 +119,9 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	emit := func(file string, src []byte) error {
 		if toStdout {
-			fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", file, src)
+			if _, err := fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", file, src); err != nil {
+				return fmt.Errorf("write %s: %w", file, err)
+			}
 			return nil
 		}
 		path := filepath.Join(opts.OutDir, file)
@@ -145,7 +147,8 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generate model for %q: %w", e.Name, err)
 		}
-		if err = emit(fmt.Sprintf(fileModel, base), src); err != nil {
+		err = emit(fmt.Sprintf(fileModel, base), src)
+		if err != nil {
 			return err
 		}
 
@@ -161,7 +164,8 @@ func Generate(s *spec.Spec, opts Options) error {
 			return fmt.Errorf("generate migration for %q: %w", e.Name, err)
 		}
 		migFile := fmt.Sprintf(fileMigration, migNum[e.Name], plural(e.Name, e.Plural))
-		if err = emit(migFile, msrc); err != nil {
+		err = emit(migFile, msrc)
+		if err != nil {
 			return err
 		}
 
@@ -173,7 +177,8 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generate handlers for %q: %w", e.Name, err)
 		}
-		if err = emit(fmt.Sprintf(fileHandler, base), hsrc); err != nil {
+		err = emit(fmt.Sprintf(fileHandler, base), hsrc)
+		if err != nil {
 			return err
 		}
 
@@ -185,7 +190,8 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generate repository for %q: %w", e.Name, err)
 		}
-		if err = emit(fmt.Sprintf(fileRepo, base), rsrc); err != nil {
+		err = emit(fmt.Sprintf(fileRepo, base), rsrc)
+		if err != nil {
 			return err
 		}
 		anyNullable = anyNullable || rd.HasNullable
@@ -202,7 +208,8 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generate router: %w", err)
 		}
-		if err = emit(fileHTTP, ssrc); err != nil {
+		err = emit(fileHTTP, ssrc)
+		if err != nil {
 			return err
 		}
 
@@ -210,7 +217,8 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err != nil {
 			return fmt.Errorf("generate db connection: %w", err)
 		}
-		if err = emit(fileDB, dbsrc); err != nil {
+		err = emit(fileDB, dbsrc)
+		if err != nil {
 			return err
 		}
 
@@ -221,7 +229,8 @@ func Generate(s *spec.Spec, opts Options) error {
 			if err != nil {
 				return fmt.Errorf("generate null helpers: %w", err)
 			}
-			if err = emit(fileNulls, nsrc); err != nil {
+			err = emit(fileNulls, nsrc)
+			if err != nil {
 				return err
 			}
 		}

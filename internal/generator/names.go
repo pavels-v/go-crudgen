@@ -3,7 +3,7 @@ package generator
 import "strings"
 
 // initialisms get fully upper-cased in Go identifiers for idiomatic output.
-var initialisms = map[string]struct{}{
+var initialisms = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	"id":   {},
 	"uuid": {},
 	"url":  {},
