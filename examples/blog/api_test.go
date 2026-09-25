@@ -291,3 +291,41 @@ func TestTagClientKey(t *testing.T) {
 	do(t, srv, http.MethodPut, "/tags/"+slug, UpdateTagRequest{Label: "Golang", Color: new("blue")}, &updated, http.StatusOK)
 	require.Equal(t, Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1}, updated)
 }
+
+func TestAuthorDateWireFormat(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer()
+	t.Cleanup(srv.Close)
+
+	const bornOn = "1815-12-10"
+
+	cases := []struct {
+		name       string
+		bornOn     string
+		wantStatus int
+	}{
+		{"date only accepted", bornOn, http.StatusCreated},
+		{"timestamp rejected", bornOn + "T00:00:00Z", http.StatusBadRequest},
+		{"invalid date rejected", "1815-13-10", http.StatusBadRequest},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			body := `{"email":"ada@example.com","born_on":"` + tc.bornOn + `"}`
+			resp, err := http.Post(srv.URL+"/authors", contentTypeJSON, strings.NewReader(body))
+			require.NoError(t, err)
+			defer func() { require.NoError(t, resp.Body.Close()) }()
+			require.Equal(t, tc.wantStatus, resp.StatusCode)
+			if tc.wantStatus != http.StatusCreated {
+				return
+			}
+
+			var got map[string]any
+			require.NoError(t, json.UnmarshalRead(resp.Body, &got))
+			require.Equal(t, bornOn, got["born_on"])
+		})
+	}
+}

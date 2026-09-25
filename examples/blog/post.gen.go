@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Post represents a post.
+// Post is the API model of the post entity.
 type Post struct {
 	ID        uuid.UUID       `json:"id"`
 	Title     string          `json:"title" validate:"required,min=1,max=200"`
@@ -20,7 +20,7 @@ type Post struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
-// CreatePostRequest is the request body for creating a post.
+// CreatePostRequest is the request body for creating the post entity.
 type CreatePostRequest struct {
 	Title     string          `json:"title" validate:"required,min=1,max=200"`
 	Body      *string         `json:"body,omitzero"`
@@ -30,7 +30,7 @@ type CreatePostRequest struct {
 	Author    *uuid.UUID      `json:"author,omitzero"`
 }
 
-// UpdatePostRequest is the request body for replacing a post.
+// UpdatePostRequest is the request body for replacing the post entity.
 type UpdatePostRequest struct {
 	Title     string          `json:"title" validate:"required,min=1,max=200"`
 	Body      *string         `json:"body,omitzero"`

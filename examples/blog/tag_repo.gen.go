@@ -75,7 +75,7 @@ func (r *PostgresTagRepository) Get(ctx context.Context, id string) (*Tag, error
 }
 
 func (r *PostgresTagRepository) List(ctx context.Context, limit, offset int) ([]Tag, error) {
-	rows := []tagRow{}
+	var rows []tagRow
 	if err := r.db.SelectContext(ctx, &rows, `SELECT slug, label, color, weight FROM tags ORDER BY slug LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list tag: %w", err)
 	}

@@ -24,6 +24,7 @@ const (
 	tmplHandler   = "handler.go.tmpl"
 	tmplRepo      = "repo.go.tmpl"
 	tmplNulls     = "nulls.go.tmpl"
+	tmplDate      = "date.go.tmpl"
 	tmplDB        = "db.go.tmpl"
 	tmplHTTP      = "http.go.tmpl"
 	tmplMigration = "migration.sql.tmpl"
@@ -36,6 +37,7 @@ const (
 	fileHTTP      = "http.gen.go"
 	fileDB        = "db.gen.go"
 	fileNulls     = "nulls.gen.go"
+	fileDate      = "date.gen.go"
 	fileMigration = "migrations/%05d_create_%s.sql"
 )
 
@@ -149,7 +151,7 @@ func Generate(s *spec.Spec, opts Options) error {
 	}
 
 	var serveable []sharedEntity
-	var anyNullable bool
+	var anyNullable, anyDate bool
 	for i := range s.Entities {
 		e := &s.Entities[i]
 		base := snakeCase(e.Name)
@@ -206,6 +208,7 @@ func Generate(s *spec.Spec, opts Options) error {
 			return err
 		}
 		anyNullable = anyNullable || rd.HasNullable
+		anyDate = anyDate || hasFieldType(e, spec.TypeDate)
 
 		serveable = append(serveable, sharedEntity{
 			Struct:    hd.Struct,
@@ -241,6 +244,17 @@ func Generate(s *spec.Spec, opts Options) error {
 				return fmt.Errorf("generate null helpers: %w", err)
 			}
 			err = emit(fileNulls, nsrc)
+			if err != nil {
+				return err
+			}
+		}
+
+		if anyDate {
+			dsrc, err := renderDate(dateData{Package: s.Package})
+			if err != nil {
+				return fmt.Errorf("generate date type: %w", err)
+			}
+			err = emit(fileDate, dsrc)
 			if err != nil {
 				return err
 			}
@@ -309,11 +323,10 @@ type sharedEntity struct {
 	DepsField string // field name in Deps, e.g. "Posts"
 }
 
-// serveKey resolves the path-addressable primary key used to build an entity's
-// handler and repository. Validation guarantees exactly one primary key of a
-// path-addressable type, so the pkParser miss below is a defensive check against
-// an unvalidated spec, not a normal skip. handlerInfo and repoInfo share this so
-// their notion of the primary key can never drift apart.
+type dateData struct {
+	Package string
+}
+
 func checkColumns(e *spec.Entity) error {
 	names := make([]string, 0, len(e.Fields)+3)
 	for _, f := range e.Fields {
@@ -338,6 +351,11 @@ func checkColumns(e *spec.Entity) error {
 	return nil
 }
 
+// serveKey resolves the path-addressable primary key used to build an entity's
+// handler and repository. Validation guarantees exactly one primary key of a
+// path-addressable type, so the pkParser miss below is a defensive check against
+// an unvalidated spec, not a normal skip. handlerInfo and repoInfo share this so
+// their notion of the primary key can never drift apart.
 func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, pp pkParse, err error) {
 	pk = e.PrimaryKey()[0]
 	gt, err = fieldType(pk, byName)
@@ -432,6 +450,7 @@ func renderRepo(data repoData) ([]byte, error)       { return renderTemplate(tmp
 func renderNulls(data nullsData) ([]byte, error)     { return renderTemplate(tmplNulls, data) }
 func renderDB(data dbData) ([]byte, error)           { return renderTemplate(tmplDB, data) }
 func renderShared(data sharedData) ([]byte, error)   { return renderTemplate(tmplHTTP, data) }
+func renderDate(data dateData) ([]byte, error)       { return renderTemplate(tmplDate, data) }
 
 // renderModel builds, executes, and gofmt-formats the model file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
@@ -542,6 +561,15 @@ func groupImports(set map[string]struct{}) []string {
 		return append(std, ext...)
 	}
 	return append(append(std, ""), ext...)
+}
+
+func hasFieldType(e *spec.Entity, typ string) bool {
+	for _, f := range e.Fields {
+		if f.Type == typ {
+			return true
+		}
+	}
+	return false
 }
 
 func entityWord(n int) string {

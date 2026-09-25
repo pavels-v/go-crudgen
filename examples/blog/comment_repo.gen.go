@@ -82,7 +82,7 @@ func (r *PostgresCommentRepository) Get(ctx context.Context, id int64) (*Comment
 }
 
 func (r *PostgresCommentRepository) List(ctx context.Context, limit, offset int) ([]Comment, error) {
-	rows := []commentRow{}
+	var rows []commentRow
 	if err := r.db.SelectContext(ctx, &rows, `SELECT id, post, body, likes, posted_at, deleted_at FROM comments WHERE deleted_at IS NULL ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list comment: %w", err)
 	}

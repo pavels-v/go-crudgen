@@ -24,6 +24,7 @@ const (
 	goBool    = "bool"
 	goDecimal = "decimal.Decimal"
 	goTime    = "time.Time"
+	goDate    = "Date"
 	goUUID    = "uuid.UUID"
 	goJSON    = "jsontext.Value"
 )
@@ -70,7 +71,7 @@ var scalarTypes = map[string]typeInfo{ //nolint:gochecknoglobals // read-only lo
 	spec.TypeFloat:    {goExpr: goFloat64, sqlType: sqlDouble},
 	spec.TypeBool:     {goExpr: goBool, sqlType: sqlBoolean},
 	spec.TypeDecimal:  {goExpr: goDecimal, goImport: importDecimal, sqlType: sqlNumeric},
-	spec.TypeDate:     {goExpr: goTime, goImport: importTime, sqlType: sqlDate},
+	spec.TypeDate:     {goExpr: goDate, sqlType: sqlDate},
 	spec.TypeDatetime: {goExpr: goTime, goImport: importTime, sqlType: sqlTimestamptz},
 	spec.TypeUUID:     {goExpr: goUUID, goImport: importUUID, sqlType: sqlUUID},
 	spec.TypeJSON:     {goExpr: goJSON, goImport: importJSON, sqlType: sqlJSONB},
