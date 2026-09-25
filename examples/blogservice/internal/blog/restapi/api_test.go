@@ -1,4 +1,4 @@
-package blog
+package restapi
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +42,7 @@ func (s *memStore[K, M]) Create(_ context.Context, m *M) error {
 	}
 	k := *s.key(m)
 	if _, ok := s.data[k]; ok {
-		return ErrAlreadyExists
+		return blog.ErrAlreadyExists
 	}
 	s.data[k] = *m
 	return nil
@@ -52,7 +53,7 @@ func (s *memStore[K, M]) Get(_ context.Context, id K) (*M, error) {
 	defer s.mu.Unlock()
 	m, ok := s.data[id]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, blog.ErrNotFound
 	}
 	return &m, nil
 }
@@ -72,7 +73,7 @@ func (s *memStore[K, M]) Update(_ context.Context, m *M) error {
 	defer s.mu.Unlock()
 	k := *s.key(m)
 	if _, ok := s.data[k]; !ok {
-		return ErrNotFound
+		return blog.ErrNotFound
 	}
 	s.data[k] = *m
 	return nil
@@ -82,7 +83,7 @@ func (s *memStore[K, M]) Delete(_ context.Context, id K) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.data[id]; !ok {
-		return ErrNotFound
+		return blog.ErrNotFound
 	}
 	delete(s.data, id)
 	return nil
@@ -91,10 +92,10 @@ func (s *memStore[K, M]) Delete(_ context.Context, id K) error {
 func newServer() *httptest.Server {
 	var commentSeq atomic.Int64
 	return httptest.NewServer(NewRouter(Deps{
-		Posts:    newMemStore(func(m *Post) *uuid.UUID { return &m.ID }, uuid.New),
-		Authors:  newMemStore(func(m *Author) *uuid.UUID { return &m.ID }, uuid.New),
-		Comments: newMemStore(func(m *Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
-		Tags:     newMemStore[string](func(m *Tag) *string { return &m.Slug }, nil),
+		Posts:    newMemStore(func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New),
+		Authors:  newMemStore(func(m *blog.Author) *uuid.UUID { return &m.ID }, uuid.New),
+		Comments: newMemStore(func(m *blog.Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
+		Tags:     newMemStore[string](func(m *blog.Tag) *string { return &m.Slug }, nil),
 	}))
 }
 
@@ -133,7 +134,7 @@ func TestPostCRUD(t *testing.T) {
 
 	authorID := uuid.New()
 
-	var created Post
+	var created blog.Post
 	do(t, srv, http.MethodPost, "/posts",
 		CreatePostRequest{Title: "Hello", Body: new("world"), Author: &authorID},
 		&created, http.StatusCreated)
@@ -143,15 +144,15 @@ func TestPostCRUD(t *testing.T) {
 	require.False(t, created.Published)
 	idPath := "/posts/" + created.ID.String()
 
-	var got Post
+	var got blog.Post
 	do(t, srv, http.MethodGet, idPath, nil, &got, http.StatusOK)
 	require.Equal(t, "Hello", got.Title)
 
-	var list []Post
+	var list []blog.Post
 	do(t, srv, http.MethodGet, "/posts", nil, &list, http.StatusOK)
 	require.Len(t, list, 1)
 
-	var updated Post
+	var updated blog.Post
 	do(t, srv, http.MethodPut, idPath,
 		UpdatePostRequest{Title: "Updated", Body: new("body2"), Author: &authorID},
 		&updated, http.StatusOK)
@@ -234,7 +235,7 @@ func TestPostCreateAppliesDefault(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			var created Post
+			var created blog.Post
 			do(t, srv, http.MethodPost, "/posts",
 				CreatePostRequest{Title: "Hello", Published: tc.published},
 				&created, http.StatusCreated)
@@ -250,7 +251,7 @@ func TestCommentDefaults(t *testing.T) {
 	defer srv.Close()
 
 	before := time.Now()
-	var created Comment
+	var created blog.Comment
 	do(t, srv, http.MethodPost, "/comments",
 		CreateCommentRequest{Post: uuid.New(), Body: "Nice"},
 		&created, http.StatusCreated)
@@ -258,7 +259,7 @@ func TestCommentDefaults(t *testing.T) {
 	require.Zero(t, created.Likes)
 	require.False(t, created.PostedAt.Before(before), "posted_at defaults to now")
 
-	var got Comment
+	var got blog.Comment
 	do(t, srv, http.MethodGet, "/comments/"+strconv.FormatInt(created.ID, 10), nil, &got, http.StatusOK)
 	require.Equal(t, created.Body, got.Body)
 }
@@ -280,16 +281,16 @@ func TestTagClientKey(t *testing.T) {
 
 	const slug = "go"
 
-	var created Tag
+	var created blog.Tag
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Go"}, &created, http.StatusCreated)
-	require.Equal(t, Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1}, created)
+	require.Equal(t, blog.Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1}, created)
 
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Again"}, nil, http.StatusConflict)
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Label: "No slug"}, nil, http.StatusBadRequest)
 
-	var updated Tag
+	var updated blog.Tag
 	do(t, srv, http.MethodPut, "/tags/"+slug, UpdateTagRequest{Label: "Golang", Color: new("blue")}, &updated, http.StatusOK)
-	require.Equal(t, Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1}, updated)
+	require.Equal(t, blog.Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1}, updated)
 }
 
 func TestAuthorDateWireFormat(t *testing.T) {

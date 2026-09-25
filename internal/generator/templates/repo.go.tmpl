@@ -6,9 +6,9 @@ import (
 {{- end }}
 )
 
-// {{ .RowStruct }} is the database representation of {{ .Struct }}. Nullable
+// {{ .RowStruct }} is the database representation of {{ .Model }}. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// {{ .NewRowFunc }} and toModel convert to and from the pointer fields on {{ .Struct }}.
+// {{ .NewRowFunc }} and toModel convert to and from the pointer fields on {{ .Model }}.
 type {{ .RowStruct }} struct {
 {{- range .RowFields }}
 	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
@@ -17,7 +17,7 @@ type {{ .RowStruct }} struct {
 
 // {{ .NewRowFunc }} builds the row written by Create and Update. Option-managed
 // columns (timestamps) are set by the SQL itself, so they are omitted here.
-func {{ .NewRowFunc }}(m *{{ .Struct }}) {{ .RowStruct }} {
+func {{ .NewRowFunc }}(m *{{ .Model }}) {{ .RowStruct }} {
 	return {{ .RowStruct }}{
 {{- range .ToRow }}
 		{{ .Field }}: {{ .Expr }},
@@ -26,8 +26,8 @@ func {{ .NewRowFunc }}(m *{{ .Struct }}) {{ .RowStruct }} {
 }
 
 // toModel converts a scanned row back into the API model.
-func (row {{ .RowStruct }}) toModel() {{ .Struct }} {
-	return {{ .Struct }}{
+func (row {{ .RowStruct }}) toModel() {{ .Model }} {
+	return {{ .Model }}{
 {{- range .ToModel }}
 		{{ .Field }}: {{ .Expr }},
 {{- end }}
@@ -41,14 +41,14 @@ type {{ .Receiver }} struct {
 	db *sqlx.DB
 }
 
-// {{ .Constructor }} returns a {{ .Receiver }} backed by db.
+// {{ .Constructor }} returns a repository backed by db.
 func {{ .Constructor }}(db *sqlx.DB) *{{ .Receiver }} {
 	return &{{ .Receiver }}{db: db}
 }
 
 var _ {{ .Repo }} = (*{{ .Receiver }})(nil)
 
-func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
+func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Model }}) error {
 {{- if .GenerateUUID }}
 	m.{{ .PKGoName }} = uuid.New()
 {{- end }}
@@ -65,11 +65,11 @@ func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
 	return nil
 }
 
-func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Struct }}, error) {
+func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Model }}, error) {
 	var row {{ .RowStruct }}
 	if err := r.db.GetContext(ctx, &row, `{{ .GetSQL }}`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, {{ .Domain }}.ErrNotFound
 		}
 		return nil, fmt.Errorf("get {{ .LowerStruct }}: %w", err)
 	}
@@ -77,24 +77,24 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Str
 	return &m, nil
 }
 
-func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error) {
+func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .Model }}, error) {
 	var rows []{{ .RowStruct }}
 	if err := r.db.SelectContext(ctx, &rows, `{{ .ListSQL }}`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
 	}
-	out := make([]{{ .Struct }}, len(rows))
+	out := make([]{{ .Model }}, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
 	return out, nil
 }
 
-func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
+func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Model }}) error {
 	row := {{ .NewRowFunc }}(m)
 {{- if .HasTimestamps }}
 	if err := r.db.QueryRowContext(ctx, `{{ .UpdateSQL }}`, {{ .UpdateArgs }}).Scan({{ .UpdateScan }}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return {{ .Domain }}.ErrNotFound
 		}
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
@@ -103,7 +103,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 	var exists int
 	if err := r.db.GetContext(ctx, &exists, `{{ .UpdateSQL }}`, {{ .UpdateArgs }}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return {{ .Domain }}.ErrNotFound
 		}
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
 	}
@@ -117,7 +117,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
 	}
 	if n == 0 {
-		return ErrNotFound
+		return {{ .Domain }}.ErrNotFound
 	}
 {{- end }}
 	return nil
@@ -133,7 +133,7 @@ func (r *{{ .Receiver }}) Delete(ctx context.Context, id {{ .PKGoType }}) error 
 		return fmt.Errorf("delete {{ .LowerStruct }}: %w", err)
 	}
 	if n == 0 {
-		return ErrNotFound
+		return {{ .Domain }}.ErrNotFound
 	}
 	return nil
 }

@@ -1,27 +1,33 @@
-package blog
+package restapi
 
 import (
-	"context"
 	"net/http"
+
+	"example.com/blogservice/internal/blog"
 )
 
-// TagRepository is the storage interface the Tag handlers depend on.
-// The concrete implementation is provided by the caller.
-type TagRepository interface {
-	Create(ctx context.Context, m *Tag) error
-	Get(ctx context.Context, id string) (*Tag, error)
-	List(ctx context.Context, limit, offset int) ([]Tag, error)
-	Update(ctx context.Context, m *Tag) error
-	Delete(ctx context.Context, id string) error
+// CreateTagRequest is the request body for creating the tag entity.
+type CreateTagRequest struct {
+	Slug   string   `json:"slug" validate:"required"`
+	Label  string   `json:"label" validate:"required"`
+	Color  *string  `json:"color"`
+	Weight *float64 `json:"weight"`
+}
+
+// UpdateTagRequest is the request body for replacing the tag entity.
+type UpdateTagRequest struct {
+	Label  string   `json:"label" validate:"required"`
+	Color  *string  `json:"color"`
+	Weight *float64 `json:"weight"`
 }
 
 // TagHandler serves the CRUD endpoints for Tag.
 type TagHandler struct {
-	repo TagRepository
+	repo blog.TagRepository
 }
 
 // NewTagHandler returns a handler backed by repo.
-func NewTagHandler(repo TagRepository) *TagHandler {
+func NewTagHandler(repo blog.TagRepository) *TagHandler {
 	return &TagHandler{repo: repo}
 }
 
@@ -44,7 +50,7 @@ func (h *TagHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Tag{
+	m := blog.Tag{
 		Slug:   req.Slug,
 		Label:  req.Label,
 		Color:  valueOr(req.Color, "gray"),
@@ -88,7 +94,7 @@ func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Tag{
+	m := blog.Tag{
 		Slug:   id,
 		Label:  req.Label,
 		Color:  valueOr(req.Color, "gray"),

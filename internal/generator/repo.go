@@ -7,17 +7,30 @@ import (
 	"go-crudgen/internal/spec"
 )
 
-// dbData is the template input for the package-wide db.gen.go connection file.
+// dbData is the template input for postgres/db.gen.go.
 type dbData struct {
 	Package      string
+	Imports      []string
+	Domain       string
 	DriverName   string // database/sql driver name, e.g. "pgx" or "postgres"
 	DriverImport string // blank-imported driver package
 }
 
-// nullsData is the template input for the package-wide nulls.gen.go file holding
-// the generic sql.Null[T] conversion helpers shared by every repository.
-type nullsData struct {
-	Package string
+func dbInfo(s *spec.Spec, driverName, driverImp string) dbData {
+	return dbData{
+		Package: pkgPostgres,
+		Imports: groupImports(map[string]struct{}{
+			importErrors: {},
+			importFmt:    {},
+			importTime:   {},
+			importSQLx:   {},
+			driverImp:    {},
+			s.Module:     {},
+		}, s.Module),
+		Domain:       s.Package,
+		DriverName:   driverName,
+		DriverImport: driverImp,
+	}
 }
 
 const (
@@ -42,6 +55,9 @@ const (
 	importErrors      = "errors"
 	importFmt         = "fmt"
 	importSQLx        = "github.com/jmoiron/sqlx"
+	importJSONv2      = "encoding/json/v2"
+	importSlog        = "log/slog"
+	importValidator   = "github.com/go-playground/validator/v10"
 )
 
 // driverInfo maps a --driver choice to its database/sql driver name and the
@@ -87,10 +103,8 @@ const (
 )
 
 const (
-	namePostgresRepo     = "Postgres%sRepository"
-	namePostgresRepoCtor = "NewPostgres%sRepository"
-	nameRow              = "%sRow"
-	nameNewRow           = "new%sRow"
+	nameRow    = "%sRow"
+	nameNewRow = "new%sRow"
 )
 
 // optionColumn describes a column injected by an EntityOptions toggle.
@@ -136,11 +150,13 @@ func scanList(cols []string) string {
 type repoData struct {
 	Package         string
 	Imports         []string
+	Domain          string
 	Struct          string
+	Model           string // qualified domain model, e.g. "blog.Post"
 	LowerStruct     string // struct name lower-cased, for error messages
-	Repo            string // interface name, e.g. "PostRepository"
-	Receiver        string // concrete type, e.g. "PostgresPostRepository"
-	Constructor     string // e.g. "NewPostgresPostRepository"
+	Repo            string // qualified interface name, e.g. "blog.PostRepository"
+	Receiver        string // concrete type, e.g. "PostRepository"
+	Constructor     string // e.g. "NewPostRepository"
 	PKGoType        string
 	HasTimestamps   bool
 	GenerateUUID    bool // the uuid primary key is generated in Go before insert
@@ -194,7 +210,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	ts := e.Options.Timestamps
 
 	impSet := map[string]struct{}{
-		importContext: {}, importDatabaseSQL: {}, importErrors: {}, importFmt: {}, importSQLx: {},
+		importContext: {}, importDatabaseSQL: {}, importErrors: {}, importFmt: {}, importSQLx: {}, s.Module: {},
 	}
 
 	// Persisted columns in struct order: spec fields first, then the
@@ -221,6 +237,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		if err != nil {
 			return repoData{}, err
 		}
+		ft = ft.outside(s)
 		if ft.imp != "" {
 			impSet[ft.imp] = struct{}{}
 		}
@@ -342,15 +359,17 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed
 	// context/database/sql/errors/fmt/sqlx packages.
-	imports := groupImports(impSet)
+	imports := groupImports(impSet, s.Module)
 
 	return repoData{
-		Package:         s.Package,
+		Package:         pkgPostgres,
+		Domain:          s.Package,
 		Struct:          name,
+		Model:           qualified(s, name),
 		LowerStruct:     strings.ToLower(name),
-		Repo:            fmt.Sprintf(nameRepo, name),
-		Receiver:        fmt.Sprintf(namePostgresRepo, name),
-		Constructor:     fmt.Sprintf(namePostgresRepoCtor, name),
+		Repo:            qualified(s, fmt.Sprintf(nameRepo, name)),
+		Receiver:        fmt.Sprintf(nameRepo, name),
+		Constructor:     fmt.Sprintf(nameRepoCtor, name),
 		PKGoType:        gt.expr,
 		HasTimestamps:   ts,
 		GenerateUUID:    pkInCode,

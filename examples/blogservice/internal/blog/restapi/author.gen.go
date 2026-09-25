@@ -1,29 +1,34 @@
-package blog
+package restapi
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/google/uuid"
+
+	"example.com/blogservice/internal/blog"
 )
 
-// AuthorRepository is the storage interface the Author handlers depend on.
-// The concrete implementation is provided by the caller.
-type AuthorRepository interface {
-	Create(ctx context.Context, m *Author) error
-	Get(ctx context.Context, id uuid.UUID) (*Author, error)
-	List(ctx context.Context, limit, offset int) ([]Author, error)
-	Update(ctx context.Context, m *Author) error
-	Delete(ctx context.Context, id uuid.UUID) error
+// CreateAuthorRequest is the request body for creating the author entity.
+type CreateAuthorRequest struct {
+	Email  string     `json:"email" validate:"required,email"`
+	Name   *string    `json:"name,omitzero"`
+	BornOn *blog.Date `json:"born_on,omitzero"`
+}
+
+// UpdateAuthorRequest is the request body for replacing the author entity.
+type UpdateAuthorRequest struct {
+	Email  string     `json:"email" validate:"required,email"`
+	Name   *string    `json:"name,omitzero"`
+	BornOn *blog.Date `json:"born_on,omitzero"`
 }
 
 // AuthorHandler serves the CRUD endpoints for Author.
 type AuthorHandler struct {
-	repo AuthorRepository
+	repo blog.AuthorRepository
 }
 
 // NewAuthorHandler returns a handler backed by repo.
-func NewAuthorHandler(repo AuthorRepository) *AuthorHandler {
+func NewAuthorHandler(repo blog.AuthorRepository) *AuthorHandler {
 	return &AuthorHandler{repo: repo}
 }
 
@@ -46,7 +51,7 @@ func (h *AuthorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Author{
+	m := blog.Author{
 		Email:  req.Email,
 		Name:   req.Name,
 		BornOn: req.BornOn,
@@ -97,7 +102,7 @@ func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	m := Author{
+	m := blog.Author{
 		ID:     id,
 		Email:  req.Email,
 		Name:   req.Name,

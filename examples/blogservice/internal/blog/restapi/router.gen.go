@@ -1,4 +1,4 @@
-package blog
+package restapi
 
 import (
 	"encoding/json/v2"
@@ -8,36 +8,28 @@ import (
 	"strconv"
 
 	"github.com/go-playground/validator/v10"
+
+	"example.com/blogservice/internal/blog"
 )
 
 // validate is the shared validator used to check request DTOs.
 var validate = validator.New()
 
-// ErrNotFound is returned by a repository when an entity does not exist; the
-// HTTP layer maps it to a 404 response.
-var ErrNotFound = errors.New("not found")
-
-var (
-	ErrAlreadyExists     = errors.New("already exists")
-	ErrReferenceNotFound = errors.New("referenced entity not found")
-	ErrStillReferenced   = errors.New("entity is still referenced")
-)
-
 var errInternal = errors.New(http.StatusText(http.StatusInternalServerError))
 
 var repoErrorStatus = map[error]int{
-	ErrNotFound:          http.StatusNotFound,
-	ErrAlreadyExists:     http.StatusConflict,
-	ErrReferenceNotFound: http.StatusUnprocessableEntity,
-	ErrStillReferenced:   http.StatusConflict,
+	blog.ErrNotFound:          http.StatusNotFound,
+	blog.ErrAlreadyExists:     http.StatusConflict,
+	blog.ErrReferenceNotFound: http.StatusUnprocessableEntity,
+	blog.ErrStillReferenced:   http.StatusConflict,
 }
 
 // Deps holds the repository implementation for each entity.
 type Deps struct {
-	Posts    PostRepository
-	Authors  AuthorRepository
-	Comments CommentRepository
-	Tags     TagRepository
+	Posts    blog.PostRepository
+	Authors  blog.AuthorRepository
+	Comments blog.CommentRepository
+	Tags     blog.TagRepository
 }
 
 // NewRouter wires every entity's routes onto a fresh ServeMux.

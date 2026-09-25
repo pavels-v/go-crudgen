@@ -1,12 +1,9 @@
 package {{ .Package }}
 
 import (
-	"errors"
-	"fmt"
-	"time"
-
-	_ {{ printf "%q" .DriverImport }}
-	"github.com/jmoiron/sqlx"
+{{- range .Imports }}
+	{{ if eq . $.DriverImport }}_ {{ end }}{{ if . }}{{ printf "%q" . }}{{ end }}
+{{- end }}
 )
 
 // Connection-pool defaults. Tune these for your workload, or replace NewDB with
@@ -55,16 +52,16 @@ func sqlState(err error) string {
 func mapWriteError(err error) error {
 	switch sqlState(err) {
 	case sqlStateUniqueViolation:
-		return fmt.Errorf("%w: %v", ErrAlreadyExists, err)
+		return fmt.Errorf("%w: %v", {{ .Domain }}.ErrAlreadyExists, err)
 	case sqlStateForeignKeyViolation:
-		return fmt.Errorf("%w: %v", ErrReferenceNotFound, err)
+		return fmt.Errorf("%w: %v", {{ .Domain }}.ErrReferenceNotFound, err)
 	}
 	return err
 }
 
 func mapDeleteError(err error) error {
 	if sqlState(err) == sqlStateForeignKeyViolation {
-		return fmt.Errorf("%w: %v", ErrStillReferenced, err)
+		return fmt.Errorf("%w: %v", {{ .Domain }}.ErrStillReferenced, err)
 	}
 	return err
 }

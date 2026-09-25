@@ -9,6 +9,7 @@ import (
 )
 
 const validYAML = `package: blog
+module: example.com/blog
 entities:
   - name: Author
     fields:
@@ -31,6 +32,7 @@ func TestLoad(t *testing.T) {
 		{"empty file", "", true},
 		{"unknown top-level key", validYAML + "modul: x\n", true},
 		{"unknown field key", `package: blog
+module: example.com/blog
 entities:
   - name: Author
     fields:
@@ -40,6 +42,7 @@ entities:
         optional: true
 `, true},
 		{"unknown option key", `package: blog
+module: example.com/blog
 entities:
   - name: Author
     fields:

@@ -11,6 +11,7 @@ import (
 func validSpec() *Spec {
 	return &Spec{
 		Package: "blog",
+		Module:  "example.com/blog",
 		Entities: []Entity{
 			{Name: "Author", Fields: []Field{
 				{Name: "id", Type: TypeUUID, Primary: true},
@@ -66,6 +67,7 @@ func TestValidate_Errors(t *testing.T) {
 		mutate func(*Spec)
 	}{
 		{"missing package", func(s *Spec) { s.Package = "" }},
+		{"missing module", func(s *Spec) { s.Module = "" }},
 		{"no entities", func(s *Spec) { s.Entities = nil }},
 		{"entity without name", func(s *Spec) { s.Entities[0].Name = "" }},
 		{"duplicate entity", func(s *Spec) { s.Entities[1].Name = "Author" }},

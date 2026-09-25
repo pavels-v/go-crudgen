@@ -50,13 +50,13 @@ cd ./internal/api && go mod tidy
 ```
 
 ```go
-db, err := blog.NewDB(dsn)
+db, err := postgres.NewDB(dsn)
 if err != nil {
 	log.Fatal(err)
 }
-router := blog.NewRouter(blog.Deps{
-	Posts:   blog.NewPostgresPostRepository(db),
-	Authors: blog.NewPostgresAuthorRepository(db),
+router := restapi.NewRouter(restapi.Deps{
+	Posts:   postgres.NewPostRepository(db),
+	Authors: postgres.NewAuthorRepository(db),
 })
 http.ListenAndServe(":8080", router)
 ```
@@ -65,14 +65,16 @@ Developer tasks: `make help`.
 
 ## Output
 
-- `<entity>.gen.go` - model and `Create`/`Update` request DTOs.
-- `<entity>_handler.gen.go` - repository interface and CRUD handlers.
-- `<entity>_repo.gen.go` - `sqlx` PostgreSQL repository.
-- `http.gen.go` - `NewRouter`, `Deps`, JSON and pagination helpers.
-- `db.gen.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
-- `nulls.gen.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
+- `<entity>.gen.go` - model and repository interface, in the root package named by `package`.
+- `errors.gen.go` - sentinel errors shared by all layers.
 - `date.gen.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
+- `restapi/<entity>.gen.go` - `Create`/`Update` request DTOs and CRUD handlers.
+- `restapi/router.gen.go` - `NewRouter`, `Deps`, JSON and pagination helpers.
+- `postgres/<entity>.gen.go` - `sqlx` PostgreSQL repository.
+- `postgres/db.gen.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
+- `postgres/nulls.gen.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
 - `migrations/NNNNN_create_<table>.sql` - goose migrations, numbered in foreign-key order.
+- Generation fails when an entity name collides with a generated declaration or file.
 
 | Method   | Path             | Action                           |
 | -------- | ---------------- | -------------------------------- |
@@ -86,7 +88,7 @@ Errors: `404` not found, `409` unique violation or deleting a referenced row, `4
 
 ## Spec
 
-Full example: [examples/blog.yaml](examples/blog.yaml), generated output: [examples/blog](examples/blog).
+Full example: [examples/blog.yaml](examples/blog.yaml), generated output: [examples/blogservice/internal/blog](examples/blogservice/internal/blog).
 
 ```yaml
 package: blog
@@ -103,6 +105,7 @@ entities:
       soft_delete: false
 ```
 
+- `package` names the root package; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules).
 - Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.

@@ -10,8 +10,16 @@ import (
 // goType describes how a spec field type renders in Go: the type expression and
 // the import path it needs (empty for builtins).
 type goType struct {
-	expr string
-	imp  string // import path, "" for builtins
+	expr   string
+	imp    string // import path, "" for builtins
+	domain bool
+}
+
+func (gt goType) outside(s *spec.Spec) goType {
+	if !gt.domain {
+		return gt
+	}
+	return goType{expr: fmt.Sprintf(exprQualified, s.Package, gt.expr), imp: s.Module}
 }
 
 // Go type expressions emitted for spec field types. scalarType produces these and
@@ -58,6 +66,7 @@ type typeInfo struct {
 	goExpr   string
 	goImport string // "" for builtins
 	sqlType  string
+	domain   bool
 }
 
 // scalarTypes is the single source of truth mapping each non-reference spec field
@@ -71,7 +80,7 @@ var scalarTypes = map[string]typeInfo{ //nolint:gochecknoglobals // read-only lo
 	spec.TypeFloat:    {goExpr: goFloat64, sqlType: sqlDouble},
 	spec.TypeBool:     {goExpr: goBool, sqlType: sqlBoolean},
 	spec.TypeDecimal:  {goExpr: goDecimal, goImport: importDecimal, sqlType: sqlNumeric},
-	spec.TypeDate:     {goExpr: goDate, sqlType: sqlDate},
+	spec.TypeDate:     {goExpr: goDate, sqlType: sqlDate, domain: true},
 	spec.TypeDatetime: {goExpr: goTime, goImport: importTime, sqlType: sqlTimestamptz},
 	spec.TypeUUID:     {goExpr: goUUID, goImport: importUUID, sqlType: sqlUUID},
 	spec.TypeJSON:     {goExpr: goJSON, goImport: importJSON, sqlType: sqlJSONB},
@@ -145,8 +154,10 @@ func scalarType(t string) (goType, bool) {
 	if !ok {
 		return goType{}, false
 	}
-	return goType{expr: ti.goExpr, imp: ti.goImport}, true
+	return goType{expr: ti.goExpr, imp: ti.goImport, domain: ti.domain}, true
 }
+
+const exprQualified = "%s.%s"
 
 const (
 	exprPathValue = "r.PathValue(pathParamID)"

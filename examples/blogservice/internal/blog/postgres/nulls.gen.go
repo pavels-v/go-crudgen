@@ -1,4 +1,4 @@
-package blog
+package postgres
 
 import "database/sql"
 
