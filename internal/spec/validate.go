@@ -1,24 +1,25 @@
 package spec
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
 
 // KnownTypes is the set of field types the generator understands.
-var KnownTypes = map[string]struct{}{
-	"string":     {},
-	"text":       {},
-	"int32":      {},
-	"int64":      {},
-	"float":      {},
-	"decimal":    {},
-	"bool":       {},
-	"date":       {},
-	"datetime":   {},
-	"uuid":       {},
-	"json":       {},
-	"references": {},
+var KnownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+	TypeString:     {},
+	TypeText:       {},
+	TypeInt32:      {},
+	TypeInt64:      {},
+	TypeFloat:      {},
+	TypeDecimal:    {},
+	TypeBool:       {},
+	TypeDate:       {},
+	TypeDatetime:   {},
+	TypeUUID:       {},
+	TypeJSON:       {},
+	TypeReferences: {},
 }
 
 // PrimaryKeyTypes is the set of field types allowed for a primary key: those the
@@ -27,22 +28,22 @@ var KnownTypes = map[string]struct{}{
 // datetime, json) have no path parser and are rejected. (references is allowed:
 // it resolves to the target's primary key, which this same rule guarantees is
 // path-addressable.)
-var PrimaryKeyTypes = map[string]struct{}{
-	"string":     {},
-	"text":       {},
-	"int32":      {},
-	"int64":      {},
-	"uuid":       {},
-	"references": {},
+var PrimaryKeyTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+	TypeString:     {},
+	TypeText:       {},
+	TypeInt32:      {},
+	TypeInt64:      {},
+	TypeUUID:       {},
+	TypeReferences: {},
 }
 
 // Validate checks the spec for structural errors.
 func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Package) == "" {
-		return fmt.Errorf("missing package name")
+		return errors.New("missing package name")
 	}
 	if len(s.Entities) == 0 {
-		return fmt.Errorf("no entities defined")
+		return errors.New("no entities defined")
 	}
 
 	seen := make(map[string]bool, len(s.Entities))
@@ -66,7 +67,7 @@ func (s *Spec) Validate() error {
 			if _, ok := KnownTypes[f.Type]; !ok {
 				return fmt.Errorf("entity %q field %q has unknown type %q", e.Name, f.Name, f.Type)
 			}
-			if f.Type == "references" && f.Target == "" {
+			if f.Type == TypeReferences && f.Target == "" {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
 		}
@@ -92,7 +93,7 @@ func (s *Spec) Validate() error {
 	for i := range s.Entities {
 		e := &s.Entities[i]
 		for _, f := range e.Fields {
-			if f.Type != "references" {
+			if f.Type != TypeReferences {
 				continue
 			}
 			if _, ok := byName[f.Target]; !ok {

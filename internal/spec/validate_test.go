@@ -13,11 +13,11 @@ func validSpec() *Spec {
 		Package: "blog",
 		Entities: []Entity{
 			{Name: "Author", Fields: []Field{
-				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "id", Type: TypeUUID, Primary: true},
 			}},
 			{Name: "Post", Fields: []Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "author", Type: "references", Target: "Author"},
+				{Name: "id", Type: TypeUUID, Primary: true},
+				{Name: "author", Type: TypeReferences, Target: "Author"},
 			}},
 		},
 	}
@@ -48,8 +48,8 @@ func TestValidate_Errors(t *testing.T) {
 		{"entity without primary key", func(s *Spec) { s.Entities[0].Fields[0].Primary = false }},
 		{"composite primary key", func(s *Spec) {
 			s.Entities[0].Fields = []Field{
-				{Name: "a", Type: "uuid", Primary: true},
-				{Name: "b", Type: "uuid", Primary: true},
+				{Name: "a", Type: TypeUUID, Primary: true},
+				{Name: "b", Type: TypeUUID, Primary: true},
 			}
 		}},
 		{"decimal primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "decimal" }},

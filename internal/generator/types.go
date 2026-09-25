@@ -61,18 +61,18 @@ type typeInfo struct {
 // scalarTypes is the single source of truth mapping each non-reference spec field
 // type to its Go and SQL representations. scalarType and sqlType both read from
 // it, so a new field type is added in exactly one place.
-var scalarTypes = map[string]typeInfo{
-	"string":   {goExpr: goString, sqlType: sqlText},
-	"text":     {goExpr: goString, sqlType: sqlText},
-	"int32":    {goExpr: goInt32, sqlType: sqlInteger},
-	"int64":    {goExpr: goInt64, sqlType: sqlBigint},
-	"float":    {goExpr: goFloat64, sqlType: sqlDouble},
-	"bool":     {goExpr: goBool, sqlType: sqlBoolean},
-	"decimal":  {goExpr: goDecimal, goImport: importDecimal, sqlType: sqlNumeric},
-	"date":     {goExpr: goTime, goImport: importTime, sqlType: sqlDate},
-	"datetime": {goExpr: goTime, goImport: importTime, sqlType: sqlTimestamptz},
-	"uuid":     {goExpr: goUUID, goImport: importUUID, sqlType: sqlUUID},
-	"json":     {goExpr: goJSON, goImport: importJSON, sqlType: sqlJSONB},
+var scalarTypes = map[string]typeInfo{ //nolint:gochecknoglobals // read-only lookup table
+	spec.TypeString:   {goExpr: goString, sqlType: sqlText},
+	spec.TypeText:     {goExpr: goString, sqlType: sqlText},
+	spec.TypeInt32:    {goExpr: goInt32, sqlType: sqlInteger},
+	spec.TypeInt64:    {goExpr: goInt64, sqlType: sqlBigint},
+	spec.TypeFloat:    {goExpr: goFloat64, sqlType: sqlDouble},
+	spec.TypeBool:     {goExpr: goBool, sqlType: sqlBoolean},
+	spec.TypeDecimal:  {goExpr: goDecimal, goImport: importDecimal, sqlType: sqlNumeric},
+	spec.TypeDate:     {goExpr: goTime, goImport: importTime, sqlType: sqlDate},
+	spec.TypeDatetime: {goExpr: goTime, goImport: importTime, sqlType: sqlTimestamptz},
+	spec.TypeUUID:     {goExpr: goUUID, goImport: importUUID, sqlType: sqlUUID},
+	spec.TypeJSON:     {goExpr: goJSON, goImport: importJSON, sqlType: sqlJSONB},
 }
 
 // isNullable reports whether a field maps to a nullable column. It is the single
@@ -93,6 +93,12 @@ func scalarType(t string) (goType, bool) {
 	return goType{expr: ti.goExpr, imp: ti.goImport}, true
 }
 
+const (
+	exprPathValue = "r.PathValue(pathParamID)"
+	exprParseInt  = "strconv.ParseInt(%s, 10, %d)"
+	exprParseUUID = "uuid.Parse(%s)"
+)
+
 // pkParse describes how a primary key of the given Go type is parsed from the
 // `{id}` path segment inside a handler.
 type pkParse struct {
@@ -105,16 +111,17 @@ type pkParse struct {
 // pkParser returns how to parse a path id into the given Go primary-key type.
 // ok is false for types we do not generate handlers for (decimal, time, json).
 func pkParser(goExpr string) (pkParse, bool) {
+	id := exprPathValue
 	switch goExpr {
 	case goString:
-		return pkParse{expr: `r.PathValue("id")`}, true
+		return pkParse{expr: id}, true
 	case goInt32:
 		// strconv has no parse-to-int32, so parse with a 32-bit size and cast.
-		return pkParse{expr: `strconv.ParseInt(r.PathValue("id"), 10, 32)`, needsErr: true, imp: importStrconv, cast: goInt32}, true
+		return pkParse{expr: fmt.Sprintf(exprParseInt, id, 32), needsErr: true, imp: importStrconv, cast: goInt32}, true
 	case goInt64:
-		return pkParse{expr: `strconv.ParseInt(r.PathValue("id"), 10, 64)`, needsErr: true, imp: importStrconv}, true
+		return pkParse{expr: fmt.Sprintf(exprParseInt, id, 64), needsErr: true, imp: importStrconv}, true
 	case goUUID:
-		return pkParse{expr: `uuid.Parse(r.PathValue("id"))`, needsErr: true, imp: importUUID}, true
+		return pkParse{expr: fmt.Sprintf(exprParseUUID, id), needsErr: true, imp: importUUID}, true
 	}
 	return pkParse{}, false
 }
@@ -123,7 +130,7 @@ func pkParser(goExpr string) (pkParse, bool) {
 // the target entity's single primary-key field (validation guarantees the
 // target exists and is not composite).
 func fieldType(f spec.Field, byName map[string]*spec.Entity) (goType, error) {
-	if f.Type != "references" {
+	if f.Type != spec.TypeReferences {
 		gt, ok := scalarType(f.Type)
 		if !ok {
 			return goType{}, fmt.Errorf("unsupported field type %q", f.Type)
@@ -133,7 +140,7 @@ func fieldType(f spec.Field, byName map[string]*spec.Entity) (goType, error) {
 
 	target := byName[f.Target]
 	pk := target.PrimaryKey()[0]
-	if pk.Type == "references" {
+	if pk.Type == spec.TypeReferences {
 		return goType{}, fmt.Errorf("reference to %q whose primary key %q is itself a reference (not supported)", f.Target, pk.Name)
 	}
 	gt, ok := scalarType(pk.Type)

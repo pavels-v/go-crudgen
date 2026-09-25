@@ -58,12 +58,12 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		Entities: []spec.Entity{{
 			Name: "Product",
 			Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "name", Type: "string", Required: true, Validate: "min=1"},
-				{Name: "price", Type: "decimal"},
-				{Name: "in_stock", Type: "bool"},
-				{Name: "released_at", Type: "datetime"},
-				{Name: "metadata", Type: "json"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "name", Type: spec.TypeString, Required: true, Validate: "min=1"},
+				{Name: "price", Type: spec.TypeDecimal},
+				{Name: "in_stock", Type: spec.TypeBool},
+				{Name: "released_at", Type: spec.TypeDatetime},
+				{Name: "metadata", Type: spec.TypeJSON},
 			},
 		}},
 	}
@@ -99,11 +99,11 @@ func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
 		Package: "blog",
 		Entities: []spec.Entity{
 			{Name: "Author", Fields: []spec.Field{
-				{Name: "id", Type: "int64", Primary: true},
+				{Name: "id", Type: spec.TypeInt64, Primary: true},
 			}},
 			{Name: "Post", Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "author", Type: "references", Target: "Author"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "author", Type: spec.TypeReferences, Target: "Author"},
 			}},
 		},
 	}
@@ -122,7 +122,7 @@ func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
 		Package: "app",
 		Entities: []spec.Entity{{
 			Name:    "Session",
-			Fields:  []spec.Field{{Name: "id", Type: "uuid", Primary: true}},
+			Fields:  []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}},
 			Options: spec.EntityOptions{Timestamps: true, SoftDelete: true},
 		}},
 	}
@@ -170,8 +170,8 @@ func TestRenderModel_DTOs(t *testing.T) {
 		Entities: []spec.Entity{{
 			Name: "Post",
 			Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "title", Type: "string", Required: true},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "title", Type: spec.TypeString, Required: true},
 			},
 			Options: spec.EntityOptions{Timestamps: true},
 		}},
@@ -191,7 +191,8 @@ func TestRenderModel_DTOs(t *testing.T) {
 		"type UpdatePostRequest struct { ID uuid.UUID",
 		"UpdatePostRequest should not contain the primary key field")
 	// ...and DTOs never carry the option-injected timestamp fields.
-	create := got[strings.Index(got, "type CreatePostRequest"):]
+	_, create, ok := strings.Cut(got, "type CreatePostRequest")
+	require.True(t, ok, "CreatePostRequest should be generated")
 	require.NotContains(t, create, "CreatedAt", "DTOs should not contain timestamp fields")
 }
 
@@ -204,8 +205,8 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 			Name:   "Post",
 			Plural: "posts",
 			Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "title", Type: "string", Required: true},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "title", Type: spec.TypeString, Required: true},
 			},
 		}},
 	}
@@ -218,7 +219,7 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		`mux.HandleFunc("PUT /posts/{id}", h.Update)`,
 		`mux.HandleFunc("DELETE /posts/{id}", h.Delete)`,
 		"Get(ctx context.Context, id uuid.UUID) (*Post, error)",
-		"id, err := uuid.Parse(r.PathValue(\"id\"))",
+		"id, err := uuid.Parse(r.PathValue(pathParamID))",
 		"writeJSON(w, http.StatusCreated, m)",
 		"w.WriteHeader(http.StatusNoContent)",
 	} {
@@ -233,12 +234,12 @@ func TestRenderHandler_StringPKNeedsNoParse(t *testing.T) {
 		Package: "cat",
 		Entities: []spec.Entity{{
 			Name:   "Tag",
-			Fields: []spec.Field{{Name: "slug", Type: "string", Primary: true}},
+			Fields: []spec.Field{{Name: "slug", Type: spec.TypeString, Primary: true}},
 		}},
 	}
 
 	got := renderHandlerSrc(t, s, "Tag")
-	wantContains(t, got, `id := r.PathValue("id")`)
+	wantContains(t, got, `id := r.PathValue(pathParamID)`)
 }
 
 func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
@@ -250,13 +251,13 @@ func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
 		Package: "shop",
 		Entities: []spec.Entity{{
 			Name:   "Widget",
-			Fields: []spec.Field{{Name: "id", Type: "int32", Primary: true}},
+			Fields: []spec.Field{{Name: "id", Type: spec.TypeInt32, Primary: true}},
 		}},
 	}
 
 	got := renderHandlerSrc(t, s, "Widget")
 	for _, want := range []string{
-		`idRaw, err := strconv.ParseInt(r.PathValue("id"), 10, 32)`,
+		`idRaw, err := strconv.ParseInt(r.PathValue(pathParamID), 10, 32)`,
 		"id := int32(idRaw)",
 		"Get(ctx context.Context, id int32) (*Widget, error)",
 	} {
@@ -299,9 +300,9 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 			Name:   "Post",
 			Plural: "posts",
 			Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "title", Type: "string", Required: true},
-				{Name: "body", Type: "text"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "title", Type: spec.TypeString, Required: true},
+				{Name: "body", Type: spec.TypeText},
 			},
 			Options: spec.EntityOptions{Timestamps: true},
 		}},
@@ -345,8 +346,8 @@ func TestRenderRepo_SoftDeleteFiltersAndUpdates(t *testing.T) {
 		Entities: []spec.Entity{{
 			Name: "Account",
 			Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "name", Type: "string"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "name", Type: spec.TypeString},
 			},
 			Options: spec.EntityOptions{SoftDelete: true},
 		}},
@@ -377,7 +378,7 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 		Package: "cat",
 		Entities: []spec.Entity{{
 			Name:   "Tag",
-			Fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}},
+			Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}},
 		}},
 	}
 
@@ -412,17 +413,17 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 	}{
 		{
 			name:   "a non-required column is nullable",
-			fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "body", Type: "text"}},
+			fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "body", Type: spec.TypeText}},
 			want:   true,
 		},
 		{
 			name:   "all columns required or primary",
-			fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "value", Type: "string", Required: true}},
+			fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "value", Type: spec.TypeString, Required: true}},
 			want:   false,
 		},
 		{
 			name:   "soft delete adds a nullable deleted_at",
-			fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "value", Type: "string", Required: true}},
+			fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "value", Type: spec.TypeString, Required: true}},
 			want:   false, // overridden below for the soft-delete sub-case
 		},
 	}
@@ -443,7 +444,7 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 
 		s := &spec.Spec{Package: "app", Entities: []spec.Entity{{
 			Name:    "Thing",
-			Fields:  []spec.Field{{Name: "id", Type: "uuid", Primary: true}, {Name: "value", Type: "string", Required: true}},
+			Fields:  []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "value", Type: spec.TypeString, Required: true}},
 			Options: spec.EntityOptions{SoftDelete: true},
 		}}}
 		rd, err := repoInfo(s, &s.Entities[0], byNameOf(s))
@@ -511,15 +512,15 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 		Package: "blog",
 		Entities: []spec.Entity{
 			{Name: "Author", Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
 			}},
 			{Name: "Post", Plural: "posts", Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "title", Type: "string", Required: true},
-				{Name: "body", Type: "text"},
-				{Name: "published", Type: "bool", Default: false},
-				{Name: "slug", Type: "string", Unique: true, Index: true},
-				{Name: "author", Type: "references", Target: "Author"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "title", Type: spec.TypeString, Required: true},
+				{Name: "body", Type: spec.TypeText},
+				{Name: "published", Type: spec.TypeBool, Default: false},
+				{Name: "slug", Type: spec.TypeString, Unique: true, Index: true},
+				{Name: "author", Type: spec.TypeReferences, Target: "Author"},
 			}, Options: spec.EntityOptions{Timestamps: true, SoftDelete: true}},
 		},
 	}
@@ -532,11 +533,11 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 		"-- +goose StatementBegin",
 		"-- +goose StatementEnd",
 		"CREATE TABLE posts (",
-		"id UUID NOT NULL PRIMARY KEY",    // single PK declared inline
-		"title TEXT NOT NULL",             // required -> NOT NULL
-		"body TEXT,",                      // optional column is nullable
-		"published BOOLEAN DEFAULT FALSE", // bool default rendered as SQL literal
-		"slug TEXT UNIQUE",                // unique modifier
+		"id UUID NOT NULL PRIMARY KEY",        // single PK declared inline
+		"title TEXT NOT NULL",                 // required -> NOT NULL
+		"body TEXT,",                          // optional column is nullable
+		"published BOOLEAN DEFAULT FALSE",     // bool default rendered as SQL literal
+		"slug TEXT UNIQUE",                    // unique modifier
 		"author UUID REFERENCES authors (id)", // FK column typed from + pointing at the target PK
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
@@ -570,10 +571,10 @@ func TestMigrationOrder(t *testing.T) {
 		// so its table exists when the posts foreign key is created.
 		s := &spec.Spec{Package: "blog", Entities: []spec.Entity{
 			{Name: "Post", Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "author", Type: "references", Target: "Author"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "author", Type: spec.TypeReferences, Target: "Author"},
 			}},
-			{Name: "Author", Fields: []spec.Field{{Name: "id", Type: "uuid", Primary: true}}},
+			{Name: "Author", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
 		}}
 
 		order, err := migrationOrder(s.Entities, byNameOf(s))
@@ -587,8 +588,8 @@ func TestMigrationOrder(t *testing.T) {
 
 		s := &spec.Spec{Package: "tree", Entities: []spec.Entity{
 			{Name: "Node", Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "parent", Type: "references", Target: "Node"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "parent", Type: spec.TypeReferences, Target: "Node"},
 			}},
 		}}
 
@@ -602,12 +603,12 @@ func TestMigrationOrder(t *testing.T) {
 
 		s := &spec.Spec{Package: "loop", Entities: []spec.Entity{
 			{Name: "A", Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "b", Type: "references", Target: "B"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "b", Type: spec.TypeReferences, Target: "B"},
 			}},
 			{Name: "B", Fields: []spec.Field{
-				{Name: "id", Type: "uuid", Primary: true},
-				{Name: "a", Type: "references", Target: "A"},
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "a", Type: spec.TypeReferences, Target: "A"},
 			}},
 		}}
 
@@ -620,24 +621,24 @@ func TestSQLType(t *testing.T) {
 	t.Parallel()
 
 	byName := map[string]*spec.Entity{
-		"Author": {Name: "Author", Fields: []spec.Field{{Name: "id", Type: "int64", Primary: true}}},
+		"Author": {Name: "Author", Fields: []spec.Field{{Name: "id", Type: spec.TypeInt64, Primary: true}}},
 	}
 	cases := []struct {
 		name  string
 		field spec.Field
 		want  string
 	}{
-		{name: "string", field: spec.Field{Type: "string"}, want: "TEXT"},
-		{name: "int32", field: spec.Field{Type: "int32"}, want: "INTEGER"},
-		{name: "int64", field: spec.Field{Type: "int64"}, want: "BIGINT"},
-		{name: "float", field: spec.Field{Type: "float"}, want: "DOUBLE PRECISION"},
-		{name: "decimal", field: spec.Field{Type: "decimal"}, want: "NUMERIC"},
-		{name: "bool", field: spec.Field{Type: "bool"}, want: "BOOLEAN"},
-		{name: "date", field: spec.Field{Type: "date"}, want: "DATE"},
-		{name: "datetime", field: spec.Field{Type: "datetime"}, want: "TIMESTAMPTZ"},
-		{name: "uuid", field: spec.Field{Type: "uuid"}, want: "UUID"},
-		{name: "json", field: spec.Field{Type: "json"}, want: "JSONB"},
-		{name: "reference takes target PK type", field: spec.Field{Type: "references", Target: "Author"}, want: "BIGINT"},
+		{name: "string", field: spec.Field{Type: spec.TypeString}, want: "TEXT"},
+		{name: "int32", field: spec.Field{Type: spec.TypeInt32}, want: "INTEGER"},
+		{name: "int64", field: spec.Field{Type: spec.TypeInt64}, want: "BIGINT"},
+		{name: "float", field: spec.Field{Type: spec.TypeFloat}, want: "DOUBLE PRECISION"},
+		{name: "decimal", field: spec.Field{Type: spec.TypeDecimal}, want: "NUMERIC"},
+		{name: "bool", field: spec.Field{Type: spec.TypeBool}, want: "BOOLEAN"},
+		{name: "date", field: spec.Field{Type: spec.TypeDate}, want: "DATE"},
+		{name: "datetime", field: spec.Field{Type: spec.TypeDatetime}, want: "TIMESTAMPTZ"},
+		{name: "uuid", field: spec.Field{Type: spec.TypeUUID}, want: "UUID"},
+		{name: "json", field: spec.Field{Type: spec.TypeJSON}, want: "JSONB"},
+		{name: "reference takes target PK type", field: spec.Field{Type: spec.TypeReferences, Target: "Author"}, want: "BIGINT"},
 	}
 
 	for _, tc := range cases {
@@ -688,8 +689,8 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 		wantImport string
 	}{
 		{name: "default is pgx", driver: "", wantName: `"pgx"`, wantImport: `_ "github.com/jackc/pgx/v5/stdlib"`},
-		{name: "explicit pgx", driver: "pgx", wantName: `"pgx"`, wantImport: `_ "github.com/jackc/pgx/v5/stdlib"`},
-		{name: "pq maps to postgres", driver: "pq", wantName: `"postgres"`, wantImport: `_ "github.com/lib/pq"`},
+		{name: "explicit pgx", driver: DriverPgx, wantName: `"pgx"`, wantImport: `_ "github.com/jackc/pgx/v5/stdlib"`},
+		{name: "pq maps to postgres", driver: DriverPq, wantName: `"postgres"`, wantImport: `_ "github.com/lib/pq"`},
 	}
 
 	for _, tc := range cases {
@@ -810,6 +811,37 @@ func TestSnakeCase(t *testing.T) {
 			t.Parallel()
 
 			require.Equal(t, tc.want, snakeCase(tc.in))
+		})
+	}
+}
+
+func TestGroupImports(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "empty", in: nil, want: nil},
+		{name: "stdlib only", in: []string{importTime, importContext}, want: []string{importContext, importTime}},
+		{name: "third-party only", in: []string{importUUID, importDecimal}, want: []string{importUUID, importDecimal}},
+		{
+			name: "mixed split by blank entry",
+			in:   []string{importSQLx, importTime, importUUID, importContext},
+			want: []string{importContext, importTime, "", importUUID, importSQLx},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			set := make(map[string]struct{}, len(tc.in))
+			for _, imp := range tc.in {
+				set[imp] = struct{}{}
+			}
+			require.Equal(t, tc.want, groupImports(set))
 		})
 	}
 }

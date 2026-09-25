@@ -84,7 +84,7 @@ func TestIntegration(t *testing.T) {
 		id := uuid.New()
 
 		// Body and Author are omitted, so they must be stored and returned as NULL
-		// (nil pointers) — the sql.Null[T] round-trip on the repository row.
+		// (nil pointers) - the sql.Null[T] round-trip on the repository row.
 		var created blog.Post
 		do(t, srv, http.MethodPost, "/posts",
 			blog.CreatePostRequest{ID: id, Title: "No body"},
@@ -151,7 +151,7 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoErrorf(t, err, "%s %s", method, path)
-	defer resp.Body.Close()
+	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	if resp.StatusCode != wantStatus {
 		b, _ := io.ReadAll(resp.Body)

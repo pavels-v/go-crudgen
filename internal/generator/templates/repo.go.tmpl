@@ -2,7 +2,7 @@ package {{ .Package }}
 
 import (
 {{- range .Imports }}
-	{{ printf "%q" . }}
+	{{ if . }}{{ printf "%q" . }}{{ end }}
 {{- end }}
 )
 
@@ -72,11 +72,10 @@ func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Struct }}) error {
 
 func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Struct }}, error) {
 	var row {{ .RowStruct }}
-	err := r.db.GetContext(ctx, &row, get{{ .Struct }}SQL, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
+	if err := r.db.GetContext(ctx, &row, get{{ .Struct }}SQL, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("get {{ .LowerStruct }}: %w", err)
 	}
 	m := row.toModel()
@@ -98,21 +97,19 @@ func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .St
 func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Struct }}) error {
 	row := {{ .NewRowFunc }}(m)
 {{- if .HasTimestamps }}
-	err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan({{ .UpdateScan }})
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
+	if err := r.db.QueryRowContext(ctx, update{{ .Struct }}SQL, {{ .UpdateArgs }}).Scan({{ .UpdateScan }}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
 	}
 {{- else if .NoUpdateColumns }}
 	// {{ .Struct }} has no writable columns; verify the row exists.
 	var exists int
-	err := r.db.GetContext(ctx, &exists, update{{ .Struct }}SQL, {{ .UpdateArgs }})
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
+	if err := r.db.GetContext(ctx, &exists, update{{ .Struct }}SQL, {{ .UpdateArgs }}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
 	}
 {{- else }}

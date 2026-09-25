@@ -18,7 +18,44 @@ import (
 //go:embed templates/*.tmpl
 var templates embed.FS
 
-var tmpl = template.Must(template.ParseFS(templates, "templates/*.tmpl"))
+const (
+	templatesGlob = "templates/*.tmpl"
+	tmplModel     = "model.go.tmpl"
+	tmplHandler   = "handler.go.tmpl"
+	tmplRepo      = "repo.go.tmpl"
+	tmplNulls     = "nulls.go.tmpl"
+	tmplDB        = "db.go.tmpl"
+	tmplHTTP      = "http.go.tmpl"
+	tmplMigration = "migration.sql.tmpl"
+)
+
+const (
+	fileModel     = "%s.gen.go"
+	fileHandler   = "%s_handler.gen.go"
+	fileRepo      = "%s_repo.gen.go"
+	fileHTTP      = "http.gen.go"
+	fileDB        = "db.gen.go"
+	fileNulls     = "nulls.gen.go"
+	fileMigration = "migrations/%05d_create_%s.sql"
+)
+
+const (
+	nameRepo          = "%sRepository"
+	nameCreateRequest = "Create%sRequest"
+	nameUpdateRequest = "Update%sRequest"
+)
+
+const (
+	importPathSep = "/"
+	importHostDot = "."
+)
+
+const (
+	ruleRequired = "required"
+	ruleSep      = ","
+)
+
+var tmpl = template.Must(template.ParseFS(templates, templatesGlob)) //nolint:gochecknoglobals // parsed once from embedded templates
 
 // Options controls generation output.
 type Options struct {
@@ -60,7 +97,7 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	if !toStdout {
 		if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
-			return fmt.Errorf("creating output dir: %w", err)
+			return fmt.Errorf("create output dir: %w", err)
 		}
 	}
 
@@ -82,17 +119,19 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	emit := func(file string, src []byte) error {
 		if toStdout {
-			fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", file, src)
+			if _, err := fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", file, src); err != nil {
+				return fmt.Errorf("write %s: %w", file, err)
+			}
 			return nil
 		}
 		path := filepath.Join(opts.OutDir, file)
 		if dir := filepath.Dir(path); dir != opts.OutDir {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return fmt.Errorf("creating %s: %w", dir, err)
+				return fmt.Errorf("create %s: %w", dir, err)
 			}
 		}
-		if err := os.WriteFile(path, src, 0o644); err != nil {
-			return fmt.Errorf("writing %s: %w", path, err)
+		if err := os.WriteFile(path, src, 0o644); err != nil { //nolint:gosec // generated source is world-readable
+			return fmt.Errorf("write %s: %w", path, err)
 		}
 		fmt.Fprintf(os.Stderr, "  wrote %s\n", path)
 		return nil
@@ -106,9 +145,10 @@ func Generate(s *spec.Spec, opts Options) error {
 
 		src, err := renderModel(s, e, byName)
 		if err != nil {
-			return fmt.Errorf("generating model for %q: %w", e.Name, err)
+			return fmt.Errorf("generate model for %q: %w", e.Name, err)
 		}
-		if err := emit(base+".gen.go", src); err != nil {
+		err = emit(fmt.Sprintf(fileModel, base), src)
+		if err != nil {
 			return err
 		}
 
@@ -117,38 +157,41 @@ func Generate(s *spec.Spec, opts Options) error {
 		// migrationOrder) so foreign keys resolve when goose applies them.
 		md, err := migrationInfo(e, byName)
 		if err != nil {
-			return fmt.Errorf("generating migration for %q: %w", e.Name, err)
+			return fmt.Errorf("generate migration for %q: %w", e.Name, err)
 		}
 		msrc, err := renderMigration(md)
 		if err != nil {
-			return fmt.Errorf("generating migration for %q: %w", e.Name, err)
+			return fmt.Errorf("generate migration for %q: %w", e.Name, err)
 		}
-		migFile := fmt.Sprintf("migrations/%05d_create_%s.sql", migNum[e.Name], plural(e.Name, e.Plural))
-		if err := emit(migFile, msrc); err != nil {
+		migFile := fmt.Sprintf(fileMigration, migNum[e.Name], plural(e.Name, e.Plural))
+		err = emit(migFile, msrc)
+		if err != nil {
 			return err
 		}
 
 		hd, err := handlerInfo(s, e, byName)
 		if err != nil {
-			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
+			return fmt.Errorf("generate handlers for %q: %w", e.Name, err)
 		}
 		hsrc, err := renderHandler(hd)
 		if err != nil {
-			return fmt.Errorf("generating handlers for %q: %w", e.Name, err)
+			return fmt.Errorf("generate handlers for %q: %w", e.Name, err)
 		}
-		if err := emit(base+"_handler.gen.go", hsrc); err != nil {
+		err = emit(fmt.Sprintf(fileHandler, base), hsrc)
+		if err != nil {
 			return err
 		}
 
 		rd, err := repoInfo(s, e, byName)
 		if err != nil {
-			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
+			return fmt.Errorf("generate repository for %q: %w", e.Name, err)
 		}
 		rsrc, err := renderRepo(rd)
 		if err != nil {
-			return fmt.Errorf("generating repository for %q: %w", e.Name, err)
+			return fmt.Errorf("generate repository for %q: %w", e.Name, err)
 		}
-		if err := emit(base+"_repo.gen.go", rsrc); err != nil {
+		err = emit(fmt.Sprintf(fileRepo, base), rsrc)
+		if err != nil {
 			return err
 		}
 		anyNullable = anyNullable || rd.HasNullable
@@ -163,17 +206,19 @@ func Generate(s *spec.Spec, opts Options) error {
 	if len(serveable) > 0 {
 		ssrc, err := renderShared(sharedData{Package: s.Package, Entities: serveable})
 		if err != nil {
-			return fmt.Errorf("generating router: %w", err)
+			return fmt.Errorf("generate router: %w", err)
 		}
-		if err := emit("http.gen.go", ssrc); err != nil {
+		err = emit(fileHTTP, ssrc)
+		if err != nil {
 			return err
 		}
 
 		dbsrc, err := renderDB(dbData{Package: s.Package, DriverName: driverName, DriverImport: driverImp})
 		if err != nil {
-			return fmt.Errorf("generating db connection: %w", err)
+			return fmt.Errorf("generate db connection: %w", err)
 		}
-		if err := emit("db.gen.go", dbsrc); err != nil {
+		err = emit(fileDB, dbsrc)
+		if err != nil {
 			return err
 		}
 
@@ -182,9 +227,10 @@ func Generate(s *spec.Spec, opts Options) error {
 		if anyNullable {
 			nsrc, err := renderNulls(nullsData{Package: s.Package})
 			if err != nil {
-				return fmt.Errorf("generating null helpers: %w", err)
+				return fmt.Errorf("generate null helpers: %w", err)
 			}
-			if err := emit("nulls.gen.go", nsrc); err != nil {
+			err = emit(fileNulls, nsrc)
+			if err != nil {
 				return err
 			}
 		}
@@ -281,10 +327,10 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	data := handlerData{
 		Package:    s.Package,
 		Struct:     name,
-		Repo:       name + "Repository",
+		Repo:       fmt.Sprintf(nameRepo, name),
 		Plural:     plural(e.Name, e.Plural),
-		CreateName: "Create" + name + "Request",
-		UpdateName: "Update" + name + "Request",
+		CreateName: fmt.Sprintf(nameCreateRequest, name),
+		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 		PK: pkData{
 			GoName:   pascalCase(pk.Name),
 			GoType:   gt.expr,
@@ -301,14 +347,11 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 	}
 
-	imports := map[string]struct{}{"context": {}, "net/http": {}}
+	imports := map[string]struct{}{importContext: {}, importNetHTTP: {}}
 	if pp.imp != "" {
 		imports[pp.imp] = struct{}{}
 	}
-	for imp := range imports {
-		data.Imports = append(data.Imports, imp)
-	}
-	sort.Strings(data.Imports)
+	data.Imports = groupImports(imports)
 	return data, nil
 }
 
@@ -316,11 +359,11 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 func renderTemplate(name string, data any) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
-		return nil, fmt.Errorf("rendering %s: %w", name, err)
+		return nil, fmt.Errorf("render %s: %w", name, err)
 	}
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
-		return nil, fmt.Errorf("formatting generated source: %w", err)
+		return nil, fmt.Errorf("format generated source: %w", err)
 	}
 	return formatted, nil
 }
@@ -329,17 +372,17 @@ func renderTemplate(name string, data any) ([]byte, error) {
 // templates it skips gofmt: the output is SQL, not Go source.
 func renderMigration(data migrationData) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "migration.sql.tmpl", data); err != nil {
-		return nil, fmt.Errorf("rendering migration: %w", err)
+	if err := tmpl.ExecuteTemplate(&buf, tmplMigration, data); err != nil {
+		return nil, fmt.Errorf("render migration: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-func renderHandler(data handlerData) ([]byte, error) { return renderTemplate("handler.go.tmpl", data) }
-func renderRepo(data repoData) ([]byte, error)       { return renderTemplate("repo.go.tmpl", data) }
-func renderNulls(data nullsData) ([]byte, error)     { return renderTemplate("nulls.go.tmpl", data) }
-func renderDB(data dbData) ([]byte, error)           { return renderTemplate("db.go.tmpl", data) }
-func renderShared(data sharedData) ([]byte, error)   { return renderTemplate("http.go.tmpl", data) }
+func renderHandler(data handlerData) ([]byte, error) { return renderTemplate(tmplHandler, data) }
+func renderRepo(data repoData) ([]byte, error)       { return renderTemplate(tmplRepo, data) }
+func renderNulls(data nullsData) ([]byte, error)     { return renderTemplate(tmplNulls, data) }
+func renderDB(data dbData) ([]byte, error)           { return renderTemplate(tmplDB, data) }
+func renderShared(data sharedData) ([]byte, error)   { return renderTemplate(tmplHTTP, data) }
 
 // renderModel builds, executes, and gofmt-formats the model file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
@@ -348,8 +391,8 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		Package:    s.Package,
 		Struct:     name,
 		Lower:      strings.ToLower(name),
-		CreateName: "Create" + name + "Request",
-		UpdateName: "Update" + name + "Request",
+		CreateName: fmt.Sprintf(nameCreateRequest, name),
+		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 	}
 	imports := make(map[string]struct{})
 
@@ -386,12 +429,9 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		add(oc.Column, oc.GoType, importTime, oc.JSONTag)
 	}
 
-	for imp := range imports {
-		data.Imports = append(data.Imports, imp)
-	}
-	sort.Strings(data.Imports)
+	data.Imports = groupImports(imports)
 
-	return renderTemplate("model.go.tmpl", data)
+	return renderTemplate(tmplModel, data)
 }
 
 // modelType returns a field's Go type in the API model and DTOs: a pointer for
@@ -399,7 +439,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 // value, and the bare type otherwise.
 func modelType(f spec.Field, base string) string {
 	if isNullable(f) {
-		return "*" + base
+		return fmt.Sprintf(exprPointer, base)
 	}
 	return base
 }
@@ -412,19 +452,37 @@ func fieldTag(f spec.Field) string {
 	if isNullable(f) {
 		jsonName += ",omitempty"
 	}
-	tag := fmt.Sprintf("json:%q", jsonName)
+	tag := fmt.Sprintf(tagJSON, jsonName)
 
 	var rules []string
-	if f.Required && !strings.Contains(f.Validate, "required") {
-		rules = append(rules, "required")
+	if f.Required && !strings.Contains(f.Validate, ruleRequired) {
+		rules = append(rules, ruleRequired)
 	}
 	if f.Validate != "" {
 		rules = append(rules, f.Validate)
 	}
 	if len(rules) > 0 {
-		tag += fmt.Sprintf(" validate:%q", strings.Join(rules, ","))
+		tag += fmt.Sprintf(tagValidate, strings.Join(rules, ruleSep))
 	}
 	return tag
+}
+
+func groupImports(set map[string]struct{}) []string {
+	var std, ext []string
+	for imp := range set {
+		host, _, _ := strings.Cut(imp, importPathSep)
+		if strings.Contains(host, importHostDot) {
+			ext = append(ext, imp)
+			continue
+		}
+		std = append(std, imp)
+	}
+	sort.Strings(std)
+	sort.Strings(ext)
+	if len(std) == 0 || len(ext) == 0 {
+		return append(std, ext...)
+	}
+	return append(append(std, ""), ext...)
 }
 
 func entityWord(n int) string {

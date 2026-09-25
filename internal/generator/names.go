@@ -3,14 +3,14 @@ package generator
 import "strings"
 
 // initialisms get fully upper-cased in Go identifiers for idiomatic output.
-var initialisms = map[string]bool{
-	"id":   true,
-	"uuid": true,
-	"url":  true,
-	"api":  true,
-	"http": true,
-	"json": true,
-	"sql":  true,
+var initialisms = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+	"id":   {},
+	"uuid": {},
+	"url":  {},
+	"api":  {},
+	"http": {},
+	"json": {},
+	"sql":  {},
 }
 
 // splitWords breaks an identifier on underscores, hyphens, and spaces.
@@ -25,7 +25,7 @@ func splitWords(s string) []string {
 func pascalCase(s string) string {
 	var b strings.Builder
 	for _, w := range splitWords(s) {
-		if initialisms[strings.ToLower(w)] {
+		if _, ok := initialisms[strings.ToLower(w)]; ok {
 			b.WriteString(strings.ToUpper(w))
 			continue
 		}

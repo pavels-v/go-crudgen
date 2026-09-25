@@ -22,6 +22,21 @@ type EntityOptions struct {
 	SoftDelete bool `yaml:"soft_delete"`
 }
 
+const (
+	TypeString     = "string"
+	TypeText       = "text"
+	TypeInt32      = "int32"
+	TypeInt64      = "int64"
+	TypeFloat      = "float"
+	TypeDecimal    = "decimal"
+	TypeBool       = "bool"
+	TypeDate       = "date"
+	TypeDatetime   = "datetime"
+	TypeUUID       = "uuid"
+	TypeJSON       = "json"
+	TypeReferences = "references"
+)
+
 // Field is a single attribute of an entity.
 type Field struct {
 	Name     string `yaml:"name"`

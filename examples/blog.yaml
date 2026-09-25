@@ -7,7 +7,7 @@ entities:
     fields:
       - name: id
         type: uuid
-        primary: true      # at least one primary field is required per entity
+        primary: true      # exactly one primary field is required per entity
       - name: title
         type: string
         required: true
