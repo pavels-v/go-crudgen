@@ -44,6 +44,9 @@ linters:
         - G104 # handled by errcheck
     misspell:
       locale: US
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     revive:
       rules:
         - name: blank-imports
