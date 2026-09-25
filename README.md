@@ -84,7 +84,9 @@ Developer tasks: `make help`.
 | `PUT`    | `/{plural}/{id}` | Update                           |
 | `DELETE` | `/{plural}/{id}` | Delete                           |
 
-Errors: `404` not found, `409` unique violation or deleting a referenced row, `422` unknown reference, `500` without internal details.
+Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset"}`), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
+
+Errors: `400` malformed body, id or query, `404` not found, `405` method not allowed, `409` unique violation or deleting a referenced row, `413` body over 1 MiB, `422` failed validation or unknown reference, `500` without internal details.
 
 ## Spec
 
