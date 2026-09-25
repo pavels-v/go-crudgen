@@ -532,11 +532,11 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 		"-- +goose StatementBegin",
 		"-- +goose StatementEnd",
 		"CREATE TABLE posts (",
-		"id UUID NOT NULL PRIMARY KEY",    // single PK declared inline
-		"title TEXT NOT NULL",             // required -> NOT NULL
-		"body TEXT,",                      // optional column is nullable
-		"published BOOLEAN DEFAULT FALSE", // bool default rendered as SQL literal
-		"slug TEXT UNIQUE",                // unique modifier
+		"id UUID NOT NULL PRIMARY KEY",        // single PK declared inline
+		"title TEXT NOT NULL",                 // required -> NOT NULL
+		"body TEXT,",                          // optional column is nullable
+		"published BOOLEAN DEFAULT FALSE",     // bool default rendered as SQL literal
+		"slug TEXT UNIQUE",                    // unique modifier
 		"author UUID REFERENCES authors (id)", // FK column typed from + pointing at the target PK
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
