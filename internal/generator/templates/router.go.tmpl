@@ -100,6 +100,7 @@ const (
 	pathParamID     = "id"
 	queryLimit      = "limit"
 	queryOffset     = "offset"
+	querySort       = "sort"
 	contentTypeJSON = "application/json"
 	tagJSON         = "json"
 	tagOptionSep    = ","
@@ -225,25 +226,91 @@ const (
 	maxLimit     = 200
 )
 
-// parsePage reads the optional ?limit= and ?offset= query parameters. A limit
-// above maxLimit is clamped; a malformed or out-of-range value is an error
-// detail naming the parameter.
-func parsePage(r *http.Request) (limit, offset int, details []errorDetail) {
-	limit, offset = defaultLimit, 0
-	q := r.URL.Query()
-	if v := q.Get(queryLimit); v != "" {
+type listQuery struct {
+	values  url.Values
+	details []errorDetail
+}
+
+// newListQuery accepts the paging parameters plus keys; any other parameter,
+// and any parameter given more than once, is an error detail.
+func newListQuery(r *http.Request, keys ...string) *listQuery {
+	q := &listQuery{values: r.URL.Query()}
+	for _, key := range slices.Sorted(maps.Keys(q.values)) {
+		switch {
+		case key != queryLimit && key != queryOffset && !slices.Contains(keys, key):
+			q.details = append(q.details, errorDetail{Field: key, Reason: reasonUnknownField})
+		case len(q.values[key]) > 1:
+			q.details = append(q.details, errorDetail{Field: key, Reason: reasonDuplicateField})
+		}
+	}
+	return q
+}
+
+func (q *listQuery) invalid(key string) {
+	q.details = append(q.details, errorDetail{Field: key, Reason: reasonInvalidValue})
+}
+
+// page reads the optional ?limit= and ?offset= query parameters. A limit above
+// maxLimit is clamped.
+func (q *listQuery) page() (limit, offset int) {
+	limit = defaultLimit
+	if v := q.values.Get(queryLimit); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
-			details = append(details, errorDetail{Field: queryLimit, Reason: reasonInvalidValue})
+			q.invalid(queryLimit)
 		}
 		limit = min(n, maxLimit)
 	}
-	if v := q.Get(queryOffset); v != "" {
+	if v := q.values.Get(queryOffset); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			details = append(details, errorDetail{Field: queryOffset, Reason: reasonInvalidValue})
+			q.invalid(queryOffset)
 		}
 		offset = n
 	}
-	return limit, offset, details
+	return limit, offset
+}
+
+// queryValue returns nil when key is absent, so the filter is not applied.
+func queryValue[T any](q *listQuery, key string, parse func(string) (T, error)) *T {
+	if !q.values.Has(key) {
+		return nil
+	}
+	v, err := parse(q.values.Get(key))
+	if err != nil {
+		q.invalid(key)
+		return nil
+	}
+	return &v
+}
+
+func querySortValue[S ~string](q *listQuery, allowed ...S) S {
+	v := S(q.values.Get(querySort))
+	if v == "" || slices.Contains(allowed, v) {
+		return v
+	}
+	q.invalid(querySort)
+	return ""
+}
+
+func parseString(s string) (string, error) {
+	return s, nil
+}
+
+func parseInt32(s string) (int32, error) {
+	n, err := strconv.ParseInt(s, 10, 32)
+	return int32(n), err
+}
+
+func parseInt64(s string) (int64, error) {
+	return strconv.ParseInt(s, 10, 64)
+}
+
+func parseText[T any, P interface {
+	*T
+	encoding.TextUnmarshaler
+}](s string) (T, error) {
+	var v T
+	err := P(&v).UnmarshalText([]byte(s))
+	return v, err
 }

@@ -13,11 +13,33 @@ type {{ .Struct }} struct {
 {{- end }}
 }
 
+{{- if .Sorts }}
+
+type {{ .SortType }} string
+
+const (
+{{- range .Sorts }}
+	{{ .Name }} {{ $.SortType }} = {{ printf "%q" .Value }}
+{{- end }}
+)
+{{- end }}
+
+type {{ .ListParams }} struct {
+{{- range .Filters }}
+	{{ .GoName }} {{ .GoType }}
+{{- end }}
+{{- if .Sorts }}
+	Sort {{ .SortType }}
+{{- end }}
+	Limit  int
+	Offset int
+}
+
 // {{ .Repo }} is the storage interface for {{ .Struct }}.
 type {{ .Repo }} interface {
 	Create(ctx context.Context, m *{{ .Struct }}) error
 	Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Struct }}, error)
-	List(ctx context.Context, limit, offset int) ([]{{ .Struct }}, error)
+	List(ctx context.Context, p {{ .ListParams }}) ([]{{ .Struct }}, error)
 	Update(ctx context.Context, m *{{ .Struct }}) error
 	Delete(ctx context.Context, id {{ .PKGoType }}) error
 }

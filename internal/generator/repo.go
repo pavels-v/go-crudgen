@@ -60,6 +60,10 @@ const (
 	importStrings     = "strings"
 	importSlog        = "log/slog"
 	importValidator   = "github.com/go-playground/validator/v10"
+	importEncoding    = "encoding"
+	importMaps        = "maps"
+	importSlices      = "slices"
+	importNetURL      = "net/url"
 )
 
 // driverInfo maps a --driver choice to its database/sql driver name and the
@@ -170,14 +174,25 @@ type repoData struct {
 
 	CreateSQL string
 	GetSQL    string
-	ListSQL   string
+	ListSQL   string // full query, or the SELECT ... FROM prefix when ListDynamic
 	UpdateSQL string
 	DeleteSQL string
+
+	ListParams  string // qualified domain params, e.g. "blog.PostListParams"
+	ListDynamic bool   // WHERE and ORDER BY are assembled from ListFilters and ListSorts
+	ListFilters []repoFilter
+	ListSorts   []sortOption // Name is the qualified domain constant
+	ListOrder   string       // default ORDER BY
 
 	InsertArgs string // create args, e.g. "row.ID, row.Title"
 	UpdateArgs string // update args: non-PK fields then PK, e.g. "row.Title, row.ID"
 	CreateScan string // scan targets for the create RETURNING clause
 	UpdateScan string // scan targets for the update RETURNING clause
+}
+
+type repoFilter struct {
+	GoName string
+	Clause string // e.g. "author = ?"
 }
 
 // rowField is one field of the repository's row struct.
@@ -196,6 +211,10 @@ type assign struct {
 // repoInfo builds the repository template data for an entity.
 func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (repoData, error) {
 	pk, gt, _, err := serveKey(e, byName)
+	if err != nil {
+		return repoData{}, err
+	}
+	filters, err := listFilters(e, byName)
 	if err != nil {
 		return repoData{}, err
 	}
@@ -302,8 +321,24 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	getSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1",
 		strings.Join(selectCols, ", "), table, pkCol)
 
+	var listFilterData []repoFilter
+	for _, lf := range filters {
+		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, snakeCase(lf.Field.Name))})
+	}
+	if len(listFilterData) > 0 {
+		impSet[importStrings] = struct{}{}
+	}
+	listSorts := sortOptions(e)
+	for i := range listSorts {
+		listSorts[i].Name = qualified(s, listSorts[i].Name)
+	}
+	listDynamic := len(listFilterData) > 0 || len(listSorts) > 0
+
 	listSQL := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s LIMIT $1 OFFSET $2",
 		strings.Join(selectCols, ", "), table, pkCol)
+	if listDynamic {
+		listSQL = fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, ", "), table)
+	}
 
 	// UPDATE: non-PK fields get placeholders $1..$n, the PK gets $n+1.
 	setClauses := make([]string, 0, len(update)+1)
@@ -364,6 +399,11 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		CreateSQL:       createSQL,
 		GetSQL:          getSQL,
 		ListSQL:         listSQL,
+		ListParams:      qualified(s, fmt.Sprintf(nameListParams, name)),
+		ListDynamic:     listDynamic,
+		ListFilters:     listFilterData,
+		ListSorts:       listSorts,
+		ListOrder:       pkCol,
 		UpdateSQL:       updateSQL,
 		DeleteSQL:       deleteSQL,
 		InsertArgs:      strings.Join(insArgs, argSep),

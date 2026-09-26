@@ -74,17 +74,19 @@ func (h *TagHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TagHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset, details := parsePage(r)
-	if details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", details)
+	q := newListQuery(r)
+	p := blog.TagListParams{}
+	p.Limit, p.Offset = q.page()
+	if q.details != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
 	}
-	items, err := h.repo.List(r.Context(), limit, offset)
+	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[blog.Tag]{Items: items, Limit: limit, Offset: offset})
+	writeBody(w, http.StatusOK, page[blog.Tag]{Items: items, Limit: p.Limit, Offset: p.Offset})
 }
 
 func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {

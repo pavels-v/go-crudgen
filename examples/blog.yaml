@@ -12,19 +12,23 @@ entities:
         type: string
         required: true
         validate: "min=1,max=200"
+        sort: true         # ?sort=title or ?sort=-title
       - name: body
         type: text
       - name: published
         type: bool
         default: false
+        filter: true       # ?published=true
       - name: views
         type: int64
         default: 0
+        sort: true
       - name: metadata
         type: json
       - name: author
         type: references   # belongs-to relation
         target: Author
+        filter: true
     options:
       timestamps: true     # adds created_at / updated_at
 
@@ -38,10 +42,12 @@ entities:
         required: true
         unique: true
         validate: "email"
+        filter: true
       - name: name
         type: string
       - name: born_on
         type: date
+        sort: true
 
   - name: Comment
     fields:
@@ -53,6 +59,7 @@ entities:
         target: Post
         required: true
         index: true
+        filter: true         # ?post=<id> lists a post's comments
         on_delete: cascade   # deleting a post deletes its comments
       - name: body
         type: text
@@ -64,6 +71,7 @@ entities:
       - name: posted_at
         type: datetime
         default: now
+        sort: true
 
   - name: Tag
     fields:

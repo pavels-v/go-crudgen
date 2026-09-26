@@ -77,9 +77,50 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Mod
 	return &m, nil
 }
 
-func (r *{{ .Receiver }}) List(ctx context.Context, limit, offset int) ([]{{ .Model }}, error) {
+func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .Model }}, error) {
+{{- if .ListDynamic }}
+{{- if .ListFilters }}
+	var (
+		where []string
+		args  []any
+	)
+{{- range .ListFilters }}
+	if p.{{ .GoName }} != nil {
+		where = append(where, `{{ .Clause }}`)
+		args = append(args, *p.{{ .GoName }})
+	}
+{{- end }}
+{{- else }}
+	var args []any
+{{- end }}
+
+	q := `{{ .ListSQL }}`
+{{- if .ListFilters }}
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+{{- end }}
+{{- if .ListSorts }}
+	switch p.Sort {
+{{- range .ListSorts }}
+	case {{ .Name }}:
+		q += ` ORDER BY {{ .OrderBy }}`
+{{- end }}
+	default:
+		q += ` ORDER BY {{ .ListOrder }}`
+	}
+{{- else }}
+	q += ` ORDER BY {{ .ListOrder }}`
+{{- end }}
+	q += ` LIMIT ? OFFSET ?`
+	args = append(args, p.Limit, p.Offset)
+
 	var rows []{{ .RowStruct }}
-	if err := r.db.SelectContext(ctx, &rows, `{{ .ListSQL }}`, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
+{{- else }}
+	var rows []{{ .RowStruct }}
+	if err := r.db.SelectContext(ctx, &rows, `{{ .ListSQL }}`, p.Limit, p.Offset); err != nil {
+{{- end }}
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
 	}
 	out := make([]{{ .Model }}, len(rows))

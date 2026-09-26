@@ -18,7 +18,7 @@ func validSpec() *Spec {
 			}},
 			{Name: "Post", Fields: []Field{
 				{Name: "id", Type: TypeUUID, Primary: true},
-				{Name: "author", Type: TypeReferences, Target: "Author", OnDelete: OnDeleteCascade},
+				{Name: "author", Type: TypeReferences, Target: "Author", OnDelete: OnDeleteCascade, Filter: true, Sort: true},
 			}},
 		},
 	}
@@ -106,6 +106,22 @@ func TestValidate_Errors(t *testing.T) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "on", Type: TypeDate, Default: DefaultNow})
 		}},
 		{"default on reference", func(s *Spec) { s.Entities[1].Fields[1].Default = "x" }},
+		{"filter on primary key", func(s *Spec) { s.Entities[0].Fields[0].Filter = true }},
+		{"filter on json", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "meta", Type: TypeJSON, Filter: true})
+		}},
+		{"filter on float", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "score", Type: TypeFloat, Filter: true})
+		}},
+		{"filter named like a paging parameter", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "limit", Type: TypeInt32, Filter: true})
+		}},
+		{"sort on bool", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "done", Type: TypeBool, Sort: true})
+		}},
+		{"sort on json", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "meta", Type: TypeJSON, Sort: true})
+		}},
 	}
 
 	for _, tc := range cases {

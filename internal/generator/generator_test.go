@@ -285,7 +285,9 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		"writeValidationError(w, r, err)",
 		"writeInvalidID(w)",
 		"writeBody(w, http.StatusCreated, m)",
-		"writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: limit, Offset: offset})",
+		"q := newListQuery(r) p := blog.PostListParams{} p.Limit, p.Offset = q.page()",
+		"items, err := h.repo.List(r.Context(), p)",
+		"writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: p.Limit, Offset: p.Offset})",
 		"writeError(w, http.StatusBadRequest, codeInvalidQuery,",
 		"w.WriteHeader(http.StatusNoContent)",
 	} {
@@ -431,13 +433,128 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	got := renderRepoSrc(t, s, "Account")
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
-		"SELECT id, name FROM accounts ORDER BY id",
+		"r.db.SelectContext(ctx, &rows, `SELECT id, name FROM accounts ORDER BY id LIMIT $1 OFFSET $2`, p.Limit, p.Offset)",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
 		"if n == 0 {",
 	} {
 		wantContains(t, got, want)
+	}
+}
+
+func TestRenderList_FiltersAndSort(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Module:  "example.com/blog",
+		Entities: []spec.Entity{
+			{Name: "Author", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
+			{Name: "Post", Plural: "posts", Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true, Sort: true},
+				{Name: "title", Type: spec.TypeString, Required: true, Filter: true, Sort: true},
+				{Name: "author", Type: spec.TypeReferences, Target: "Author", Filter: true},
+				{Name: "published_on", Type: spec.TypeDate, Filter: true},
+				{Name: "views", Type: spec.TypeInt32, Filter: true},
+				{Name: "published", Type: spec.TypeBool, Filter: true},
+			}},
+			{Name: "Tag", Fields: []spec.Field{
+				{Name: "slug", Type: spec.TypeString, Primary: true},
+				{Name: "label", Type: spec.TypeString, Sort: true},
+			}},
+		},
+	}
+
+	cases := []struct {
+		name   string
+		render func(t *testing.T, s *spec.Spec, entity string) string
+		entity string
+		want   []string
+		absent []string
+	}{
+		{
+			name:   "domain params and sort constants",
+			render: render,
+			entity: "Post",
+			want: []string{
+				"type PostSort string",
+				`PostSortID PostSort = "id"`,
+				`PostSortIDDesc PostSort = "-id"`,
+				`PostSortTitle PostSort = "title"`,
+				`PostSortTitleDesc PostSort = "-title"`,
+				"type PostListParams struct { Title *string Author *uuid.UUID PublishedOn *Date Views *int32 Published *bool Sort PostSort Limit int Offset int }",
+				"List(ctx context.Context, p PostListParams) ([]Post, error)",
+			},
+		},
+		{
+			name:   "handler parses filters and sort",
+			render: renderHandlerSrc,
+			entity: "Post",
+			want: []string{
+				`queryPostTitle = "title"`,
+				`queryPostPublishedOn = "published_on"`,
+				"q := newListQuery(r, queryPostTitle, queryPostAuthor, queryPostPublishedOn, queryPostViews, queryPostPublished, querySort)",
+				"Title: queryValue(q, queryPostTitle, parseString),",
+				"Author: queryValue(q, queryPostAuthor, parseText[uuid.UUID]),",
+				"PublishedOn: queryValue(q, queryPostPublishedOn, parseText[blog.Date]),",
+				"Views: queryValue(q, queryPostViews, parseInt32),",
+				"Published: queryValue(q, queryPostPublished, strconv.ParseBool),",
+				"Sort: querySortValue(q, blog.PostSortID, blog.PostSortIDDesc, blog.PostSortTitle, blog.PostSortTitleDesc),",
+				`"strconv"`,
+			},
+		},
+		{
+			name:   "repository assembles where and order by",
+			render: renderRepoSrc,
+			entity: "Post",
+			want: []string{
+				"if p.Author != nil { where = append(where, `author = ?`) args = append(args, *p.Author) }",
+				"if p.PublishedOn != nil { where = append(where, `published_on = ?`)",
+				"q := `SELECT id, title, author, published_on, views, published FROM posts`",
+				"q += ` WHERE ` + strings.Join(where, ` AND `)",
+				"case blog.PostSortIDDesc: q += ` ORDER BY id DESC`",
+				"case blog.PostSortTitleDesc: q += ` ORDER BY title DESC, id`",
+				"default: q += ` ORDER BY id`",
+				"q += ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
+				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
+				`"strings"`,
+			},
+		},
+		{
+			name:   "sort without filters",
+			render: renderRepoSrc,
+			entity: "Tag",
+			want: []string{
+				"var args []any q := `SELECT slug, label FROM tags` switch p.Sort {",
+				"case blog.TagSortLabel: q += ` ORDER BY label, slug`",
+			},
+			absent: []string{"where = append", `"strings"`},
+		},
+		{
+			name:   "handler without filters accepts only sort",
+			render: renderHandlerSrc,
+			entity: "Tag",
+			want: []string{
+				"q := newListQuery(r, querySort)",
+				"p := blog.TagListParams{ Sort: querySortValue(q, blog.TagSortLabel, blog.TagSortLabelDesc), }",
+			},
+			absent: []string{"queryValue("},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.render(t, s, tc.entity)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
 	}
 }
 
