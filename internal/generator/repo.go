@@ -78,7 +78,6 @@ func driverInfo(driver string) (name, imp string, ok bool) {
 const (
 	colCreatedAt = "created_at"
 	colUpdatedAt = "updated_at"
-	colDeletedAt = "deleted_at"
 )
 
 const (
@@ -118,7 +117,7 @@ type optionColumn struct {
 }
 
 // optionColumns returns the columns injected by an entity's options, in the
-// order they are appended to the model struct (timestamps, then soft-delete).
+// order they are appended to the model struct.
 // renderModel and repoInfo both consume it so the model struct and the
 // generated SQL agree on which columns exist and their order.
 func optionColumns(o spec.EntityOptions) []optionColumn {
@@ -128,9 +127,6 @@ func optionColumns(o spec.EntityOptions) []optionColumn {
 			optionColumn{colCreatedAt, pascalCase(colCreatedAt), goTime, fmt.Sprintf(tagJSON, colCreatedAt)},
 			optionColumn{colUpdatedAt, pascalCase(colUpdatedAt), goTime, fmt.Sprintf(tagJSON, colUpdatedAt)},
 		)
-	}
-	if o.SoftDelete {
-		cols = append(cols, optionColumn{colDeletedAt, pascalCase(colDeletedAt), fmt.Sprintf(exprPointer, goTime), fmt.Sprintf(tagJSON, colDeletedAt+jsonOmit)})
 	}
 	return cols
 }
@@ -148,7 +144,7 @@ func scanList(cols []string) string {
 
 // repoData is the template input for one entity's PostgreSQL repository file.
 // The SQL statements are built here rather than in the template so the column
-// math (placeholders, ordering, soft-delete/timestamp handling) stays testable.
+// math (placeholders, ordering, timestamp handling) stays testable.
 type repoData struct {
 	Package         string
 	Imports         []string
@@ -208,7 +204,6 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	table := plural(e.Name, e.Plural)
 	pkCol := snakeCase(pk.Name)
 	pkGoName := pascalCase(pk.Name)
-	soft := e.Options.SoftDelete
 	ts := e.Options.Timestamps
 
 	impSet := map[string]struct{}{
@@ -258,16 +253,10 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 
 	// Option-injected columns belong to the row and the model, but not the insert
-	// path (the SQL sets timestamps via now()). deleted_at is nullable.
+	// path (the SQL sets timestamps via now()).
 	for _, oc := range optionColumns(e.Options) {
 		gn := pascalCase(oc.Column)
 		impSet[importTime] = struct{}{}
-		if oc.Column == colDeletedAt {
-			rowFields = append(rowFields, rowField{GoName: gn, GoType: fmt.Sprintf(exprNull, goTime), Tag: fmt.Sprintf(tagDB, oc.Column)})
-			toModel = append(toModel, assign{Field: gn, Expr: fmt.Sprintf(exprFromNull, fmt.Sprintf(exprRowField, gn))})
-			hasNullable = true
-			continue
-		}
 		rowFields = append(rowFields, rowField{GoName: gn, GoType: goTime, Tag: fmt.Sprintf(tagDB, oc.Column)})
 		toModel = append(toModel, assign{Field: gn, Expr: fmt.Sprintf(exprRowField, gn)})
 	}
@@ -310,19 +299,11 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		createScan = scanList(ret)
 	}
 
-	softFilter := ""
-	if soft {
-		softFilter = fmt.Sprintf(" AND %s IS NULL", colDeletedAt)
-	}
-	getSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1%s",
-		strings.Join(selectCols, ", "), table, pkCol, softFilter)
+	getSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1",
+		strings.Join(selectCols, ", "), table, pkCol)
 
-	listWhere := ""
-	if soft {
-		listWhere = fmt.Sprintf(" WHERE %s IS NULL", colDeletedAt)
-	}
-	listSQL := fmt.Sprintf("SELECT %s FROM %s%s ORDER BY %s LIMIT $1 OFFSET $2",
-		strings.Join(selectCols, ", "), table, listWhere, pkCol)
+	listSQL := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s LIMIT $1 OFFSET $2",
+		strings.Join(selectCols, ", "), table, pkCol)
 
 	// UPDATE: non-PK fields get placeholders $1..$n, the PK gets $n+1.
 	setClauses := make([]string, 0, len(update)+1)
@@ -342,10 +323,10 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		// Nothing writable (a primary-key-only entity without timestamps): an
 		// empty SET would be invalid SQL, so Update degrades to an existence
 		// check by primary key that still returns ErrNotFound for a missing row.
-		updateSQL = fmt.Sprintf("SELECT 1 FROM %s WHERE %s = $1%s", table, pkCol, softFilter)
+		updateSQL = fmt.Sprintf("SELECT 1 FROM %s WHERE %s = $1", table, pkCol)
 	} else {
-		updateSQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d%s",
-			table, strings.Join(setClauses, ", "), pkCol, len(update)+1, softFilter)
+		updateSQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d",
+			table, strings.Join(setClauses, ", "), pkCol, len(update)+1)
 		if ts {
 			ret := []string{colCreatedAt, colUpdatedAt}
 			updateSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, ", "))
@@ -354,9 +335,6 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 
 	deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", table, pkCol)
-	if soft {
-		deleteSQL = fmt.Sprintf("UPDATE %s SET %s = now() WHERE %s = $1 AND %s IS NULL", table, colDeletedAt, pkCol, colDeletedAt)
-	}
 
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed

@@ -2,11 +2,10 @@
 -- +goose StatementBegin
 CREATE TABLE comments (
     id BIGINT NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    post UUID NOT NULL REFERENCES posts (id),
+    post UUID NOT NULL REFERENCES posts (id) ON DELETE CASCADE,
     body TEXT NOT NULL,
     likes INTEGER NOT NULL DEFAULT 0,
-    posted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at TIMESTAMPTZ
+    posted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- +goose StatementEnd
 -- +goose StatementBegin

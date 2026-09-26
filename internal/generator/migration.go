@@ -144,6 +144,9 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 			target := byName[f.Target]
 			parts = append(parts, fmt.Sprintf("REFERENCES %s (%s)",
 				plural(target.Name, target.Plural), snakeCase(target.PrimaryKey()[0].Name)))
+			if f.OnDelete == spec.OnDeleteCascade {
+				parts = append(parts, "ON DELETE CASCADE")
+			}
 		}
 		lines = append(lines, "    "+strings.Join(parts, " "))
 
@@ -154,14 +157,9 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 
 	// Option-injected columns reuse optionColumns' ordering so the schema and the
 	// generated model never disagree on which columns exist. Timestamps are
-	// NOT NULL DEFAULT now(); the soft-delete marker is nullable.
+	// NOT NULL DEFAULT now().
 	for _, oc := range optionColumns(e.Options) {
-		switch oc.Column {
-		case colCreatedAt, colUpdatedAt:
-			lines = append(lines, fmt.Sprintf("    %s %s NOT NULL DEFAULT now()", oc.Column, sqlTimestamptz))
-		case colDeletedAt:
-			lines = append(lines, fmt.Sprintf("    %s %s", oc.Column, sqlTimestamptz))
-		}
+		lines = append(lines, fmt.Sprintf("    %s %s NOT NULL DEFAULT now()", oc.Column, sqlTimestamptz))
 	}
 
 	up := []string{fmt.Sprintf("CREATE TABLE %s (\n%s\n);", table, strings.Join(lines, ",\n"))}

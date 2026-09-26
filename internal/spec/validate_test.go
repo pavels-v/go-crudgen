@@ -18,7 +18,7 @@ func validSpec() *Spec {
 			}},
 			{Name: "Post", Fields: []Field{
 				{Name: "id", Type: TypeUUID, Primary: true},
-				{Name: "author", Type: TypeReferences, Target: "Author"},
+				{Name: "author", Type: TypeReferences, Target: "Author", OnDelete: OnDeleteCascade},
 			}},
 		},
 	}
@@ -76,6 +76,8 @@ func TestValidate_Errors(t *testing.T) {
 		{"unknown field type", func(s *Spec) { s.Entities[0].Fields[0].Type = "bogus" }},
 		{"reference without target", func(s *Spec) { s.Entities[1].Fields[1].Target = "" }},
 		{"reference to unknown entity", func(s *Spec) { s.Entities[1].Fields[1].Target = "Ghost" }},
+		{"on_delete on non-reference", func(s *Spec) { s.Entities[1].Fields[0].OnDelete = OnDeleteCascade }},
+		{"unknown on_delete", func(s *Spec) { s.Entities[1].Fields[1].OnDelete = "set_null" }},
 		{"entity without primary key", func(s *Spec) { s.Entities[0].Fields[0].Primary = false }},
 		{"composite primary key", func(s *Spec) {
 			s.Entities[0].Fields = []Field{

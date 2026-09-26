@@ -121,7 +121,7 @@ func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
 	wantContains(t, got, `json:"author,omitzero"`)
 }
 
-func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
+func TestRenderModel_OptionsTimestamps(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{
@@ -130,7 +130,7 @@ func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
 		Entities: []spec.Entity{{
 			Name:    "Session",
 			Fields:  []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}},
-			Options: spec.EntityOptions{Timestamps: true, SoftDelete: true},
+			Options: spec.EntityOptions{Timestamps: true},
 		}},
 	}
 
@@ -138,8 +138,6 @@ func TestRenderModel_OptionsTimestampsAndSoftDelete(t *testing.T) {
 	wantContains(t, got, "CreatedAt time.Time")
 	wantContains(t, got, `json:"created_at"`)
 	wantContains(t, got, "UpdatedAt time.Time")
-	wantContains(t, got, "DeletedAt *time.Time")
-	wantContains(t, got, `json:"deleted_at,omitzero"`)
 }
 
 // renderHandlerSrc runs handlerInfo + renderHandler for the named entity and
@@ -415,7 +413,7 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 	}
 }
 
-func TestRenderRepo_SoftDeleteFiltersAndUpdates(t *testing.T) {
+func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{
@@ -427,17 +425,14 @@ func TestRenderRepo_SoftDeleteFiltersAndUpdates(t *testing.T) {
 				{Name: "id", Type: spec.TypeUUID, Primary: true},
 				{Name: "name", Type: spec.TypeString},
 			},
-			Options: spec.EntityOptions{SoftDelete: true},
 		}},
 	}
 
 	got := renderRepoSrc(t, s, "Account")
 	for _, want := range []string{
-		// reads exclude soft-deleted rows
-		"WHERE id = $1 AND deleted_at IS NULL",
-		"FROM accounts WHERE deleted_at IS NULL ORDER BY id",
-		// delete is a soft update, not a row removal
-		"UPDATE accounts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL",
+		"SELECT id, name FROM accounts WHERE id = $1",
+		"SELECT id, name FROM accounts ORDER BY id",
+		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
 		"if n == 0 {",
@@ -499,14 +494,9 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 			fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "value", Type: spec.TypeString, Required: true}},
 			want:   false,
 		},
-		{
-			name:   "soft delete adds a nullable deleted_at",
-			fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "value", Type: spec.TypeString, Required: true}},
-			want:   false, // overridden below for the soft-delete sub-case
-		},
 	}
 
-	for _, tc := range cases[:2] {
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -516,29 +506,6 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 			require.Equal(t, tc.want, rd.HasNullable)
 		})
 	}
-
-	t.Run("soft delete makes deleted_at nullable", func(t *testing.T) {
-		t.Parallel()
-
-		s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: []spec.Entity{{
-			Name:    "Thing",
-			Fields:  []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, {Name: "value", Type: spec.TypeString, Required: true}},
-			Options: spec.EntityOptions{SoftDelete: true},
-		}}}
-		rd, err := repoInfo(s, &s.Entities[0], byNameOf(s))
-		require.NoError(t, err)
-		require.True(t, rd.HasNullable, "deleted_at is nullable, so the repo needs sql.Null helpers")
-		wantContains(t, mustRenderRepo(t, rd), "DeletedAt sql.Null[time.Time]")
-	})
-}
-
-// mustRenderRepo renders repo data to source, failing on error or invalid Go.
-func mustRenderRepo(t *testing.T, rd repoData) string {
-	t.Helper()
-	src, err := renderRepo(rd)
-	require.NoError(t, err)
-	requireParses(t, src)
-	return string(src)
 }
 
 func TestRenderNulls_GenericHelpers(t *testing.T) {
@@ -621,7 +588,8 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 				{Name: "published", Type: spec.TypeBool, Default: false},
 				{Name: "slug", Type: spec.TypeString, Unique: true, Index: true},
 				{Name: "author", Type: spec.TypeReferences, Target: "Author"},
-			}, Options: spec.EntityOptions{Timestamps: true, SoftDelete: true}},
+				{Name: "editor", Type: spec.TypeReferences, Target: "Author", OnDelete: spec.OnDeleteCascade},
+			}, Options: spec.EntityOptions{Timestamps: true}},
 		},
 	}
 
@@ -638,10 +606,10 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 		"body TEXT,",          // optional column is nullable
 		"published BOOLEAN NOT NULL DEFAULT FALSE", // bool default rendered as SQL literal
 		"slug TEXT UNIQUE",                         // unique modifier
-		"author UUID REFERENCES authors (id)",      // FK column typed from + pointing at the target PK
+		"author UUID REFERENCES authors (id),",     // FK column typed from + pointing at the target PK
+		"editor UUID REFERENCES authors (id) ON DELETE CASCADE,",
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
-		"deleted_at TIMESTAMPTZ", // soft-delete marker is nullable
 		"CREATE INDEX idx_posts_slug ON posts (slug);",
 		"DROP TABLE posts;",
 	} {
@@ -1000,12 +968,11 @@ func TestCheckColumns(t *testing.T) {
 		options spec.EntityOptions
 		wantErr bool
 	}{
-		{"distinct", []spec.Field{id, {Name: "title", Type: spec.TypeString}}, spec.EntityOptions{Timestamps: true, SoftDelete: true}, false},
+		{"distinct", []spec.Field{id, {Name: "title", Type: spec.TypeString}}, spec.EntityOptions{Timestamps: true}, false},
 		{"duplicate name", []spec.Field{id, {Name: "title", Type: spec.TypeString}, {Name: "title", Type: spec.TypeText}}, spec.EntityOptions{}, true},
 		{"same column", []spec.Field{id, {Name: "authorName", Type: spec.TypeString}, {Name: "author_name", Type: spec.TypeString}}, spec.EntityOptions{}, true},
 		{"same go field", []spec.Field{id, {Name: "Id", Type: spec.TypeString}}, spec.EntityOptions{}, true},
 		{"timestamps collision", []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime}}, spec.EntityOptions{Timestamps: true}, true},
-		{"soft delete collision", []spec.Field{id, {Name: "deletedAt", Type: spec.TypeDatetime}}, spec.EntityOptions{SoftDelete: true}, true},
 		{"option column without option", []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime}}, spec.EntityOptions{}, false},
 	}
 

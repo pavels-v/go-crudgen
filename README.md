@@ -34,7 +34,7 @@ Among the tools we found, none generates every layer (validation, handlers, rout
 - Storage is driver-agnostic via `database/sql`; `pgx` or `pq` is a flag.
 - Nullability flows from the spec: `*T` in the model, `sql.Null[T]` in the repository, no `NOT NULL` in the migration.
 - Migrations are goose SQL files, applied with standard tooling.
-- Per-entity options: `timestamps`, `soft_delete`.
+- Per-entity option: `timestamps`.
 - Spec-first: works for greenfield projects; the spec is versioned and diff-friendly.
 - Plain YAML syntax familiar from OpenAPI and Kubernetes; the generator validates its own rules on top (required fields, known types, exactly one primary key, existing reference targets).
 - Handlers depend on a repository interface, so storage can be swapped or faked in tests.
@@ -104,12 +104,11 @@ entities:
       - { name: author, type: references, target: Author }
     options:
       timestamps: true
-      soft_delete: false
 ```
 
 - `package` names the root package; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
-- Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules).
+- Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only).
 - Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
 - `uuid` keys are generated in Go (v4) with `gen_random_uuid()` as the column default; `int32` and `int64` keys use `IDENTITY`; other keys are required in Create.
 - `default` takes a literal of the field's type (`string`, `text`, `int32`, `int64`, `float`, `bool`) or `now` for `datetime`; the column is `NOT NULL DEFAULT` and the handler fills an omitted value.
