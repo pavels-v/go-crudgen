@@ -144,6 +144,9 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 			target := byName[f.Target]
 			parts = append(parts, fmt.Sprintf("REFERENCES %s (%s)",
 				plural(target.Name, target.Plural), snakeCase(target.PrimaryKey()[0].Name)))
+			if f.OnDelete == spec.OnDeleteCascade {
+				parts = append(parts, "ON DELETE CASCADE")
+			}
 		}
 		lines = append(lines, "    "+strings.Join(parts, " "))
 

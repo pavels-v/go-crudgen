@@ -588,6 +588,7 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 				{Name: "published", Type: spec.TypeBool, Default: false},
 				{Name: "slug", Type: spec.TypeString, Unique: true, Index: true},
 				{Name: "author", Type: spec.TypeReferences, Target: "Author"},
+				{Name: "editor", Type: spec.TypeReferences, Target: "Author", OnDelete: spec.OnDeleteCascade},
 			}, Options: spec.EntityOptions{Timestamps: true}},
 		},
 	}
@@ -605,7 +606,8 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 		"body TEXT,",          // optional column is nullable
 		"published BOOLEAN NOT NULL DEFAULT FALSE", // bool default rendered as SQL literal
 		"slug TEXT UNIQUE",                         // unique modifier
-		"author UUID REFERENCES authors (id)",      // FK column typed from + pointing at the target PK
+		"author UUID REFERENCES authors (id),",     // FK column typed from + pointing at the target PK
+		"editor UUID REFERENCES authors (id) ON DELETE CASCADE,",
 		"created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 		"CREATE INDEX idx_posts_slug ON posts (slug);",

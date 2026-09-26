@@ -170,7 +170,7 @@ func TestIntegration(t *testing.T) {
 		require.JSONEq(t, string(metadata), string(*gotPost.Metadata))
 	})
 
-	t.Run("comments use identity keys and defaults", func(t *testing.T) {
+	t.Run("comments use identity keys and defaults and cascade with their post", func(t *testing.T) {
 		var post blog.Post
 		do(t, srv, http.MethodPost, "/posts", restapi.CreatePostRequest{Title: "Commented"}, &post, http.StatusCreated)
 
@@ -193,7 +193,8 @@ func TestIntegration(t *testing.T) {
 		require.Len(t, list.Items, 1)
 		require.Equal(t, second.ID, list.Items[0].ID)
 
-		do(t, srv, http.MethodDelete, "/posts/"+post.ID.String(), nil, nil, http.StatusConflict)
+		do(t, srv, http.MethodDelete, "/posts/"+post.ID.String(), nil, nil, http.StatusNoContent)
+		do(t, srv, http.MethodGet, "/comments/"+strconv.FormatInt(second.ID, 10), nil, nil, http.StatusNotFound)
 	})
 
 	t.Run("tags use client keys", func(t *testing.T) {

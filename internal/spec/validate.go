@@ -73,6 +73,12 @@ func (s *Spec) Validate() error {
 			if f.Type == TypeReferences && f.Target == "" {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
+			if f.OnDelete != "" && f.Type != TypeReferences {
+				return fmt.Errorf("entity %q field %q has on_delete but is not a reference", e.Name, f.Name)
+			}
+			if f.OnDelete != "" && f.OnDelete != OnDeleteCascade {
+				return fmt.Errorf("entity %q field %q has unknown on_delete %q: use %q", e.Name, f.Name, f.OnDelete, OnDeleteCascade)
+			}
 			if f.Default != nil && f.Primary {
 				return fmt.Errorf("entity %q primary key %q cannot have a default", e.Name, f.Name)
 			}

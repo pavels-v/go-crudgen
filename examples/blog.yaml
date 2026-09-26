@@ -53,6 +53,7 @@ entities:
         target: Post
         required: true
         index: true
+        on_delete: cascade   # deleting a post deletes its comments
       - name: body
         type: text
         required: true

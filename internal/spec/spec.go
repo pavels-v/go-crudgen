@@ -38,6 +38,8 @@ const (
 
 const DefaultNow = "now"
 
+const OnDeleteCascade = "cascade"
+
 // Field is a single attribute of an entity.
 type Field struct {
 	Name     string `yaml:"name"`
@@ -49,6 +51,7 @@ type Field struct {
 	Default  any    `yaml:"default"`
 	Validate string `yaml:"validate"` // go-playground/validator rule string
 	Target   string `yaml:"target"`   // referenced entity, when Type == "references"
+	OnDelete string `yaml:"on_delete"`
 }
 
 // PrimaryKey returns the fields marked primary, in declaration order. A valid
