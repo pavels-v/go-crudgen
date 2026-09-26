@@ -34,7 +34,7 @@ Among the tools we found, none generates every layer (validation, handlers, rout
 - Storage is driver-agnostic via `database/sql`; `pgx` or `pq` is a flag.
 - Nullability flows from the spec: `*T` in the model, `sql.Null[T]` in the repository, no `NOT NULL` in the migration.
 - Migrations are goose SQL files, applied with standard tooling.
-- Per-entity options: `timestamps`, `soft_delete`.
+- Per-entity option: `timestamps`.
 - Spec-first: works for greenfield projects; the spec is versioned and diff-friendly.
 - Plain YAML syntax familiar from OpenAPI and Kubernetes; the generator validates its own rules on top (required fields, known types, exactly one primary key, existing reference targets).
 - Handlers depend on a repository interface, so storage can be swapped or faked in tests.
@@ -104,7 +104,6 @@ entities:
       - { name: author, type: references, target: Author }
     options:
       timestamps: true
-      soft_delete: false
 ```
 
 - `package` names the root package; `module` is the import path of the `--out` directory.

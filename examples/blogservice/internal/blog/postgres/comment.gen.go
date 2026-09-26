@@ -17,12 +17,11 @@ import (
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
 // newCommentRow and toModel convert to and from the pointer fields on blog.Comment.
 type commentRow struct {
-	ID        int64               `db:"id"`
-	Post      uuid.UUID           `db:"post"`
-	Body      string              `db:"body"`
-	Likes     int32               `db:"likes"`
-	PostedAt  time.Time           `db:"posted_at"`
-	DeletedAt sql.Null[time.Time] `db:"deleted_at"`
+	ID       int64     `db:"id"`
+	Post     uuid.UUID `db:"post"`
+	Body     string    `db:"body"`
+	Likes    int32     `db:"likes"`
+	PostedAt time.Time `db:"posted_at"`
 }
 
 // newCommentRow builds the row written by Create and Update. Option-managed
@@ -40,12 +39,11 @@ func newCommentRow(m *blog.Comment) commentRow {
 // toModel converts a scanned row back into the API model.
 func (row commentRow) toModel() blog.Comment {
 	return blog.Comment{
-		ID:        row.ID,
-		Post:      row.Post,
-		Body:      row.Body,
-		Likes:     row.Likes,
-		PostedAt:  row.PostedAt,
-		DeletedAt: fromNull(row.DeletedAt),
+		ID:       row.ID,
+		Post:     row.Post,
+		Body:     row.Body,
+		Likes:    row.Likes,
+		PostedAt: row.PostedAt,
 	}
 }
 
@@ -73,7 +71,7 @@ func (r *CommentRepository) Create(ctx context.Context, m *blog.Comment) error {
 
 func (r *CommentRepository) Get(ctx context.Context, id int64) (*blog.Comment, error) {
 	var row commentRow
-	if err := r.db.GetContext(ctx, &row, `SELECT id, post, body, likes, posted_at, deleted_at FROM comments WHERE id = $1 AND deleted_at IS NULL`, id); err != nil {
+	if err := r.db.GetContext(ctx, &row, `SELECT id, post, body, likes, posted_at FROM comments WHERE id = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, blog.ErrNotFound
 		}
@@ -85,7 +83,7 @@ func (r *CommentRepository) Get(ctx context.Context, id int64) (*blog.Comment, e
 
 func (r *CommentRepository) List(ctx context.Context, limit, offset int) ([]blog.Comment, error) {
 	var rows []commentRow
-	if err := r.db.SelectContext(ctx, &rows, `SELECT id, post, body, likes, posted_at, deleted_at FROM comments WHERE deleted_at IS NULL ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, `SELECT id, post, body, likes, posted_at FROM comments ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, fmt.Errorf("list comment: %w", err)
 	}
 	out := make([]blog.Comment, len(rows))
@@ -97,7 +95,7 @@ func (r *CommentRepository) List(ctx context.Context, limit, offset int) ([]blog
 
 func (r *CommentRepository) Update(ctx context.Context, m *blog.Comment) error {
 	row := newCommentRow(m)
-	res, err := r.db.ExecContext(ctx, `UPDATE comments SET post = $1, body = $2, likes = $3, posted_at = $4 WHERE id = $5 AND deleted_at IS NULL`, row.Post, row.Body, row.Likes, row.PostedAt, row.ID)
+	res, err := r.db.ExecContext(ctx, `UPDATE comments SET post = $1, body = $2, likes = $3, posted_at = $4 WHERE id = $5`, row.Post, row.Body, row.Likes, row.PostedAt, row.ID)
 	if err != nil {
 		return fmt.Errorf("update comment: %w", mapWriteError(err))
 	}
@@ -112,7 +110,7 @@ func (r *CommentRepository) Update(ctx context.Context, m *blog.Comment) error {
 }
 
 func (r *CommentRepository) Delete(ctx context.Context, id int64) error {
-	res, err := r.db.ExecContext(ctx, `UPDATE comments SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
+	res, err := r.db.ExecContext(ctx, `DELETE FROM comments WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete comment: %w", mapDeleteError(err))
 	}

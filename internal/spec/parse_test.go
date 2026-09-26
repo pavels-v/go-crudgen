@@ -50,7 +50,7 @@ entities:
         type: uuid
         primary: true
     options:
-      softdelete: true
+      soft_delete: true
 `, true},
 	}
 

@@ -19,7 +19,6 @@ type Entity struct {
 // EntityOptions toggles per-entity generation behavior.
 type EntityOptions struct {
 	Timestamps bool `yaml:"timestamps"` // adds created_at / updated_at
-	SoftDelete bool `yaml:"soft_delete"`
 }
 
 const (

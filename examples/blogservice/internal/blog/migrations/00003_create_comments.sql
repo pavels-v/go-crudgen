@@ -5,8 +5,7 @@ CREATE TABLE comments (
     post UUID NOT NULL REFERENCES posts (id),
     body TEXT NOT NULL,
     likes INTEGER NOT NULL DEFAULT 0,
-    posted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at TIMESTAMPTZ
+    posted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- +goose StatementEnd
 -- +goose StatementBegin

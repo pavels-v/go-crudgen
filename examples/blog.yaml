@@ -27,7 +27,6 @@ entities:
         target: Author
     options:
       timestamps: true     # adds created_at / updated_at
-      soft_delete: false
 
   - name: Author
     fields:
@@ -64,8 +63,6 @@ entities:
       - name: posted_at
         type: datetime
         default: now
-    options:
-      soft_delete: true
 
   - name: Tag
     fields:

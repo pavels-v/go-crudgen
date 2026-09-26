@@ -565,7 +565,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		add(f.Name, modelType(f, gt.expr), gt.imp, jsonTag(f))
 	}
 
-	// Option-injected columns (timestamps, soft-delete) share one definition
+	// Option-injected columns (timestamps) share one definition
 	// with repoInfo so the model struct and the generated SQL never disagree.
 	for _, oc := range optionColumns(e.Options) {
 		add(oc.Column, oc.GoType, importTime, oc.JSONTag)
