@@ -127,9 +127,9 @@ entities:
 - [x] List endpoint: pagination (`?limit` / `?offset`)
 - [x] List endpoint: filtering (equality)
 - [x] List endpoint: sorting
-- [~] Relations (`belongs_to` / `has_many`)
+- [x] Relations (`belongs_to` / `has_many`)
   - [x] `belongs_to` via `references` fields
-  - [ ] `has_many`, nested/relation routes, and JOIN-based loading
+  - [x] `has_many` via `filter: true` on the reference field
 - [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)
 - [ ] Auth/middleware hooks
