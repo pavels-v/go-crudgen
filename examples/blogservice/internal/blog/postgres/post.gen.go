@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,8 +30,8 @@ type postRow struct {
 	UpdatedAt time.Time                `db:"updated_at"`
 }
 
-// newPostRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newPostRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newPostRow(m *blog.Post) postRow {
 	return postRow{
 		ID:        m.ID,
@@ -93,9 +94,45 @@ func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, err
 	return &m, nil
 }
 
-func (r *PostRepository) List(ctx context.Context, limit, offset int) ([]blog.Post, error) {
+func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blog.Post, error) {
+	var (
+		where []string
+		args  []any
+	)
+	if p.Published != nil {
+		where = append(where, `published = ?`)
+		args = append(args, *p.Published)
+	}
+	if p.Author != nil {
+		where = append(where, `author = ?`)
+		args = append(args, *p.Author)
+	}
+
+	q := `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts`
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+	switch p.Sort {
+	case blog.PostSortTitle:
+		q += ` ORDER BY title, id`
+	case blog.PostSortTitleDesc:
+		q += ` ORDER BY title DESC, id`
+	case blog.PostSortViews:
+		q += ` ORDER BY views, id`
+	case blog.PostSortViewsDesc:
+		q += ` ORDER BY views DESC, id`
+	case blog.PostSortCreatedAt:
+		q += ` ORDER BY created_at, id`
+	case blog.PostSortCreatedAtDesc:
+		q += ` ORDER BY created_at DESC, id`
+	default:
+		q += ` ORDER BY id`
+	}
+	q += ` LIMIT ? OFFSET ?`
+	args = append(args, p.Limit, p.Offset)
+
 	var rows []postRow
-	if err := r.db.SelectContext(ctx, &rows, `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 		return nil, fmt.Errorf("list post: %w", err)
 	}
 	out := make([]blog.Post, len(rows))

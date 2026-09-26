@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,8 +25,8 @@ type commentRow struct {
 	PostedAt time.Time `db:"posted_at"`
 }
 
-// newCommentRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newCommentRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newCommentRow(m *blog.Comment) commentRow {
 	return commentRow{
 		ID:       m.ID,
@@ -81,9 +82,33 @@ func (r *CommentRepository) Get(ctx context.Context, id int64) (*blog.Comment, e
 	return &m, nil
 }
 
-func (r *CommentRepository) List(ctx context.Context, limit, offset int) ([]blog.Comment, error) {
+func (r *CommentRepository) List(ctx context.Context, p blog.CommentListParams) ([]blog.Comment, error) {
+	var (
+		where []string
+		args  []any
+	)
+	if p.Post != nil {
+		where = append(where, `post = ?`)
+		args = append(args, *p.Post)
+	}
+
+	q := `SELECT id, post, body, likes, posted_at FROM comments`
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+	switch p.Sort {
+	case blog.CommentSortPostedAt:
+		q += ` ORDER BY posted_at, id`
+	case blog.CommentSortPostedAtDesc:
+		q += ` ORDER BY posted_at DESC, id`
+	default:
+		q += ` ORDER BY id`
+	}
+	q += ` LIMIT ? OFFSET ?`
+	args = append(args, p.Limit, p.Offset)
+
 	var rows []commentRow
-	if err := r.db.SelectContext(ctx, &rows, `SELECT id, post, body, likes, posted_at FROM comments ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 		return nil, fmt.Errorf("list comment: %w", err)
 	}
 	out := make([]blog.Comment, len(rows))

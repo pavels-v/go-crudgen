@@ -8,6 +8,10 @@ import (
 	"example.com/blogservice/internal/blog"
 )
 
+const (
+	queryAuthorEmail = "email"
+)
+
 // CreateAuthorRequest is the request body for creating the author entity.
 type CreateAuthorRequest struct {
 	Email  string     `json:"email" validate:"required,email"`
@@ -78,17 +82,22 @@ func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset, details := parsePage(r)
-	if details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", details)
+	q := newListQuery(r, queryAuthorEmail, querySort)
+	p := blog.AuthorListParams{
+		Email: queryValue(q, queryAuthorEmail, parseString),
+		Sort:  querySortValue(q, blog.AuthorSortBornOn, blog.AuthorSortBornOnDesc),
+	}
+	p.Limit, p.Offset = q.page()
+	if q.details != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
 	}
-	items, err := h.repo.List(r.Context(), limit, offset)
+	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[blog.Author]{Items: items, Limit: limit, Offset: offset})
+	writeBody(w, http.StatusOK, page[blog.Author]{Items: items, Limit: p.Limit, Offset: p.Offset})
 }
 
 func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {

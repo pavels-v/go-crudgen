@@ -121,23 +121,25 @@ func TestRenderModel_ReferenceDerivesTargetPKType(t *testing.T) {
 	wantContains(t, got, `json:"author,omitzero"`)
 }
 
-func TestRenderModel_OptionsTimestamps(t *testing.T) {
+func TestRenderModel_GeneratedTimestamps(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{
 		Package: "app",
 		Module:  "example.com/app",
 		Entities: []spec.Entity{{
-			Name:    "Session",
-			Fields:  []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}},
-			Options: spec.EntityOptions{Timestamps: true},
+			Name: "Session",
+			Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate},
+				{Name: "updated_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnWrite},
+			},
 		}},
 	}
 
 	got := render(t, s, "Session")
-	wantContains(t, got, "CreatedAt time.Time")
-	wantContains(t, got, `json:"created_at"`)
-	wantContains(t, got, "UpdatedAt time.Time")
+	wantContains(t, got, "CreatedAt time.Time `json:\"created_at\"`")
+	wantContains(t, got, "UpdatedAt time.Time `json:\"updated_at\"`")
 }
 
 // renderHandlerSrc runs handlerInfo + renderHandler for the named entity and
@@ -178,8 +180,8 @@ func TestRenderHandler_DTOs(t *testing.T) {
 			Fields: []spec.Field{
 				{Name: "id", Type: spec.TypeUUID, Primary: true},
 				{Name: "title", Type: spec.TypeString, Required: true},
+				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate},
 			},
-			Options: spec.EntityOptions{Timestamps: true},
 		}},
 	}
 
@@ -196,10 +198,10 @@ func TestRenderHandler_DTOs(t *testing.T) {
 	require.NotContains(t, strings.Join(strings.Fields(got), " "),
 		"type UpdatePostRequest struct { ID uuid.UUID",
 		"UpdatePostRequest should not contain the primary key field")
-	// ...and DTOs never carry the option-injected timestamp fields.
+	// ...and DTOs never carry generated fields.
 	_, create, ok := strings.Cut(got, "type CreatePostRequest")
 	require.True(t, ok, "CreatePostRequest should be generated")
-	require.NotContains(t, create, "CreatedAt", "DTOs should not contain timestamp fields")
+	require.NotContains(t, create, "CreatedAt", "DTOs should not contain generated fields")
 	require.NotContains(t, create, "ID uuid.UUID", "a generated key is not part of CreatePostRequest")
 }
 
@@ -285,7 +287,9 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		"writeValidationError(w, r, err)",
 		"writeInvalidID(w)",
 		"writeBody(w, http.StatusCreated, m)",
-		"writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: limit, Offset: offset})",
+		"q := newListQuery(r) p := blog.PostListParams{} p.Limit, p.Offset = q.page()",
+		"items, err := h.repo.List(r.Context(), p)",
+		"writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: p.Limit, Offset: p.Offset})",
 		"writeError(w, http.StatusBadRequest, codeInvalidQuery,",
 		"w.WriteHeader(http.StatusNoContent)",
 	} {
@@ -372,8 +376,9 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 				{Name: "id", Type: spec.TypeUUID, Primary: true},
 				{Name: "title", Type: spec.TypeString, Required: true},
 				{Name: "body", Type: spec.TypeText},
+				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate},
+				{Name: "updated_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnWrite},
 			},
-			Options: spec.EntityOptions{Timestamps: true},
 		}},
 	}
 
@@ -399,7 +404,7 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"r.db.GetContext(ctx, &row, `SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1`, id)",
 		"m := row.toModel()",
 		"errors.Is(err, sql.ErrNoRows)",
-		// timestamps default to now() on insert and are returned into the struct
+		// generated columns take now() on insert and are returned into the struct
 		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
 		"m.ID = uuid.New() row := newPostRow(m)",
 		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
@@ -431,13 +436,128 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	got := renderRepoSrc(t, s, "Account")
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
-		"SELECT id, name FROM accounts ORDER BY id",
+		"r.db.SelectContext(ctx, &rows, `SELECT id, name FROM accounts ORDER BY id LIMIT $1 OFFSET $2`, p.Limit, p.Offset)",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
 		"if n == 0 {",
 	} {
 		wantContains(t, got, want)
+	}
+}
+
+func TestRenderList_FiltersAndSort(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Module:  "example.com/blog",
+		Entities: []spec.Entity{
+			{Name: "Author", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
+			{Name: "Post", Plural: "posts", Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true, Sort: true},
+				{Name: "title", Type: spec.TypeString, Required: true, Filter: true, Sort: true},
+				{Name: "author", Type: spec.TypeReferences, Target: "Author", Filter: true},
+				{Name: "published_on", Type: spec.TypeDate, Filter: true},
+				{Name: "views", Type: spec.TypeInt32, Filter: true},
+				{Name: "published", Type: spec.TypeBool, Filter: true},
+			}},
+			{Name: "Tag", Fields: []spec.Field{
+				{Name: "slug", Type: spec.TypeString, Primary: true},
+				{Name: "label", Type: spec.TypeString, Sort: true},
+			}},
+		},
+	}
+
+	cases := []struct {
+		name   string
+		render func(t *testing.T, s *spec.Spec, entity string) string
+		entity string
+		want   []string
+		absent []string
+	}{
+		{
+			name:   "domain params and sort constants",
+			render: render,
+			entity: "Post",
+			want: []string{
+				"type PostSort string",
+				`PostSortID PostSort = "id"`,
+				`PostSortIDDesc PostSort = "-id"`,
+				`PostSortTitle PostSort = "title"`,
+				`PostSortTitleDesc PostSort = "-title"`,
+				"type PostListParams struct { Title *string Author *uuid.UUID PublishedOn *Date Views *int32 Published *bool Sort PostSort Limit int Offset int }",
+				"List(ctx context.Context, p PostListParams) ([]Post, error)",
+			},
+		},
+		{
+			name:   "handler parses filters and sort",
+			render: renderHandlerSrc,
+			entity: "Post",
+			want: []string{
+				`queryPostTitle = "title"`,
+				`queryPostPublishedOn = "published_on"`,
+				"q := newListQuery(r, queryPostTitle, queryPostAuthor, queryPostPublishedOn, queryPostViews, queryPostPublished, querySort)",
+				"Title: queryValue(q, queryPostTitle, parseString),",
+				"Author: queryValue(q, queryPostAuthor, parseText[uuid.UUID]),",
+				"PublishedOn: queryValue(q, queryPostPublishedOn, parseText[blog.Date]),",
+				"Views: queryValue(q, queryPostViews, parseInt32),",
+				"Published: queryValue(q, queryPostPublished, strconv.ParseBool),",
+				"Sort: querySortValue(q, blog.PostSortID, blog.PostSortIDDesc, blog.PostSortTitle, blog.PostSortTitleDesc),",
+				`"strconv"`,
+			},
+		},
+		{
+			name:   "repository assembles where and order by",
+			render: renderRepoSrc,
+			entity: "Post",
+			want: []string{
+				"if p.Author != nil { where = append(where, `author = ?`) args = append(args, *p.Author) }",
+				"if p.PublishedOn != nil { where = append(where, `published_on = ?`)",
+				"q := `SELECT id, title, author, published_on, views, published FROM posts`",
+				"q += ` WHERE ` + strings.Join(where, ` AND `)",
+				"case blog.PostSortIDDesc: q += ` ORDER BY id DESC`",
+				"case blog.PostSortTitleDesc: q += ` ORDER BY title DESC, id`",
+				"default: q += ` ORDER BY id`",
+				"q += ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
+				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
+				`"strings"`,
+			},
+		},
+		{
+			name:   "sort without filters",
+			render: renderRepoSrc,
+			entity: "Tag",
+			want: []string{
+				"var args []any q := `SELECT slug, label FROM tags` switch p.Sort {",
+				"case blog.TagSortLabel: q += ` ORDER BY label, slug`",
+			},
+			absent: []string{"where = append", `"strings"`},
+		},
+		{
+			name:   "handler without filters accepts only sort",
+			render: renderHandlerSrc,
+			entity: "Tag",
+			want: []string{
+				"q := newListQuery(r, querySort)",
+				"p := blog.TagListParams{ Sort: querySortValue(q, blog.TagSortLabel, blog.TagSortLabelDesc), }",
+			},
+			absent: []string{"queryValue("},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.render(t, s, tc.entity)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
 	}
 }
 
@@ -466,6 +586,54 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 	// must NOT emit a malformed empty SET clause
 	require.NotContains(t, strings.Join(strings.Fields(got), " "), "SET WHERE",
 		"primary-key-only entity must not generate an empty UPDATE SET clause")
+}
+
+func TestRenderRepo_GeneratedColumns(t *testing.T) {
+	t.Parallel()
+
+	id := spec.Field{Name: "id", Type: spec.TypeInt64, Primary: true}
+	name := spec.Field{Name: "name", Type: spec.TypeString, Required: true}
+	cases := []struct {
+		name   string
+		fields []spec.Field
+		want   []string
+	}{
+		{
+			name:   "on_create is set on insert and only returned on update",
+			fields: []spec.Field{id, name, {Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate}},
+			want: []string{
+				"INSERT INTO events (name, created_at) VALUES ($1, now()) RETURNING id, created_at",
+				"UPDATE events SET name = $1 WHERE id = $2 RETURNING created_at`, row.Name, row.ID).Scan(&m.CreatedAt)",
+			},
+		},
+		{
+			name:   "on_write is reset on every update",
+			fields: []spec.Field{id, name, {Name: "updated_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnWrite}},
+			want: []string{
+				"UPDATE events SET name = $1, updated_at = now() WHERE id = $2 RETURNING updated_at",
+			},
+		},
+		{
+			name:   "nothing writable still reads back on_create",
+			fields: []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate}},
+			want: []string{
+				"r.db.QueryRowContext(ctx, `SELECT created_at FROM events WHERE id = $1`, row.ID).Scan(&m.CreatedAt)",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: []spec.Entity{{Name: "Event", Fields: tc.fields}}}
+			got := renderRepoSrc(t, s, "Event")
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+			require.NotContains(t, got, "CreatedAt: m.CreatedAt", "generated columns are not written from the model")
+		})
+	}
 }
 
 func TestRepoInfo_HasNullable(t *testing.T) {
@@ -589,7 +757,9 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 				{Name: "slug", Type: spec.TypeString, Unique: true, Index: true},
 				{Name: "author", Type: spec.TypeReferences, Target: "Author"},
 				{Name: "editor", Type: spec.TypeReferences, Target: "Author", OnDelete: spec.OnDeleteCascade},
-			}, Options: spec.EntityOptions{Timestamps: true}},
+				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate},
+				{Name: "updated_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnWrite},
+			}},
 		},
 	}
 
@@ -965,22 +1135,19 @@ func TestCheckColumns(t *testing.T) {
 	cases := []struct {
 		name    string
 		fields  []spec.Field
-		options spec.EntityOptions
 		wantErr bool
 	}{
-		{"distinct", []spec.Field{id, {Name: "title", Type: spec.TypeString}}, spec.EntityOptions{Timestamps: true}, false},
-		{"duplicate name", []spec.Field{id, {Name: "title", Type: spec.TypeString}, {Name: "title", Type: spec.TypeText}}, spec.EntityOptions{}, true},
-		{"same column", []spec.Field{id, {Name: "authorName", Type: spec.TypeString}, {Name: "author_name", Type: spec.TypeString}}, spec.EntityOptions{}, true},
-		{"same go field", []spec.Field{id, {Name: "Id", Type: spec.TypeString}}, spec.EntityOptions{}, true},
-		{"timestamps collision", []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime}}, spec.EntityOptions{Timestamps: true}, true},
-		{"option column without option", []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime}}, spec.EntityOptions{}, false},
+		{"distinct", []spec.Field{id, {Name: "title", Type: spec.TypeString}}, false},
+		{"duplicate name", []spec.Field{id, {Name: "title", Type: spec.TypeString}, {Name: "title", Type: spec.TypeText}}, true},
+		{"same column", []spec.Field{id, {Name: "authorName", Type: spec.TypeString}, {Name: "author_name", Type: spec.TypeString}}, true},
+		{"same go field", []spec.Field{id, {Name: "Id", Type: spec.TypeString}}, true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := checkColumns(&spec.Entity{Name: "Post", Fields: tc.fields, Options: tc.options})
+			err := checkColumns(&spec.Entity{Name: "Post", Fields: tc.fields})
 			if tc.wantErr {
 				require.Error(t, err)
 				return

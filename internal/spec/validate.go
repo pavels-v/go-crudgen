@@ -37,6 +37,28 @@ var PrimaryKeyTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-onl
 	TypeReferences: {},
 }
 
+var unfilterableTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+	TypeFloat: {},
+	TypeJSON:  {},
+}
+
+var unsortableTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+	TypeBool: {},
+	TypeJSON: {},
+}
+
+const (
+	queryLimit  = "limit"
+	queryOffset = "offset"
+	querySort   = "sort"
+)
+
+var reservedQueryNames = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+	queryLimit:  {},
+	queryOffset: {},
+	querySort:   {},
+}
+
 // Validate checks the spec for structural errors.
 func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Package) == "" {
@@ -79,6 +101,12 @@ func (s *Spec) Validate() error {
 			if f.OnDelete != "" && f.OnDelete != OnDeleteCascade {
 				return fmt.Errorf("entity %q field %q has unknown on_delete %q: use %q", e.Name, f.Name, f.OnDelete, OnDeleteCascade)
 			}
+			if err := validateListModifiers(e, f); err != nil {
+				return err
+			}
+			if err := validateGenerate(e, f); err != nil {
+				return err
+			}
 			if f.Default != nil && f.Primary {
 				return fmt.Errorf("entity %q primary key %q cannot have a default", e.Name, f.Name)
 			}
@@ -115,6 +143,38 @@ func (s *Spec) Validate() error {
 				return fmt.Errorf("entity %q field %q references unknown entity %q", e.Name, f.Name, f.Target)
 			}
 		}
+	}
+	return nil
+}
+
+func validateListModifiers(e *Entity, f Field) error {
+	if f.Filter {
+		if f.Primary {
+			return fmt.Errorf("entity %q primary key %q cannot be a filter: use GET /{id}", e.Name, f.Name)
+		}
+		if _, ok := unfilterableTypes[f.Type]; ok {
+			return fmt.Errorf("entity %q field %q of type %q cannot be a filter", e.Name, f.Name, f.Type)
+		}
+		if _, ok := reservedQueryNames[f.Name]; ok {
+			return fmt.Errorf("entity %q field %q cannot be a filter: the name is a reserved query parameter", e.Name, f.Name)
+		}
+	}
+	if _, ok := unsortableTypes[f.Type]; ok && f.Sort {
+		return fmt.Errorf("entity %q field %q of type %q cannot be sorted", e.Name, f.Name, f.Type)
+	}
+	return nil
+}
+
+func validateGenerate(e *Entity, f Field) error {
+	switch {
+	case f.Generate == "":
+		return nil
+	case f.Generate != GenerateOnCreate && f.Generate != GenerateOnWrite:
+		return fmt.Errorf("entity %q field %q has unknown generate %q: use %q or %q", e.Name, f.Name, f.Generate, GenerateOnCreate, GenerateOnWrite)
+	case f.Type != TypeDatetime:
+		return fmt.Errorf("entity %q field %q has generate but is not a datetime", e.Name, f.Name)
+	case f.Primary, f.Required, f.Default != nil, f.Validate != "":
+		return fmt.Errorf("entity %q field %q has generate, which excludes primary, required, default and validate", e.Name, f.Name)
 	}
 	return nil
 }

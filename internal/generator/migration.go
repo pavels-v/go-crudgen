@@ -116,7 +116,7 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 			return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
 		}
 		def := sqlNow
-		if !isNowDefault(f) {
+		if !isNowDefault(f) && f.Generate == "" {
 			def, err = sqlDefault(f.Default)
 			if err != nil {
 				return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
@@ -153,13 +153,6 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 		if f.Index && !f.Primary {
 			indexes = append(indexes, col)
 		}
-	}
-
-	// Option-injected columns reuse optionColumns' ordering so the schema and the
-	// generated model never disagree on which columns exist. Timestamps are
-	// NOT NULL DEFAULT now().
-	for _, oc := range optionColumns(e.Options) {
-		lines = append(lines, fmt.Sprintf("    %s %s NOT NULL DEFAULT now()", oc.Column, sqlTimestamptz))
 	}
 
 	up := []string{fmt.Sprintf("CREATE TABLE %s (\n%s\n);", table, strings.Join(lines, ",\n"))}

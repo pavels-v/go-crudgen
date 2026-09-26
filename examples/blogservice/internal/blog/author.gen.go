@@ -14,11 +14,25 @@ type Author struct {
 	BornOn *Date     `json:"born_on,omitzero"`
 }
 
+type AuthorSort string
+
+const (
+	AuthorSortBornOn     AuthorSort = "born_on"
+	AuthorSortBornOnDesc AuthorSort = "-born_on"
+)
+
+type AuthorListParams struct {
+	Email  *string
+	Sort   AuthorSort
+	Limit  int
+	Offset int
+}
+
 // AuthorRepository is the storage interface for Author.
 type AuthorRepository interface {
 	Create(ctx context.Context, m *Author) error
 	Get(ctx context.Context, id uuid.UUID) (*Author, error)
-	List(ctx context.Context, limit, offset int) ([]Author, error)
+	List(ctx context.Context, p AuthorListParams) ([]Author, error)
 	Update(ctx context.Context, m *Author) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }

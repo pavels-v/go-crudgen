@@ -10,6 +10,10 @@ import (
 	"example.com/blogservice/internal/blog"
 )
 
+const (
+	queryCommentPost = "post"
+)
+
 // CreateCommentRequest is the request body for creating the comment entity.
 type CreateCommentRequest struct {
 	Post     uuid.UUID  `json:"post" validate:"required"`
@@ -83,17 +87,22 @@ func (h *CommentHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset, details := parsePage(r)
-	if details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", details)
+	q := newListQuery(r, queryCommentPost, querySort)
+	p := blog.CommentListParams{
+		Post: queryValue(q, queryCommentPost, parseText[uuid.UUID]),
+		Sort: querySortValue(q, blog.CommentSortPostedAt, blog.CommentSortPostedAtDesc),
+	}
+	p.Limit, p.Offset = q.page()
+	if q.details != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
 	}
-	items, err := h.repo.List(r.Context(), limit, offset)
+	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[blog.Comment]{Items: items, Limit: limit, Offset: offset})
+	writeBody(w, http.StatusOK, page[blog.Comment]{Items: items, Limit: p.Limit, Offset: p.Offset})
 }
 
 func (h *CommentHandler) Update(w http.ResponseWriter, r *http.Request) {

@@ -113,6 +113,33 @@ func TestIntegration(t *testing.T) {
 		require.Equal(t, 10, list.Limit)
 	})
 
+	t.Run("list filters and sorts in SQL", func(t *testing.T) {
+		var author blog.Author
+		do(t, srv, http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: "sorted@example.com"}, &author, http.StatusCreated)
+		for _, req := range []restapi.CreatePostRequest{
+			{Title: "Beta", Author: &author.ID, Views: new(int64(2))},
+			{Title: "Alpha", Author: &author.ID, Views: new(int64(3)), Published: new(true)},
+			{Title: "Gamma", Author: &author.ID, Views: new(int64(1))},
+		} {
+			do(t, srv, http.MethodPost, "/posts", req, nil, http.StatusCreated)
+		}
+
+		titles := func(query string) []string {
+			var list page[blog.Post]
+			do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+query, nil, &list, http.StatusOK)
+			out := make([]string, len(list.Items))
+			for i, p := range list.Items {
+				out[i] = p.Title
+			}
+			return out
+		}
+		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=title"))
+		require.Equal(t, []string{"Gamma", "Beta", "Alpha"}, titles("&sort=-title"))
+		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=-views"))
+		require.Equal(t, []string{"Alpha"}, titles("&published=true"))
+		require.Equal(t, []string{"Beta"}, titles("&published=false&sort=title&limit=1"))
+	})
+
 	t.Run("constraint violations map to client errors", func(t *testing.T) {
 		const email = "grace@example.com"
 
@@ -189,7 +216,7 @@ func TestIntegration(t *testing.T) {
 		do(t, srv, http.MethodDelete, firstPath, nil, nil, http.StatusNotFound)
 
 		var list page[blog.Comment]
-		do(t, srv, http.MethodGet, "/comments", nil, &list, http.StatusOK)
+		do(t, srv, http.MethodGet, "/comments?post="+post.ID.String(), nil, &list, http.StatusOK)
 		require.Len(t, list.Items, 1)
 		require.Equal(t, second.ID, list.Items[0].ID)
 

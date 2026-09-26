@@ -10,15 +10,9 @@ type Spec struct {
 
 // Entity describes a single resource to generate CRUD endpoints for.
 type Entity struct {
-	Name    string        `yaml:"name"`
-	Plural  string        `yaml:"plural"` // optional; defaults to a naive pluralization
-	Fields  []Field       `yaml:"fields"`
-	Options EntityOptions `yaml:"options"`
-}
-
-// EntityOptions toggles per-entity generation behavior.
-type EntityOptions struct {
-	Timestamps bool `yaml:"timestamps"` // adds created_at / updated_at
+	Name   string  `yaml:"name"`
+	Plural string  `yaml:"plural"` // optional; defaults to a naive pluralization
+	Fields []Field `yaml:"fields"`
 }
 
 const (
@@ -40,6 +34,11 @@ const DefaultNow = "now"
 
 const OnDeleteCascade = "cascade"
 
+const (
+	GenerateOnCreate = "on_create"
+	GenerateOnWrite  = "on_write"
+)
+
 // Field is a single attribute of an entity.
 type Field struct {
 	Name     string `yaml:"name"`
@@ -48,10 +47,13 @@ type Field struct {
 	Required bool   `yaml:"required"`
 	Unique   bool   `yaml:"unique"`
 	Index    bool   `yaml:"index"`
+	Filter   bool   `yaml:"filter"` // List accepts ?<name>= for equality
+	Sort     bool   `yaml:"sort"`   // List accepts ?sort=<name> and ?sort=-<name>
 	Default  any    `yaml:"default"`
 	Validate string `yaml:"validate"` // go-playground/validator rule string
 	Target   string `yaml:"target"`   // referenced entity, when Type == "references"
 	OnDelete string `yaml:"on_delete"`
+	Generate string `yaml:"generate"` // the server sets now() on create, or on every write
 }
 
 // PrimaryKey returns the fields marked primary, in declaration order. A valid

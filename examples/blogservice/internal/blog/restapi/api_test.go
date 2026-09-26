@@ -20,22 +20,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type memStore[K comparable, M any] struct {
+type memStore[K comparable, M, P any] struct {
 	mu     sync.Mutex
 	data   map[K]M
 	key    func(*M) *K
 	nextID func() K
+	listed []P
 }
 
-func newMemStore[K comparable, M any](key func(*M) *K, nextID func() K) *memStore[K, M] {
-	return &memStore[K, M]{
+func newMemStore[K comparable, M, P any](key func(*M) *K, nextID func() K) *memStore[K, M, P] {
+	return &memStore[K, M, P]{
 		data:   map[K]M{},
 		key:    key,
 		nextID: nextID,
 	}
 }
 
-func (s *memStore[K, M]) Create(_ context.Context, m *M) error {
+func (s *memStore[K, M, P]) Create(_ context.Context, m *M) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.nextID != nil {
@@ -49,7 +50,7 @@ func (s *memStore[K, M]) Create(_ context.Context, m *M) error {
 	return nil
 }
 
-func (s *memStore[K, M]) Get(_ context.Context, id K) (*M, error) {
+func (s *memStore[K, M, P]) Get(_ context.Context, id K) (*M, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m, ok := s.data[id]
@@ -59,9 +60,10 @@ func (s *memStore[K, M]) Get(_ context.Context, id K) (*M, error) {
 	return &m, nil
 }
 
-func (s *memStore[K, M]) List(_ context.Context, _, _ int) ([]M, error) {
+func (s *memStore[K, M, P]) List(_ context.Context, p P) ([]M, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.listed = append(s.listed, p)
 	out := make([]M, 0, len(s.data))
 	for _, m := range s.data {
 		out = append(out, m)
@@ -69,7 +71,7 @@ func (s *memStore[K, M]) List(_ context.Context, _, _ int) ([]M, error) {
 	return out, nil
 }
 
-func (s *memStore[K, M]) Update(_ context.Context, m *M) error {
+func (s *memStore[K, M, P]) Update(_ context.Context, m *M) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := *s.key(m)
@@ -80,7 +82,7 @@ func (s *memStore[K, M]) Update(_ context.Context, m *M) error {
 	return nil
 }
 
-func (s *memStore[K, M]) Delete(_ context.Context, id K) error {
+func (s *memStore[K, M, P]) Delete(_ context.Context, id K) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.data[id]; !ok {
@@ -91,12 +93,20 @@ func (s *memStore[K, M]) Delete(_ context.Context, id K) error {
 }
 
 func newServer() *httptest.Server {
+	return newServerWithPosts(newPostStore())
+}
+
+func newPostStore() *memStore[uuid.UUID, blog.Post, blog.PostListParams] {
+	return newMemStore[uuid.UUID, blog.Post, blog.PostListParams](func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New)
+}
+
+func newServerWithPosts(posts blog.PostRepository) *httptest.Server {
 	var commentSeq atomic.Int64
 	return httptest.NewServer(NewRouter(Deps{
-		Posts:    newMemStore(func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New),
-		Authors:  newMemStore(func(m *blog.Author) *uuid.UUID { return &m.ID }, uuid.New),
-		Comments: newMemStore(func(m *blog.Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
-		Tags:     newMemStore[string](func(m *blog.Tag) *string { return &m.Slug }, nil),
+		Posts:    posts,
+		Authors:  newMemStore[uuid.UUID, blog.Author, blog.AuthorListParams](func(m *blog.Author) *uuid.UUID { return &m.ID }, uuid.New),
+		Comments: newMemStore[int64, blog.Comment, blog.CommentListParams](func(m *blog.Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
+		Tags:     newMemStore[string, blog.Tag, blog.TagListParams](func(m *blog.Tag) *string { return &m.Slug }, nil),
 	}))
 }
 
@@ -207,7 +217,10 @@ func TestErrorResponses(t *testing.T) {
 	srv := newServer()
 	t.Cleanup(srv.Close)
 
-	const tagPath = "/tags"
+	const (
+		tagPath      = "/tags"
+		unknownParam = "editor"
+	)
 	do(t, srv, http.MethodPost, tagPath, CreateTagRequest{Slug: "taken", Label: "Taken"}, nil, http.StatusCreated)
 
 	cases := []struct {
@@ -268,6 +281,30 @@ func TestErrorResponses(t *testing.T) {
 			[]errorDetail{{Field: queryLimit, Reason: reasonInvalidValue}, {Field: queryOffset, Reason: reasonInvalidValue}},
 		},
 		{
+			"unknown query parameter", http.MethodGet, "/posts?" + unknownParam + "=x&limit=5", "",
+			http.StatusBadRequest, codeInvalidQuery,
+			[]errorDetail{{Field: unknownParam, Reason: reasonUnknownField}},
+		},
+		{
+			"repeated query parameter", http.MethodGet, "/posts?published=true&published=false", "",
+			http.StatusBadRequest, codeInvalidQuery,
+			[]errorDetail{{Field: queryPostPublished, Reason: reasonDuplicateField}},
+		},
+		{
+			"invalid filter and sort", http.MethodGet, "/posts?author=nope&published=maybe&sort=body", "",
+			http.StatusBadRequest, codeInvalidQuery,
+			[]errorDetail{
+				{Field: queryPostPublished, Reason: reasonInvalidValue},
+				{Field: queryPostAuthor, Reason: reasonInvalidValue},
+				{Field: querySort, Reason: reasonInvalidValue},
+			},
+		},
+		{
+			"filter on entity without filters", http.MethodGet, "/tags?label=go", "",
+			http.StatusBadRequest, codeInvalidQuery,
+			[]errorDetail{{Field: "label", Reason: reasonUnknownField}},
+		},
+		{
 			"entity not found", http.MethodGet, "/posts/" + uuid.NewString(), "",
 			http.StatusNotFound, codeNotFound, nil,
 		},
@@ -297,6 +334,37 @@ func TestErrorResponses(t *testing.T) {
 				return
 			}
 			require.Equal(t, tc.wantDetails, got.Details)
+		})
+	}
+}
+
+func TestListParsesFiltersAndSort(t *testing.T) {
+	t.Parallel()
+
+	author := uuid.New()
+	cases := []struct {
+		name  string
+		query string
+		want  blog.PostListParams
+	}{
+		{"defaults", "", blog.PostListParams{Limit: 50}},
+		{
+			"filters, sort and page", "?author=" + author.String() + "&published=true&sort=-title&limit=5&offset=10",
+			blog.PostListParams{Author: &author, Published: new(true), Sort: blog.PostSortTitleDesc, Limit: 5, Offset: 10},
+		},
+		{"ascending sort", "?sort=views", blog.PostListParams{Sort: blog.PostSortViews, Limit: 50}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			posts := newPostStore()
+			srv := newServerWithPosts(posts)
+			t.Cleanup(srv.Close)
+
+			do(t, srv, http.MethodGet, "/posts"+tc.query, nil, nil, http.StatusOK)
+			require.Equal(t, []blog.PostListParams{tc.want}, posts.listed)
 		})
 	}
 }

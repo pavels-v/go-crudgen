@@ -21,8 +21,8 @@ type tagRow struct {
 	Weight float64 `db:"weight"`
 }
 
-// newTagRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newTagRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newTagRow(m *blog.Tag) tagRow {
 	return tagRow{
 		Slug:   m.Slug,
@@ -76,9 +76,9 @@ func (r *TagRepository) Get(ctx context.Context, id string) (*blog.Tag, error) {
 	return &m, nil
 }
 
-func (r *TagRepository) List(ctx context.Context, limit, offset int) ([]blog.Tag, error) {
+func (r *TagRepository) List(ctx context.Context, p blog.TagListParams) ([]blog.Tag, error) {
 	var rows []tagRow
-	if err := r.db.SelectContext(ctx, &rows, `SELECT slug, label, color, weight FROM tags ORDER BY slug LIMIT $1 OFFSET $2`, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, `SELECT slug, label, color, weight FROM tags ORDER BY slug LIMIT $1 OFFSET $2`, p.Limit, p.Offset); err != nil {
 		return nil, fmt.Errorf("list tag: %w", err)
 	}
 	out := make([]blog.Tag, len(rows))

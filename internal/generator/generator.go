@@ -297,13 +297,17 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 // modelData is the template input for a single entity's domain file: the model
 // struct and its repository interface.
 type modelData struct {
-	Package  string
-	Imports  []string
-	Struct   string
-	Lower    string // struct name lower-cased, for the doc comment
-	Repo     string // e.g. "PostRepository"
-	PKGoType string
-	Fields   []modelField
+	Package    string
+	Imports    []string
+	Struct     string
+	Lower      string // struct name lower-cased, for the doc comment
+	Repo       string // e.g. "PostRepository"
+	PKGoType   string
+	Fields     []modelField
+	ListParams string // e.g. "PostListParams"
+	SortType   string // e.g. "PostSort"
+	Filters    []modelField
+	Sorts      []sortOption
 }
 
 type modelField struct {
@@ -329,6 +333,16 @@ type handlerData struct {
 	PK           pkData
 	CreateAssign []assign // fields assigned from the create request
 	UpdateAssign []assign // fields assigned from the update request (PK excluded)
+	ListParams   string   // qualified domain params, e.g. "blog.PostListParams"
+	Filters      []handlerFilter
+	Sorts        []string // qualified domain sort constants
+}
+
+type handlerFilter struct {
+	GoName string
+	Const  string // query parameter constant, e.g. "queryPostAuthor"
+	Name   string // query parameter, e.g. "author"
+	Parse  string // func(string) (T, error) for the filter type
 }
 
 type pkData struct {
@@ -361,7 +375,11 @@ func routerInfo(s *spec.Spec, entities []routerEntity) routerData {
 		Imports: groupImports(map[string]struct{}{
 			importJSONv2:    {},
 			importJSON:      {},
+			importEncoding:  {},
 			importErrors:    {},
+			importMaps:      {},
+			importSlices:    {},
+			importNetURL:    {},
 			importSlog:      {},
 			importNetHTTP:   {},
 			importReflect:   {},
@@ -383,9 +401,6 @@ func checkColumns(e *spec.Entity) error {
 	names := make([]string, 0, len(e.Fields)+3)
 	for _, f := range e.Fields {
 		names = append(names, f.Name)
-	}
-	for _, oc := range optionColumns(e.Options) {
-		names = append(names, oc.Column)
 	}
 
 	columns := make(map[string]string, len(names))
@@ -427,6 +442,10 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	if err != nil {
 		return handlerData{}, err
 	}
+	filters, err := listFilters(e, byName)
+	if err != nil {
+		return handlerData{}, err
+	}
 
 	name := pascalCase(e.Name)
 	data := handlerData{
@@ -438,6 +457,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		Plural:     plural(e.Name, e.Plural),
 		CreateName: fmt.Sprintf(nameCreateRequest, name),
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
+		ListParams: qualified(s, fmt.Sprintf(nameListParams, name)),
 		PK: pkData{
 			GoName:   pascalCase(pk.Name),
 			Expr:     pp.expr,
@@ -447,6 +467,9 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	}
 	imports := map[string]struct{}{importNetHTTP: {}, s.Module: {}}
 	for _, f := range e.Fields {
+		if f.Generate != "" {
+			continue
+		}
 		gn := pascalCase(f.Name)
 		gt, err := fieldType(f, byName)
 		if err != nil {
@@ -496,6 +519,21 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	if pp.imp != "" {
 		imports[pp.imp] = struct{}{}
 	}
+	for _, lf := range filters {
+		parse, imp := queryParser(lf.Type, s)
+		if imp != "" {
+			imports[imp] = struct{}{}
+		}
+		data.Filters = append(data.Filters, handlerFilter{
+			GoName: lf.GoName,
+			Const:  fmt.Sprintf(nameQueryParam, name, lf.GoName),
+			Name:   lf.Field.Name,
+			Parse:  parse,
+		})
+	}
+	for _, so := range sortOptions(e) {
+		data.Sorts = append(data.Sorts, qualified(s, so.Name))
+	}
 	data.Imports = groupImports(imports, s.Module)
 	return data, nil
 }
@@ -538,15 +576,26 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		return nil, err
 	}
 
+	filters, err := listFilters(e, byName)
+	if err != nil {
+		return nil, err
+	}
+
 	name := pascalCase(e.Name)
 	data := modelData{
-		Package:  s.Package,
-		Struct:   name,
-		Lower:    strings.ToLower(name),
-		Repo:     fmt.Sprintf(nameRepo, name),
-		PKGoType: pkType.expr,
+		Package:    s.Package,
+		Struct:     name,
+		Lower:      strings.ToLower(name),
+		Repo:       fmt.Sprintf(nameRepo, name),
+		PKGoType:   pkType.expr,
+		ListParams: fmt.Sprintf(nameListParams, name),
+		SortType:   fmt.Sprintf(nameSortType, name),
+		Sorts:      sortOptions(e),
 	}
 	imports := map[string]struct{}{importContext: {}}
+	for _, lf := range filters {
+		data.Filters = append(data.Filters, modelField{GoName: lf.GoName, GoType: fmt.Sprintf(exprPointer, lf.Type.expr)})
+	}
 
 	// The model carries only json tags: request validation lives on the restapi
 	// DTOs and sqlx column mapping on the postgres row struct.
@@ -563,12 +612,6 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			return nil, err
 		}
 		add(f.Name, modelType(f, gt.expr), gt.imp, jsonTag(f))
-	}
-
-	// Option-injected columns (timestamps) share one definition
-	// with repoInfo so the model struct and the generated SQL never disagree.
-	for _, oc := range optionColumns(e.Options) {
-		add(oc.Column, oc.GoType, importTime, oc.JSONTag)
 	}
 
 	data.Imports = groupImports(imports, s.Module)

@@ -3,10 +3,16 @@ package restapi
 import (
 	"encoding/json/jsontext"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 
 	"example.com/blogservice/internal/blog"
+)
+
+const (
+	queryPostPublished = "published"
+	queryPostAuthor    = "author"
 )
 
 // CreatePostRequest is the request body for creating the post entity.
@@ -88,17 +94,23 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset, details := parsePage(r)
-	if details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", details)
+	q := newListQuery(r, queryPostPublished, queryPostAuthor, querySort)
+	p := blog.PostListParams{
+		Published: queryValue(q, queryPostPublished, strconv.ParseBool),
+		Author:    queryValue(q, queryPostAuthor, parseText[uuid.UUID]),
+		Sort:      querySortValue(q, blog.PostSortTitle, blog.PostSortTitleDesc, blog.PostSortViews, blog.PostSortViewsDesc, blog.PostSortCreatedAt, blog.PostSortCreatedAtDesc),
+	}
+	p.Limit, p.Offset = q.page()
+	if q.details != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
 	}
-	items, err := h.repo.List(r.Context(), limit, offset)
+	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: limit, Offset: offset})
+	writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: p.Limit, Offset: p.Offset})
 }
 
 func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {

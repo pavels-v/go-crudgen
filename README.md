@@ -34,7 +34,7 @@ Among the tools we found, none generates every layer (validation, handlers, rout
 - Storage is driver-agnostic via `database/sql`; `pgx` or `pq` is a flag.
 - Nullability flows from the spec: `*T` in the model, `sql.Null[T]` in the repository, no `NOT NULL` in the migration.
 - Migrations are goose SQL files, applied with standard tooling.
-- Per-entity option: `timestamps`.
+- Server-set timestamps via `generate: on_create | on_write`.
 - Spec-first: works for greenfield projects; the spec is versioned and diff-friendly.
 - Plain YAML syntax familiar from OpenAPI and Kubernetes; the generator validates its own rules on top (required fields, known types, exactly one primary key, existing reference targets).
 - Handlers depend on a repository interface, so storage can be swapped or faked in tests.
@@ -76,13 +76,13 @@ Developer tasks: `make help`.
 - `migrations/NNNNN_create_<table>.sql` - goose migrations, numbered in foreign-key order.
 - Generation fails when an entity name collides with a generated declaration or file.
 
-| Method   | Path             | Action                           |
-| -------- | ---------------- | -------------------------------- |
-| `POST`   | `/{plural}`      | Create                           |
-| `GET`    | `/{plural}`      | List (`?limit`, `?offset`)       |
-| `GET`    | `/{plural}/{id}` | Read                             |
-| `PUT`    | `/{plural}/{id}` | Update                           |
-| `DELETE` | `/{plural}/{id}` | Delete                           |
+| Method   | Path             | Action                                       |
+| -------- | ---------------- | -------------------------------------------- |
+| `POST`   | `/{plural}`      | Create                                       |
+| `GET`    | `/{plural}`      | List (`?limit`, `?offset`, `?sort`, filters) |
+| `GET`    | `/{plural}/{id}` | Read                                         |
+| `PUT`    | `/{plural}/{id}` | Update                                       |
+| `DELETE` | `/{plural}/{id}` | Delete                                       |
 
 Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset"}`), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
 
@@ -102,13 +102,15 @@ entities:
       - { name: id, type: uuid, primary: true }
       - { name: title, type: string, required: true, validate: "min=1,max=200" }
       - { name: author, type: references, target: Author }
-    options:
-      timestamps: true
+      - { name: created_at, type: datetime, generate: on_create }
+      - { name: updated_at, type: datetime, generate: on_write }
 ```
 
 - `package` names the root package; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
-- Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only).
+- Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `sort`, `generate`.
+- `generate: on_create` sets a `datetime` to `now()` on insert, `generate: on_write` on insert and every update; both are read-only in the API.
+- `filter: true` makes List accept `?<name>=<value>` (equality); `sort: true` accepts `?sort=<name>` or `?sort=-<name>`; unknown or repeated query parameters are rejected; pair them with `index: true`.
 - Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
 - `uuid` keys are generated in Go (v4) with `gen_random_uuid()` as the column default; `int32` and `int64` keys use `IDENTITY`; other keys are required in Create.
 - `default` takes a literal of the field's type (`string`, `text`, `int32`, `int64`, `float`, `bool`) or `now` for `datetime`; the column is `NOT NULL DEFAULT` and the handler fills an omitted value.
@@ -123,8 +125,8 @@ entities:
 - [x] PostgreSQL repository (`sqlx` / `database/sql`)
 - [x] Migrations (goose SQL schema per entity)
 - [x] List endpoint: pagination (`?limit` / `?offset`)
-- [ ] List endpoint: filtering
-- [ ] List endpoint: sorting
+- [x] List endpoint: filtering (equality)
+- [x] List endpoint: sorting
 - [~] Relations (`belongs_to` / `has_many`)
   - [x] `belongs_to` via `references` fields
   - [ ] `has_many`, nested/relation routes, and JOIN-based loading

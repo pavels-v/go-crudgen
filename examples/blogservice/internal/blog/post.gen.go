@@ -21,11 +21,30 @@ type Post struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type PostSort string
+
+const (
+	PostSortTitle         PostSort = "title"
+	PostSortTitleDesc     PostSort = "-title"
+	PostSortViews         PostSort = "views"
+	PostSortViewsDesc     PostSort = "-views"
+	PostSortCreatedAt     PostSort = "created_at"
+	PostSortCreatedAtDesc PostSort = "-created_at"
+)
+
+type PostListParams struct {
+	Published *bool
+	Author    *uuid.UUID
+	Sort      PostSort
+	Limit     int
+	Offset    int
+}
+
 // PostRepository is the storage interface for Post.
 type PostRepository interface {
 	Create(ctx context.Context, m *Post) error
 	Get(ctx context.Context, id uuid.UUID) (*Post, error)
-	List(ctx context.Context, limit, offset int) ([]Post, error)
+	List(ctx context.Context, p PostListParams) ([]Post, error)
 	Update(ctx context.Context, m *Post) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }

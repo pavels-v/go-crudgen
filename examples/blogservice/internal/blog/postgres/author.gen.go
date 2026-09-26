@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -22,8 +23,8 @@ type authorRow struct {
 	BornOn sql.Null[blog.Date] `db:"born_on"`
 }
 
-// newAuthorRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newAuthorRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newAuthorRow(m *blog.Author) authorRow {
 	return authorRow{
 		ID:     m.ID,
@@ -78,9 +79,33 @@ func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Author,
 	return &m, nil
 }
 
-func (r *AuthorRepository) List(ctx context.Context, limit, offset int) ([]blog.Author, error) {
+func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([]blog.Author, error) {
+	var (
+		where []string
+		args  []any
+	)
+	if p.Email != nil {
+		where = append(where, `email = ?`)
+		args = append(args, *p.Email)
+	}
+
+	q := `SELECT id, email, name, born_on FROM authors`
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+	switch p.Sort {
+	case blog.AuthorSortBornOn:
+		q += ` ORDER BY born_on, id`
+	case blog.AuthorSortBornOnDesc:
+		q += ` ORDER BY born_on DESC, id`
+	default:
+		q += ` ORDER BY id`
+	}
+	q += ` LIMIT ? OFFSET ?`
+	args = append(args, p.Limit, p.Offset)
+
 	var rows []authorRow
-	if err := r.db.SelectContext(ctx, &rows, `SELECT id, email, name, born_on FROM authors ORDER BY id LIMIT $1 OFFSET $2`, limit, offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 		return nil, fmt.Errorf("list author: %w", err)
 	}
 	out := make([]blog.Author, len(rows))
