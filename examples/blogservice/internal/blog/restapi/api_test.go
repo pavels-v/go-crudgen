@@ -25,6 +25,7 @@ type memStore[K comparable, M, P any] struct {
 	data   map[K]M
 	key    func(*M) *K
 	nextID func() K
+	limit  func(P) int
 	listed []P
 }
 
@@ -68,6 +69,9 @@ func (s *memStore[K, M, P]) List(_ context.Context, p P) ([]M, error) {
 	for _, m := range s.data {
 		out = append(out, m)
 	}
+	if s.limit != nil {
+		out = out[:min(len(out), s.limit(p))]
+	}
 	return out, nil
 }
 
@@ -97,7 +101,9 @@ func newServer() *httptest.Server {
 }
 
 func newPostStore() *memStore[uuid.UUID, blog.Post, blog.PostListParams] {
-	return newMemStore[uuid.UUID, blog.Post, blog.PostListParams](func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New)
+	s := newMemStore[uuid.UUID, blog.Post, blog.PostListParams](func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New)
+	s.limit = func(p blog.PostListParams) int { return p.Limit }
+	return s
 }
 
 func newServerWithPosts(posts blog.PostRepository) *httptest.Server {
@@ -194,11 +200,12 @@ func TestPostCRUD(t *testing.T) {
 	do(t, srv, http.MethodGet, idPath, nil, &got, http.StatusOK)
 	require.Equal(t, "Hello", got.Title)
 
-	var list page[blog.Post]
+	var list offsetPage[blog.Post]
 	do(t, srv, http.MethodGet, "/posts?limit=500", nil, &list, http.StatusOK)
 	require.Len(t, list.Items, 1)
 	require.Equal(t, maxLimit, list.Limit, "limit is clamped")
 	require.Zero(t, list.Offset)
+	require.False(t, list.HasMore)
 
 	var updated blog.Post
 	do(t, srv, http.MethodPut, idPath,
@@ -291,12 +298,13 @@ func TestErrorResponses(t *testing.T) {
 			[]errorDetail{{Field: queryPostPublished, Reason: reasonDuplicateField}},
 		},
 		{
-			"invalid filter and sort", http.MethodGet, "/posts?author=nope&published=maybe&sort=body", "",
+			"invalid filter and sort", http.MethodGet, "/posts?author=nope&published=maybe&sort=body&dir=up", "",
 			http.StatusBadRequest, codeInvalidQuery,
 			[]errorDetail{
 				{Field: queryPostPublished, Reason: reasonInvalidValue},
 				{Field: queryPostAuthor, Reason: reasonInvalidValue},
 				{Field: querySort, Reason: reasonInvalidValue},
+				{Field: queryDir, Reason: reasonInvalidValue},
 			},
 		},
 		{
@@ -347,12 +355,13 @@ func TestListParsesFiltersAndSort(t *testing.T) {
 		query string
 		want  blog.PostListParams
 	}{
-		{"defaults", "", blog.PostListParams{Limit: 50}},
+		{"defaults", "", blog.PostListParams{Dir: blog.SortAsc, Limit: defaultLimit + 1}},
 		{
-			"filters, sort and page", "?author=" + author.String() + "&published=true&sort=-title&limit=5&offset=10",
-			blog.PostListParams{Author: &author, Published: new(true), Sort: blog.PostSortTitleDesc, Limit: 5, Offset: 10},
+			"filters, sort and page", "?author=" + author.String() + "&published=true&sort=title&dir=desc&limit=5&offset=10",
+			blog.PostListParams{Author: &author, Published: new(true), Sort: blog.PostSortTitle, Dir: blog.SortDesc, Limit: 6, Offset: 10},
 		},
-		{"ascending sort", "?sort=views", blog.PostListParams{Sort: blog.PostSortViews, Limit: 50}},
+		{"ascending sort", "?sort=views&dir=asc", blog.PostListParams{Sort: blog.PostSortViews, Dir: blog.SortAsc, Limit: defaultLimit + 1}},
+		{"direction without sort", "?dir=desc", blog.PostListParams{Dir: blog.SortDesc, Limit: defaultLimit + 1}},
 	}
 
 	for _, tc := range cases {
@@ -365,6 +374,40 @@ func TestListParsesFiltersAndSort(t *testing.T) {
 
 			do(t, srv, http.MethodGet, "/posts"+tc.query, nil, nil, http.StatusOK)
 			require.Equal(t, []blog.PostListParams{tc.want}, posts.listed)
+		})
+	}
+}
+
+func TestListReportsHasMore(t *testing.T) {
+	t.Parallel()
+
+	const posts = 3
+	cases := []struct {
+		name     string
+		limit    int
+		wantLen  int
+		wantMore bool
+	}{
+		{"more rows than limit", posts - 1, posts - 1, true},
+		{"exactly limit", posts, posts, false},
+		{"fewer rows than limit", posts + 1, posts, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := newServer()
+			t.Cleanup(srv.Close)
+			for range posts {
+				do(t, srv, http.MethodPost, "/posts", CreatePostRequest{Title: "Hello"}, nil, http.StatusCreated)
+			}
+
+			var list offsetPage[blog.Post]
+			do(t, srv, http.MethodGet, "/posts?limit="+strconv.Itoa(tc.limit), nil, &list, http.StatusOK)
+			require.Len(t, list.Items, tc.wantLen)
+			require.Equal(t, tc.limit, list.Limit)
+			require.Equal(t, tc.wantMore, list.HasMore)
 		})
 	}
 }

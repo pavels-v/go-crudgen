@@ -19,13 +19,13 @@ type Comment struct {
 type CommentSort string
 
 const (
-	CommentSortPostedAt     CommentSort = "posted_at"
-	CommentSortPostedAtDesc CommentSort = "-posted_at"
+	CommentSortPostedAt CommentSort = "posted_at"
 )
 
 type CommentListParams struct {
 	Post   *uuid.UUID
 	Sort   CommentSort
+	Dir    SortDir
 	Limit  int
 	Offset int
 }

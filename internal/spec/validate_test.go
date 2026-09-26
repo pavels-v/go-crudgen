@@ -118,6 +118,9 @@ func TestValidate_Errors(t *testing.T) {
 		{"filter named like a paging parameter", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "limit", Type: TypeInt32, Filter: true})
 		}},
+		{"filter named like the direction parameter", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: queryDir, Type: TypeString, Filter: true})
+		}},
 		{"sort on bool", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "done", Type: TypeBool, Sort: true})
 		}},

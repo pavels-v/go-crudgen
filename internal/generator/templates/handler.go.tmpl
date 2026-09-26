@@ -81,7 +81,8 @@ func (h *{{ .Struct }}Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r{{ range .Filters }}, {{ .Const }}{{ end }}{{ if .Sorts }}, querySort{{ end }})
+	q := newListQuery(r, queryOffset{{ range .Filters }}, {{ .Const }}{{ end }}{{ if .Sorts }}, querySort{{ end }})
+	limit := q.limit()
 	p := {{ .ListParams }}{
 {{- range .Filters }}
 		{{ .GoName }}: queryValue(q, {{ .Const }}, {{ .Parse }}),
@@ -89,8 +90,10 @@ func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
 {{- if .Sorts }}
 		Sort: querySortValue(q{{ range .Sorts }}, {{ . }}{{ end }}),
 {{- end }}
+		Dir:    q.dir(),
+		Limit:  limit + 1,
+		Offset: q.offset(),
 	}
-	p.Limit, p.Offset = q.page()
 	if q.details != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
@@ -100,7 +103,8 @@ func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[{{ .Model }}]{Items: items, Limit: p.Limit, Offset: p.Offset})
+	items, more := trimPage(items, limit)
+	writeBody(w, http.StatusOK, offsetPage[{{ .Model }}]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {

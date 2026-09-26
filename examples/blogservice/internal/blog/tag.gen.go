@@ -13,6 +13,7 @@ type Tag struct {
 }
 
 type TagListParams struct {
+	Dir    SortDir
 	Limit  int
 	Offset int
 }

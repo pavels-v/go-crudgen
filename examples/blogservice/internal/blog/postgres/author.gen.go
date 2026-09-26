@@ -89,19 +89,24 @@ func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([
 		args = append(args, *p.Email)
 	}
 
+	desc := p.Dir == blog.SortDesc
+	var order string
+	switch {
+	case p.Sort == blog.AuthorSortBornOn && desc:
+		order = `born_on DESC, id DESC`
+	case p.Sort == blog.AuthorSortBornOn:
+		order = `born_on, id`
+	case desc:
+		order = `id DESC`
+	default:
+		order = `id`
+	}
+
 	q := `SELECT id, email, name, born_on FROM authors`
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	switch p.Sort {
-	case blog.AuthorSortBornOn:
-		q += ` ORDER BY born_on, id`
-	case blog.AuthorSortBornOnDesc:
-		q += ` ORDER BY born_on DESC, id`
-	default:
-		q += ` ORDER BY id`
-	}
-	q += ` LIMIT ? OFFSET ?`
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	args = append(args, p.Limit, p.Offset)
 
 	var rows []authorRow

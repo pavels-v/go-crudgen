@@ -116,6 +116,7 @@ const (
 	queryLimit      = "limit"
 	queryOffset     = "offset"
 	querySort       = "sort"
+	queryDir        = "dir"
 	contentTypeJSON = "application/json"
 	tagJSON         = "json"
 	tagOptionSep    = ","
@@ -143,10 +144,11 @@ type errorDetail struct {
 	Reason string `json:"reason"`
 }
 
-type page[T any] struct {
-	Items  []T `json:"items"`
-	Limit  int `json:"limit"`
-	Offset int `json:"offset"`
+type offsetPage[T any] struct {
+	Items   []T  `json:"items"`
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"has_more"`
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
@@ -246,13 +248,13 @@ type listQuery struct {
 	details []errorDetail
 }
 
-// newListQuery accepts the paging parameters plus keys; any other parameter,
-// and any parameter given more than once, is an error detail.
+// newListQuery accepts limit and dir plus keys; any other parameter, and any
+// parameter given more than once, is an error detail.
 func newListQuery(r *http.Request, keys ...string) *listQuery {
 	q := &listQuery{values: r.URL.Query()}
 	for _, key := range slices.Sorted(maps.Keys(q.values)) {
 		switch {
-		case key != queryLimit && key != queryOffset && !slices.Contains(keys, key):
+		case key != queryLimit && key != queryDir && !slices.Contains(keys, key):
 			q.details = append(q.details, errorDetail{Field: key, Reason: reasonUnknownField})
 		case len(q.values[key]) > 1:
 			q.details = append(q.details, errorDetail{Field: key, Reason: reasonDuplicateField})
@@ -265,25 +267,51 @@ func (q *listQuery) invalid(key string) {
 	q.details = append(q.details, errorDetail{Field: key, Reason: reasonInvalidValue})
 }
 
-// page reads the optional ?limit= and ?offset= query parameters. A limit above
-// maxLimit is clamped.
-func (q *listQuery) page() (limit, offset int) {
-	limit = defaultLimit
-	if v := q.values.Get(queryLimit); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			q.invalid(queryLimit)
-		}
-		limit = min(n, maxLimit)
+// limit reads the optional ?limit= query parameter. A limit above maxLimit is
+// clamped.
+func (q *listQuery) limit() int {
+	v := q.values.Get(queryLimit)
+	if v == "" {
+		return defaultLimit
 	}
-	if v := q.values.Get(queryOffset); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			q.invalid(queryOffset)
-		}
-		offset = n
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		q.invalid(queryLimit)
 	}
-	return limit, offset
+	return min(n, maxLimit)
+}
+
+func (q *listQuery) offset() int {
+	v := q.values.Get(queryOffset)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		q.invalid(queryOffset)
+	}
+	return n
+}
+
+func (q *listQuery) dir() blog.SortDir {
+	v := blog.SortDir(q.values.Get(queryDir))
+	switch v {
+	case "":
+		return blog.SortAsc
+	case blog.SortAsc, blog.SortDesc:
+		return v
+	}
+	q.invalid(queryDir)
+	return blog.SortAsc
+}
+
+// trimPage drops the extra row fetched past limit, which only tells whether
+// more rows follow.
+func trimPage[T any](items []T, limit int) ([]T, bool) {
+	if len(items) > limit {
+		return items[:limit], true
+	}
+	return items, false
 }
 
 // queryValue returns nil when key is absent, so the filter is not applied.

@@ -79,12 +79,12 @@ Developer tasks: `make help`.
 | Method   | Path             | Action                                       |
 | -------- | ---------------- | -------------------------------------------- |
 | `POST`   | `/{plural}`      | Create                                       |
-| `GET`    | `/{plural}`      | List (`?limit`, `?offset`, `?sort`, filters) |
+| `GET`    | `/{plural}`      | List (`?limit`, `?offset`, `?sort`, `?dir`, filters) |
 | `GET`    | `/{plural}/{id}` | Read                                         |
 | `PUT`    | `/{plural}/{id}` | Update                                       |
 | `DELETE` | `/{plural}/{id}` | Delete                                       |
 
-Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset"}`), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
+Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset", "has_more"}`), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
 
 Errors: `400` malformed body, id or query, `404` not found, `405` method not allowed, `409` unique violation or deleting a referenced row, `413` body over 1 MiB, `422` failed validation or unknown reference, `500` without internal details.
 
@@ -110,7 +110,7 @@ entities:
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `sort`, `generate`.
 - `generate: on_create` sets a `datetime` to `now()` on insert, `generate: on_write` on insert and every update; both are read-only in the API.
-- `filter: true` makes List accept `?<name>=<value>` (equality); `sort: true` accepts `?sort=<name>` or `?sort=-<name>`; unknown or repeated query parameters are rejected; pair them with `index: true`.
+- `filter: true` makes List accept `?<name>=<value>` (equality); `sort: true` accepts `?sort=<name>` with `?dir=asc|desc` (default `asc`, primary key when `sort` is absent); unknown or repeated query parameters are rejected; pair them with `index: true`.
 - Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
 - `uuid` keys are generated in Go (v4) with `gen_random_uuid()` as the column default; `int32` and `int64` keys use `IDENTITY`; other keys are required in Create.
 - `default` takes a literal of the field's type (`string`, `text`, `int32`, `int64`, `float`, `bool`) or `now` for `datetime`; the column is `NOT NULL DEFAULT` and the handler fills an omitted value.

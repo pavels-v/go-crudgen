@@ -82,12 +82,15 @@ func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryAuthorEmail, querySort)
+	q := newListQuery(r, queryOffset, queryAuthorEmail, querySort)
+	limit := q.limit()
 	p := blog.AuthorListParams{
-		Email: queryValue(q, queryAuthorEmail, parseString),
-		Sort:  querySortValue(q, blog.AuthorSortBornOn, blog.AuthorSortBornOnDesc),
+		Email:  queryValue(q, queryAuthorEmail, parseString),
+		Sort:   querySortValue(q, blog.AuthorSortBornOn),
+		Dir:    q.dir(),
+		Limit:  limit + 1,
+		Offset: q.offset(),
 	}
-	p.Limit, p.Offset = q.page()
 	if q.details != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
@@ -97,7 +100,8 @@ func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[blog.Author]{Items: items, Limit: p.Limit, Offset: p.Offset})
+	items, more := trimPage(items, limit)
+	writeBody(w, http.StatusOK, offsetPage[blog.Author]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {

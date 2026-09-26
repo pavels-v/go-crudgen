@@ -287,9 +287,10 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		"writeValidationError(w, r, err)",
 		"writeInvalidID(w)",
 		"writeBody(w, http.StatusCreated, m)",
-		"q := newListQuery(r) p := blog.PostListParams{} p.Limit, p.Offset = q.page()",
+		"q := newListQuery(r, queryOffset) limit := q.limit() p := blog.PostListParams{ Dir: q.dir(), Limit: limit + 1, Offset: q.offset(), }",
 		"items, err := h.repo.List(r.Context(), p)",
-		"writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: p.Limit, Offset: p.Offset})",
+		"items, more := trimPage(items, limit)",
+		"writeBody(w, http.StatusOK, offsetPage[blog.Post]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})",
 		"writeError(w, http.StatusBadRequest, codeInvalidQuery,",
 		"w.WriteHeader(http.StatusNoContent)",
 	} {
@@ -409,7 +410,7 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"m.ID = uuid.New() row := newPostRow(m)",
 		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
-		"ORDER BY id LIMIT $1 OFFSET $2",
+		"case desc: order = `id DESC` default: order = `id` }",
 		// the primary key is the trailing placeholder in the update
 		"UPDATE posts SET title = $1, body = $2, updated_at = now() WHERE id = $3 RETURNING created_at, updated_at",
 		"DELETE FROM posts WHERE id = $1",
@@ -436,7 +437,8 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	got := renderRepoSrc(t, s, "Account")
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
-		"r.db.SelectContext(ctx, &rows, `SELECT id, name FROM accounts ORDER BY id LIMIT $1 OFFSET $2`, p.Limit, p.Offset)",
+		"var args []any desc := p.Dir == app.SortDesc var order string switch { case desc: order = `id DESC` default: order = `id` }",
+		"q := `SELECT id, name FROM accounts` q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
@@ -483,10 +485,8 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 			want: []string{
 				"type PostSort string",
 				`PostSortID PostSort = "id"`,
-				`PostSortIDDesc PostSort = "-id"`,
 				`PostSortTitle PostSort = "title"`,
-				`PostSortTitleDesc PostSort = "-title"`,
-				"type PostListParams struct { Title *string Author *uuid.UUID PublishedOn *Date Views *int32 Published *bool Sort PostSort Limit int Offset int }",
+				"type PostListParams struct { Title *string Author *uuid.UUID PublishedOn *Date Views *int32 Published *bool Sort PostSort Dir SortDir Limit int Offset int }",
 				"List(ctx context.Context, p PostListParams) ([]Post, error)",
 			},
 		},
@@ -497,13 +497,13 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 			want: []string{
 				`queryPostTitle = "title"`,
 				`queryPostPublishedOn = "published_on"`,
-				"q := newListQuery(r, queryPostTitle, queryPostAuthor, queryPostPublishedOn, queryPostViews, queryPostPublished, querySort)",
+				"q := newListQuery(r, queryOffset, queryPostTitle, queryPostAuthor, queryPostPublishedOn, queryPostViews, queryPostPublished, querySort)",
 				"Title: queryValue(q, queryPostTitle, parseString),",
 				"Author: queryValue(q, queryPostAuthor, parseText[uuid.UUID]),",
 				"PublishedOn: queryValue(q, queryPostPublishedOn, parseText[blog.Date]),",
 				"Views: queryValue(q, queryPostViews, parseInt32),",
 				"Published: queryValue(q, queryPostPublished, strconv.ParseBool),",
-				"Sort: querySortValue(q, blog.PostSortID, blog.PostSortIDDesc, blog.PostSortTitle, blog.PostSortTitleDesc),",
+				"Sort: querySortValue(q, blog.PostSortID, blog.PostSortTitle), Dir: q.dir(),",
 				`"strconv"`,
 			},
 		},
@@ -516,10 +516,10 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 				"if p.PublishedOn != nil { where = append(where, `published_on = ?`)",
 				"q := `SELECT id, title, author, published_on, views, published FROM posts`",
 				"q += ` WHERE ` + strings.Join(where, ` AND `)",
-				"case blog.PostSortIDDesc: q += ` ORDER BY id DESC`",
-				"case blog.PostSortTitleDesc: q += ` ORDER BY title DESC, id`",
-				"default: q += ` ORDER BY id`",
-				"q += ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
+				"case p.Sort == blog.PostSortID && desc: order = `id DESC` case p.Sort == blog.PostSortID: order = `id`",
+				"case p.Sort == blog.PostSortTitle && desc: order = `title DESC, id DESC` case p.Sort == blog.PostSortTitle: order = `title, id`",
+				"case desc: order = `id DESC` default: order = `id` }",
+				"q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
 				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
 				`"strings"`,
 			},
@@ -529,8 +529,9 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 			render: renderRepoSrc,
 			entity: "Tag",
 			want: []string{
-				"var args []any q := `SELECT slug, label FROM tags` switch p.Sort {",
-				"case blog.TagSortLabel: q += ` ORDER BY label, slug`",
+				"var args []any desc := p.Dir == blog.SortDesc",
+				"case p.Sort == blog.TagSortLabel && desc: order = `label DESC, slug DESC`",
+				"q := `SELECT slug, label FROM tags` q += ` ORDER BY `",
 			},
 			absent: []string{"where = append", `"strings"`},
 		},
@@ -539,8 +540,8 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 			render: renderHandlerSrc,
 			entity: "Tag",
 			want: []string{
-				"q := newListQuery(r, querySort)",
-				"p := blog.TagListParams{ Sort: querySortValue(q, blog.TagSortLabel, blog.TagSortLabelDesc), }",
+				"q := newListQuery(r, queryOffset, querySort)",
+				"p := blog.TagListParams{ Sort: querySortValue(q, blog.TagSortLabel), Dir: q.dir(),",
 			},
 			absent: []string{"queryValue("},
 		},
@@ -988,7 +989,9 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 		"type bodyResponse[T any] struct { Body T `json:\"body\"` }",
 		"type errorResponse struct { Error apiError `json:\"error\"` }",
 		"type apiError struct { Code string `json:\"code\"` Message string `json:\"message\"` Details []errorDetail `json:\"details\"` }",
-		"type page[T any] struct { Items []T `json:\"items\"` Limit int `json:\"limit\"` Offset int `json:\"offset\"` }",
+		"type offsetPage[T any] struct { Items []T `json:\"items\"` Limit int `json:\"limit\"` Offset int `json:\"offset\"` HasMore bool `json:\"has_more\"` }",
+		"func (q *listQuery) dir() blog.SortDir {",
+		"func trimPage[T any](items []T, limit int) ([]T, bool) {",
 		"writeError(w, http.StatusUnprocessableEntity, codeValidationFailed,",
 		"writeError(w, http.StatusInternalServerError, codeInternal, http.StatusText(http.StatusInternalServerError), nil)",
 		"func valueOr[T any](p *T, def T) T",
@@ -1316,6 +1319,15 @@ func TestRenderErrors_Sentinels(t *testing.T) {
 	} {
 		wantContains(t, got, want)
 	}
+}
+
+func TestRenderSort_Directions(t *testing.T) {
+	t.Parallel()
+
+	src, err := renderSort(packageData{Package: "blog"})
+	require.NoError(t, err)
+	requireParses(t, src)
+	wantContains(t, string(src), `type SortDir string const ( SortAsc SortDir = "asc" SortDesc SortDir = "desc" )`)
 }
 
 func TestCheckCollisions(t *testing.T) {

@@ -107,7 +107,7 @@ func TestIntegration(t *testing.T) {
 	})
 
 	t.Run("list returns persisted posts", func(t *testing.T) {
-		var list page[blog.Post]
+		var list offsetPage[blog.Post]
 		do(t, srv, http.MethodGet, "/posts?limit=10", nil, &list, http.StatusOK)
 		require.NotEmpty(t, list.Items)
 		require.Equal(t, 10, list.Limit)
@@ -125,7 +125,7 @@ func TestIntegration(t *testing.T) {
 		}
 
 		titles := func(query string) []string {
-			var list page[blog.Post]
+			var list offsetPage[blog.Post]
 			do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+query, nil, &list, http.StatusOK)
 			out := make([]string, len(list.Items))
 			for i, p := range list.Items {
@@ -134,10 +134,17 @@ func TestIntegration(t *testing.T) {
 			return out
 		}
 		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=title"))
-		require.Equal(t, []string{"Gamma", "Beta", "Alpha"}, titles("&sort=-title"))
-		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=-views"))
+		require.Equal(t, []string{"Gamma", "Beta", "Alpha"}, titles("&sort=title&dir=desc"))
+		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=views&dir=desc"))
 		require.Equal(t, []string{"Alpha"}, titles("&published=true"))
 		require.Equal(t, []string{"Beta"}, titles("&published=false&sort=title&limit=1"))
+
+		var first, last offsetPage[blog.Post]
+		do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+"&sort=title&limit=2", nil, &first, http.StatusOK)
+		require.True(t, first.HasMore)
+		do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+"&sort=title&limit=2&offset=1", nil, &last, http.StatusOK)
+		require.Len(t, last.Items, 2)
+		require.False(t, last.HasMore, "offset 1 plus 2 rows reaches the last post")
 	})
 
 	t.Run("constraint violations map to client errors", func(t *testing.T) {
@@ -215,7 +222,7 @@ func TestIntegration(t *testing.T) {
 		do(t, srv, http.MethodGet, firstPath, nil, nil, http.StatusNotFound)
 		do(t, srv, http.MethodDelete, firstPath, nil, nil, http.StatusNotFound)
 
-		var list page[blog.Comment]
+		var list offsetPage[blog.Comment]
 		do(t, srv, http.MethodGet, "/comments?post="+post.ID.String(), nil, &list, http.StatusOK)
 		require.Len(t, list.Items, 1)
 		require.Equal(t, second.ID, list.Items[0].ID)
@@ -274,10 +281,11 @@ type envelope struct {
 	Error jsontext.Value `json:"error"`
 }
 
-type page[T any] struct {
-	Items  []T `json:"items"`
-	Limit  int `json:"limit"`
-	Offset int `json:"offset"`
+type offsetPage[T any] struct {
+	Items   []T  `json:"items"`
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"has_more"`
 }
 
 type apiError struct {

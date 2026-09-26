@@ -48,7 +48,7 @@ type Field struct {
 	Unique   bool   `yaml:"unique"`
 	Index    bool   `yaml:"index"`
 	Filter   bool   `yaml:"filter"` // List accepts ?<name>= for equality
-	Sort     bool   `yaml:"sort"`   // List accepts ?sort=<name> and ?sort=-<name>
+	Sort     bool   `yaml:"sort"`   // List accepts ?sort=<name>, ordered by ?dir=asc|desc
 	Default  any    `yaml:"default"`
 	Validate string `yaml:"validate"` // go-playground/validator rule string
 	Target   string `yaml:"target"`   // referenced entity, when Type == "references"

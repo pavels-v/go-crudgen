@@ -17,13 +17,13 @@ type Author struct {
 type AuthorSort string
 
 const (
-	AuthorSortBornOn     AuthorSort = "born_on"
-	AuthorSortBornOnDesc AuthorSort = "-born_on"
+	AuthorSortBornOn AuthorSort = "born_on"
 )
 
 type AuthorListParams struct {
 	Email  *string
 	Sort   AuthorSort
+	Dir    SortDir
 	Limit  int
 	Offset int
 }

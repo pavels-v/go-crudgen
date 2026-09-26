@@ -9,10 +9,8 @@ import (
 const (
 	nameListParams = "%sListParams"
 	nameSortType   = "%sSort"
-	nameSortAsc    = "%sSort%s"
-	nameSortDesc   = "%sSort%sDesc"
+	nameSortField  = "%sSort%s"
 	nameQueryParam = "query%s%s"
-	sortDescPrefix = "-"
 )
 
 const (
@@ -35,9 +33,10 @@ type listFilter struct {
 }
 
 type sortOption struct {
-	Name    string // domain constant, e.g. "PostSortTitleDesc"
-	Value   string // ?sort= value, e.g. "-title"
-	OrderBy string // e.g. "title DESC, id"
+	Name  string // domain constant, e.g. "PostSortTitle"
+	Value string // ?sort= value, e.g. "title"
+	Asc   string // ORDER BY, e.g. "title, id"
+	Desc  string // ORDER BY, e.g. "title DESC, id DESC"
 }
 
 func listFilters(e *spec.Entity, byName map[string]*spec.Entity) ([]listFilter, error) {
@@ -63,16 +62,18 @@ func sortOptions(e *spec.Entity) []sortOption {
 		if !f.Sort {
 			continue
 		}
-		col, gn := snakeCase(f.Name), pascalCase(f.Name)
+		col := snakeCase(f.Name)
 		asc, desc := col, fmt.Sprintf(exprOrderDesc, col)
 		if !f.Primary {
 			asc += argSep + pkCol
-			desc += argSep + pkCol
+			desc += argSep + fmt.Sprintf(exprOrderDesc, pkCol)
 		}
-		out = append(out,
-			sortOption{Name: fmt.Sprintf(nameSortAsc, name, gn), Value: f.Name, OrderBy: asc},
-			sortOption{Name: fmt.Sprintf(nameSortDesc, name, gn), Value: sortDescPrefix + f.Name, OrderBy: desc},
-		)
+		out = append(out, sortOption{
+			Name:  fmt.Sprintf(nameSortField, name, pascalCase(f.Name)),
+			Value: f.Name,
+			Asc:   asc,
+			Desc:  desc,
+		})
 	}
 	return out
 }

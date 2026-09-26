@@ -87,12 +87,15 @@ func (h *CommentHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryCommentPost, querySort)
+	q := newListQuery(r, queryOffset, queryCommentPost, querySort)
+	limit := q.limit()
 	p := blog.CommentListParams{
-		Post: queryValue(q, queryCommentPost, parseText[uuid.UUID]),
-		Sort: querySortValue(q, blog.CommentSortPostedAt, blog.CommentSortPostedAtDesc),
+		Post:   queryValue(q, queryCommentPost, parseText[uuid.UUID]),
+		Sort:   querySortValue(q, blog.CommentSortPostedAt),
+		Dir:    q.dir(),
+		Limit:  limit + 1,
+		Offset: q.offset(),
 	}
-	p.Limit, p.Offset = q.page()
 	if q.details != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
@@ -102,7 +105,8 @@ func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[blog.Comment]{Items: items, Limit: p.Limit, Offset: p.Offset})
+	items, more := trimPage(items, limit)
+	writeBody(w, http.StatusOK, offsetPage[blog.Comment]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *CommentHandler) Update(w http.ResponseWriter, r *http.Request) {

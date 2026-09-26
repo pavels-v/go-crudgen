@@ -108,27 +108,32 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 		args = append(args, *p.Author)
 	}
 
+	desc := p.Dir == blog.SortDesc
+	var order string
+	switch {
+	case p.Sort == blog.PostSortTitle && desc:
+		order = `title DESC, id DESC`
+	case p.Sort == blog.PostSortTitle:
+		order = `title, id`
+	case p.Sort == blog.PostSortViews && desc:
+		order = `views DESC, id DESC`
+	case p.Sort == blog.PostSortViews:
+		order = `views, id`
+	case p.Sort == blog.PostSortCreatedAt && desc:
+		order = `created_at DESC, id DESC`
+	case p.Sort == blog.PostSortCreatedAt:
+		order = `created_at, id`
+	case desc:
+		order = `id DESC`
+	default:
+		order = `id`
+	}
+
 	q := `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts`
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	switch p.Sort {
-	case blog.PostSortTitle:
-		q += ` ORDER BY title, id`
-	case blog.PostSortTitleDesc:
-		q += ` ORDER BY title DESC, id`
-	case blog.PostSortViews:
-		q += ` ORDER BY views, id`
-	case blog.PostSortViewsDesc:
-		q += ` ORDER BY views DESC, id`
-	case blog.PostSortCreatedAt:
-		q += ` ORDER BY created_at, id`
-	case blog.PostSortCreatedAtDesc:
-		q += ` ORDER BY created_at DESC, id`
-	default:
-		q += ` ORDER BY id`
-	}
-	q += ` LIMIT ? OFFSET ?`
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	args = append(args, p.Limit, p.Offset)
 
 	var rows []postRow

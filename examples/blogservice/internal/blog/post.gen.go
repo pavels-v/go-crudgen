@@ -24,18 +24,16 @@ type Post struct {
 type PostSort string
 
 const (
-	PostSortTitle         PostSort = "title"
-	PostSortTitleDesc     PostSort = "-title"
-	PostSortViews         PostSort = "views"
-	PostSortViewsDesc     PostSort = "-views"
-	PostSortCreatedAt     PostSort = "created_at"
-	PostSortCreatedAtDesc PostSort = "-created_at"
+	PostSortTitle     PostSort = "title"
+	PostSortViews     PostSort = "views"
+	PostSortCreatedAt PostSort = "created_at"
 )
 
 type PostListParams struct {
 	Published *bool
 	Author    *uuid.UUID
 	Sort      PostSort
+	Dir       SortDir
 	Limit     int
 	Offset    int
 }

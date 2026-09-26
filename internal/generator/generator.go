@@ -27,6 +27,7 @@ const (
 	tmplRepo      = "repo.go.tmpl"
 	tmplNulls     = "nulls.go.tmpl"
 	tmplDate      = "date.go.tmpl"
+	tmplSort      = "sort.go.tmpl"
 	tmplDB        = "db.go.tmpl"
 	tmplMigration = "migration.sql.tmpl"
 )
@@ -40,6 +41,7 @@ const (
 	fileModel     = "%s.gen.go"
 	fileErrors    = "errors.gen.go"
 	fileDate      = "date.gen.go"
+	fileSort      = "sort.gen.go"
 	fileHandler   = pkgREST + "/%s.gen.go"
 	fileRouter    = pkgREST + "/router.gen.go"
 	fileRepo      = pkgPostgres + "/%s.gen.go"
@@ -216,6 +218,12 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 		return nil, fmt.Errorf("generate errors: %w", err)
 	}
 	add(fileErrors, esrc)
+
+	sortSrc, err := renderSort(packageData{Package: s.Package})
+	if err != nil {
+		return nil, fmt.Errorf("generate sort direction: %w", err)
+	}
+	add(fileSort, sortSrc)
 
 	ssrc, err := renderRouter(routerInfo(s, shared.Routes))
 	if err != nil {
@@ -568,6 +576,7 @@ func renderDB(data dbData) ([]byte, error)           { return renderTemplate(tmp
 func renderRouter(data routerData) ([]byte, error)   { return renderTemplate(tmplRouter, data) }
 func renderDate(data packageData) ([]byte, error)    { return renderTemplate(tmplDate, data) }
 func renderErrors(data packageData) ([]byte, error)  { return renderTemplate(tmplErrors, data) }
+func renderSort(data packageData) ([]byte, error)    { return renderTemplate(tmplSort, data) }
 
 // renderModel builds, executes, and gofmt-formats the domain file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {

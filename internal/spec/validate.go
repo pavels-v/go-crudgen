@@ -51,12 +51,14 @@ const (
 	queryLimit  = "limit"
 	queryOffset = "offset"
 	querySort   = "sort"
+	queryDir    = "dir"
 )
 
 var reservedQueryNames = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	queryLimit:  {},
 	queryOffset: {},
 	querySort:   {},
+	queryDir:    {},
 }
 
 // Validate checks the spec for structural errors.
