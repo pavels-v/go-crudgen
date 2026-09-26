@@ -15,8 +15,8 @@ type {{ .RowStruct }} struct {
 {{- end }}
 }
 
-// {{ .NewRowFunc }} builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// {{ .NewRowFunc }} builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func {{ .NewRowFunc }}(m *{{ .Model }}) {{ .RowStruct }} {
 	return {{ .RowStruct }}{
 {{- range .ToRow }}
@@ -132,7 +132,7 @@ func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .
 
 func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Model }}) error {
 	row := {{ .NewRowFunc }}(m)
-{{- if .HasTimestamps }}
+{{- if .UpdateScan }}
 	if err := r.db.QueryRowContext(ctx, `{{ .UpdateSQL }}`, {{ .UpdateArgs }}).Scan({{ .UpdateScan }}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return {{ .Domain }}.ErrNotFound

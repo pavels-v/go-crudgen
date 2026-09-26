@@ -16,8 +16,9 @@ entities:
       - name: id
         type: uuid
         primary: true
-    options:
-      timestamps: true
+      - name: created_at
+        type: datetime
+        generate: on_create
 `
 
 func TestLoad(t *testing.T) {
@@ -41,7 +42,7 @@ entities:
         primary: true
         optional: true
 `, true},
-		{"unknown option key", `package: blog
+		{"removed options section", `package: blog
 module: example.com/blog
 entities:
   - name: Author
@@ -50,7 +51,7 @@ entities:
         type: uuid
         primary: true
     options:
-      soft_delete: true
+      timestamps: true
 `, true},
 	}
 

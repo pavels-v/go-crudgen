@@ -29,8 +29,13 @@ entities:
         type: references   # belongs-to relation
         target: Author
         filter: true
-    options:
-      timestamps: true     # adds created_at / updated_at
+      - name: created_at
+        type: datetime
+        generate: on_create  # now() on insert, read-only
+        sort: true
+      - name: updated_at
+        type: datetime
+        generate: on_write   # now() on insert and every update, read-only
 
   - name: Author
     fields:

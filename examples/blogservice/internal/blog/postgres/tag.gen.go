@@ -21,8 +21,8 @@ type tagRow struct {
 	Weight float64 `db:"weight"`
 }
 
-// newTagRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newTagRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newTagRow(m *blog.Tag) tagRow {
 	return tagRow{
 		Slug:   m.Slug,

@@ -402,9 +402,6 @@ func checkColumns(e *spec.Entity) error {
 	for _, f := range e.Fields {
 		names = append(names, f.Name)
 	}
-	for _, oc := range optionColumns(e.Options) {
-		names = append(names, oc.Column)
-	}
 
 	columns := make(map[string]string, len(names))
 	goNames := make(map[string]string, len(names))
@@ -470,6 +467,9 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	}
 	imports := map[string]struct{}{importNetHTTP: {}, s.Module: {}}
 	for _, f := range e.Fields {
+		if f.Generate != "" {
+			continue
+		}
 		gn := pascalCase(f.Name)
 		gt, err := fieldType(f, byName)
 		if err != nil {
@@ -612,12 +612,6 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			return nil, err
 		}
 		add(f.Name, modelType(f, gt.expr), gt.imp, jsonTag(f))
-	}
-
-	// Option-injected columns (timestamps) share one definition
-	// with repoInfo so the model struct and the generated SQL never disagree.
-	for _, oc := range optionColumns(e.Options) {
-		add(oc.Column, oc.GoType, importTime, oc.JSONTag)
 	}
 
 	data.Imports = groupImports(imports, s.Module)

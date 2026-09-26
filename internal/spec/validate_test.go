@@ -19,6 +19,8 @@ func validSpec() *Spec {
 			{Name: "Post", Fields: []Field{
 				{Name: "id", Type: TypeUUID, Primary: true},
 				{Name: "author", Type: TypeReferences, Target: "Author", OnDelete: OnDeleteCascade, Filter: true, Sort: true},
+				{Name: "created_at", Type: TypeDatetime, Generate: GenerateOnCreate, Sort: true},
+				{Name: "updated_at", Type: TypeDatetime, Generate: GenerateOnWrite},
 			}},
 		},
 	}
@@ -119,6 +121,10 @@ func TestValidate_Errors(t *testing.T) {
 		{"sort on bool", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "done", Type: TypeBool, Sort: true})
 		}},
+		{"unknown generate", func(s *Spec) { s.Entities[1].Fields[2].Generate = "on_update" }},
+		{"generate on non-datetime", func(s *Spec) { s.Entities[1].Fields[2].Type = TypeDate }},
+		{"generate with default", func(s *Spec) { s.Entities[1].Fields[2].Default = DefaultNow }},
+		{"generate with required", func(s *Spec) { s.Entities[1].Fields[3].Required = true }},
 		{"sort on json", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "meta", Type: TypeJSON, Sort: true})
 		}},

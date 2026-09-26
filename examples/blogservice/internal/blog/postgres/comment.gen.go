@@ -25,8 +25,8 @@ type commentRow struct {
 	PostedAt time.Time `db:"posted_at"`
 }
 
-// newCommentRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newCommentRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newCommentRow(m *blog.Comment) commentRow {
 	return commentRow{
 		ID:       m.ID,

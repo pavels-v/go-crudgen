@@ -30,8 +30,8 @@ type postRow struct {
 	UpdatedAt time.Time                `db:"updated_at"`
 }
 
-// newPostRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newPostRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newPostRow(m *blog.Post) postRow {
 	return postRow{
 		ID:        m.ID,
@@ -121,6 +121,10 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 		q += ` ORDER BY views, id`
 	case blog.PostSortViewsDesc:
 		q += ` ORDER BY views DESC, id`
+	case blog.PostSortCreatedAt:
+		q += ` ORDER BY created_at, id`
+	case blog.PostSortCreatedAtDesc:
+		q += ` ORDER BY created_at DESC, id`
 	default:
 		q += ` ORDER BY id`
 	}

@@ -104,6 +104,9 @@ func (s *Spec) Validate() error {
 			if err := validateListModifiers(e, f); err != nil {
 				return err
 			}
+			if err := validateGenerate(e, f); err != nil {
+				return err
+			}
 			if f.Default != nil && f.Primary {
 				return fmt.Errorf("entity %q primary key %q cannot have a default", e.Name, f.Name)
 			}
@@ -158,6 +161,20 @@ func validateListModifiers(e *Entity, f Field) error {
 	}
 	if _, ok := unsortableTypes[f.Type]; ok && f.Sort {
 		return fmt.Errorf("entity %q field %q of type %q cannot be sorted", e.Name, f.Name, f.Type)
+	}
+	return nil
+}
+
+func validateGenerate(e *Entity, f Field) error {
+	switch {
+	case f.Generate == "":
+		return nil
+	case f.Generate != GenerateOnCreate && f.Generate != GenerateOnWrite:
+		return fmt.Errorf("entity %q field %q has unknown generate %q: use %q or %q", e.Name, f.Name, f.Generate, GenerateOnCreate, GenerateOnWrite)
+	case f.Type != TypeDatetime:
+		return fmt.Errorf("entity %q field %q has generate but is not a datetime", e.Name, f.Name)
+	case f.Primary, f.Required, f.Default != nil, f.Validate != "":
+		return fmt.Errorf("entity %q field %q has generate, which excludes primary, required, default and validate", e.Name, f.Name)
 	}
 	return nil
 }

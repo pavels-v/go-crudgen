@@ -98,7 +98,7 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 	p := blog.PostListParams{
 		Published: queryValue(q, queryPostPublished, strconv.ParseBool),
 		Author:    queryValue(q, queryPostAuthor, parseText[uuid.UUID]),
-		Sort:      querySortValue(q, blog.PostSortTitle, blog.PostSortTitleDesc, blog.PostSortViews, blog.PostSortViewsDesc),
+		Sort:      querySortValue(q, blog.PostSortTitle, blog.PostSortTitleDesc, blog.PostSortViews, blog.PostSortViewsDesc, blog.PostSortCreatedAt, blog.PostSortCreatedAtDesc),
 	}
 	p.Limit, p.Offset = q.page()
 	if q.details != nil {

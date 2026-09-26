@@ -23,8 +23,8 @@ type authorRow struct {
 	BornOn sql.Null[blog.Date] `db:"born_on"`
 }
 
-// newAuthorRow builds the row written by Create and Update. Option-managed
-// columns (timestamps) are set by the SQL itself, so they are omitted here.
+// newAuthorRow builds the row written by Create and Update. Generated
+// columns are set by the SQL itself, so they are omitted here.
 func newAuthorRow(m *blog.Author) authorRow {
 	return authorRow{
 		ID:     m.ID,

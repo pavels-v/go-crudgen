@@ -91,7 +91,7 @@ var scalarTypes = map[string]typeInfo{ //nolint:gochecknoglobals // read-only lo
 // column), and the migration (absence of a NOT NULL constraint): a column is
 // nullable unless it is required or part of the primary key.
 func isNullable(f spec.Field) bool {
-	return !f.Required && !f.Primary && f.Default == nil
+	return !f.Required && !f.Primary && f.Default == nil && f.Generate == ""
 }
 
 func hasRequestDefault(f spec.Field) bool {
