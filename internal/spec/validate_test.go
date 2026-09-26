@@ -32,6 +32,35 @@ func TestValidate_OK(t *testing.T) {
 	require.NoError(t, validSpec().Validate())
 }
 
+func TestValidate_CursorPaginationSortsByNotNullFields(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		field Field
+	}{
+		{"primary", Field{Name: "code", Type: TypeString, Primary: true, Sort: true}},
+		{"required", Field{Name: "title", Type: TypeString, Required: true, Sort: true}},
+		{"default", Field{Name: "views", Type: TypeInt64, Default: 0, Sort: true}},
+		{"generated", Field{Name: "created_at", Type: TypeDatetime, Generate: GenerateOnCreate, Sort: true}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := validSpec()
+			s.Entities[0].Pagination = PaginationCursor
+			if tc.field.Primary {
+				s.Entities[0].Fields = []Field{tc.field}
+			} else {
+				s.Entities[0].Fields = append(s.Entities[0].Fields, tc.field)
+			}
+			require.NoError(t, s.Validate())
+		})
+	}
+}
+
 func TestValidate_Defaults(t *testing.T) {
 	t.Parallel()
 
@@ -128,6 +157,11 @@ func TestValidate_Errors(t *testing.T) {
 		{"generate on non-datetime", func(s *Spec) { s.Entities[1].Fields[2].Type = TypeDate }},
 		{"generate with default", func(s *Spec) { s.Entities[1].Fields[2].Default = DefaultNow }},
 		{"generate with required", func(s *Spec) { s.Entities[1].Fields[3].Required = true }},
+		{"unknown pagination", func(s *Spec) { s.Entities[1].Pagination = "keyset" }},
+		{"cursor pagination sorting by a nullable field", func(s *Spec) { s.Entities[1].Pagination = PaginationCursor }},
+		{"filter named like the cursor parameter", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: queryCursor, Type: TypeString, Filter: true})
+		}},
 		{"sort on json", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "meta", Type: TypeJSON, Sort: true})
 		}},

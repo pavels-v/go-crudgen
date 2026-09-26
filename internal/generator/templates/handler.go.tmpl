@@ -15,6 +15,17 @@ const (
 )
 {{- end }}
 
+{{- if .Cursor }}
+
+type {{ .Cursor }} struct {
+{{- if .Sorts }}
+	Sort {{ .SortType }} `json:"sort"`
+{{- end }}
+	Dir   {{ .SortDir }} `json:"dir"`
+	After {{ .CursorType }} `json:"after"`
+}
+{{- end }}
+
 // {{ .CreateName }} is the request body for creating the {{ .Lower }} entity.
 type {{ .CreateName }} struct {
 {{- range .CreateBody }}
@@ -81,7 +92,7 @@ func (h *{{ .Struct }}Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryOffset{{ range .Filters }}, {{ .Const }}{{ end }}{{ if .Sorts }}, querySort{{ end }})
+	q := newListQuery(r, {{ if .Cursor }}queryCursor{{ else }}queryOffset{{ end }}{{ range .Filters }}, {{ .Const }}{{ end }}{{ if .Sorts }}, querySort{{ end }})
 	limit := q.limit()
 	p := {{ .ListParams }}{
 {{- range .Filters }}
@@ -92,8 +103,18 @@ func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
 {{- end }}
 		Dir:    q.dir(),
 		Limit:  limit + 1,
+{{- if not .Cursor }}
 		Offset: q.offset(),
+{{- end }}
 	}
+{{- if .Cursor }}
+	if c := queryCursorValue[{{ .Cursor }}](q); c != nil {
+		if {{ if .Sorts }}c.Sort != p.Sort || {{ end }}c.Dir != p.Dir {
+			q.invalid(queryCursor)
+		}
+		p.After = &c.After
+	}
+{{- end }}
 	if q.details != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
@@ -104,7 +125,30 @@ func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, more := trimPage(items, limit)
+{{- if .Cursor }}
+	page := cursorPage[{{ .Model }}]{Items: items}
+	if more {
+		last := items[len(items)-1]
+		c := {{ .Cursor }}{
+{{- if .Sorts }}
+			Sort: p.Sort,
+{{- end }}
+			Dir: p.Dir,
+			After: {{ .CursorType }}{
+{{- range .CursorFields }}
+				{{ . }}: last.{{ . }},
+{{- end }}
+			},
+		}
+		if page.NextCursor, err = encodeCursor(c); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	writeBody(w, http.StatusOK, page)
+{{- else }}
 	writeBody(w, http.StatusOK, offsetPage[{{ .Model }}]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+{{- end }}
 }
 
 func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {

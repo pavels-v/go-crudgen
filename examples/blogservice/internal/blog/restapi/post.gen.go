@@ -15,6 +15,12 @@ const (
 	queryPostAuthor    = "author"
 )
 
+type postCursor struct {
+	Sort  blog.PostSort   `json:"sort"`
+	Dir   blog.SortDir    `json:"dir"`
+	After blog.PostCursor `json:"after"`
+}
+
 // CreatePostRequest is the request body for creating the post entity.
 type CreatePostRequest struct {
 	Title     string          `json:"title" validate:"required,min=1,max=200"`
@@ -94,7 +100,7 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryOffset, queryPostPublished, queryPostAuthor, querySort)
+	q := newListQuery(r, queryCursor, queryPostPublished, queryPostAuthor, querySort)
 	limit := q.limit()
 	p := blog.PostListParams{
 		Published: queryValue(q, queryPostPublished, strconv.ParseBool),
@@ -102,7 +108,12 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 		Sort:      querySortValue(q, blog.PostSortTitle, blog.PostSortViews, blog.PostSortCreatedAt),
 		Dir:       q.dir(),
 		Limit:     limit + 1,
-		Offset:    q.offset(),
+	}
+	if c := queryCursorValue[postCursor](q); c != nil {
+		if c.Sort != p.Sort || c.Dir != p.Dir {
+			q.invalid(queryCursor)
+		}
+		p.After = &c.After
 	}
 	if q.details != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
@@ -114,7 +125,25 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, more := trimPage(items, limit)
-	writeBody(w, http.StatusOK, offsetPage[blog.Post]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+	page := cursorPage[blog.Post]{Items: items}
+	if more {
+		last := items[len(items)-1]
+		c := postCursor{
+			Sort: p.Sort,
+			Dir:  p.Dir,
+			After: blog.PostCursor{
+				Title:     last.Title,
+				Views:     last.Views,
+				CreatedAt: last.CreatedAt,
+				ID:        last.ID,
+			},
+		}
+		if page.NextCursor, err = encodeCursor(c); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	writeBody(w, http.StatusOK, page)
 }
 
 func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {

@@ -99,7 +99,6 @@ func (s *statusRecorder) WriteHeader(status int)      { s.status = status }
 const (
 	pathParamID     = "id"
 	queryLimit      = "limit"
-	queryOffset     = "offset"
 	querySort       = "sort"
 	queryDir        = "dir"
 	contentTypeJSON = "application/json"
@@ -129,12 +128,27 @@ type errorDetail struct {
 	Reason string `json:"reason"`
 }
 
+{{- if .Offset }}
+
+const queryOffset = "offset"
+
 type offsetPage[T any] struct {
 	Items   []T  `json:"items"`
 	Limit   int  `json:"limit"`
 	Offset  int  `json:"offset"`
 	HasMore bool `json:"has_more"`
 }
+{{- end }}
+
+{{- if .Cursor }}
+
+const queryCursor = "cursor"
+
+type cursorPage[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"next_cursor,omitzero"`
+}
+{{- end }}
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	return json.UnmarshalRead(http.MaxBytesReader(w, r.Body, maxBodyBytes), v, json.RejectUnknownMembers(true))
@@ -266,6 +280,8 @@ func (q *listQuery) limit() int {
 	return min(n, maxLimit)
 }
 
+{{- if .Offset }}
+
 func (q *listQuery) offset() int {
 	v := q.values.Get(queryOffset)
 	if v == "" {
@@ -277,6 +293,35 @@ func (q *listQuery) offset() int {
 	}
 	return n
 }
+{{- end }}
+{{- if .Cursor }}
+
+// queryCursorValue returns nil when ?cursor= is absent, so the first page is
+// served.
+func queryCursorValue[C any](q *listQuery) *C {
+	if !q.values.Has(queryCursor) {
+		return nil
+	}
+	var c C
+	raw, err := base64.RawURLEncoding.DecodeString(q.values.Get(queryCursor))
+	if err == nil {
+		err = json.Unmarshal(raw, &c, json.RejectUnknownMembers(true))
+	}
+	if err != nil {
+		q.invalid(queryCursor)
+		return nil
+	}
+	return &c
+}
+
+func encodeCursor(c any) (string, error) {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("encode cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+{{- end }}
 
 func (q *listQuery) dir() {{ .Domain }}.SortDir {
 	v := {{ .Domain }}.SortDir(q.values.Get(queryDir))

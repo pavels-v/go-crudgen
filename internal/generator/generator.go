@@ -192,6 +192,8 @@ func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) 
 
 		shared.Nullable = shared.Nullable || rd.HasNullable
 		shared.Date = shared.Date || hasFieldType(e, spec.TypeDate)
+		shared.Cursor = shared.Cursor || e.CursorPagination()
+		shared.Offset = shared.Offset || !e.CursorPagination()
 		shared.Routes = append(shared.Routes, routerEntity{
 			Struct:    hd.Struct,
 			Repo:      hd.Repo,
@@ -206,6 +208,8 @@ type sharedFiles struct {
 	Routes   []routerEntity
 	Nullable bool
 	Date     bool
+	Offset   bool
+	Cursor   bool
 }
 
 func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, shared sharedFiles) ([]genFile, error) {
@@ -225,7 +229,7 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 	}
 	add(fileSort, sortSrc)
 
-	ssrc, err := renderRouter(routerInfo(s, shared.Routes))
+	ssrc, err := renderRouter(routerInfo(s, shared))
 	if err != nil {
 		return nil, fmt.Errorf("generate router: %w", err)
 	}
@@ -316,6 +320,8 @@ type modelData struct {
 	SortType   string // e.g. "PostSort"
 	Filters    []modelField
 	Sorts      []sortOption
+	CursorType string // e.g. "PostCursor", empty under offset pagination
+	Cursor     []modelField
 }
 
 type modelField struct {
@@ -344,6 +350,11 @@ type handlerData struct {
 	ListParams   string   // qualified domain params, e.g. "blog.PostListParams"
 	Filters      []handlerFilter
 	Sorts        []string // qualified domain sort constants
+	SortType     string   // qualified, e.g. "blog.PostSort"
+	SortDir      string   // qualified, e.g. "blog.SortDir"
+	Cursor       string   // wire cursor type, e.g. "postCursor", empty under offset pagination
+	CursorType   string   // qualified domain cursor, e.g. "blog.PostCursor"
+	CursorFields []string // Go names copied from the last item into the next cursor
 }
 
 type handlerFilter struct {
@@ -369,6 +380,8 @@ type routerData struct {
 	Imports  []string
 	Domain   string
 	Entities []routerEntity
+	Offset   bool // some entity pages by offset
+	Cursor   bool // some entity pages by cursor
 }
 
 type routerEntity struct {
@@ -377,27 +390,34 @@ type routerEntity struct {
 	DepsField string // field name in Deps, e.g. "Posts"
 }
 
-func routerInfo(s *spec.Spec, entities []routerEntity) routerData {
+func routerInfo(s *spec.Spec, shared sharedFiles) routerData {
+	imports := map[string]struct{}{
+		importJSONv2:    {},
+		importJSON:      {},
+		importEncoding:  {},
+		importErrors:    {},
+		importMaps:      {},
+		importSlices:    {},
+		importNetURL:    {},
+		importSlog:      {},
+		importNetHTTP:   {},
+		importReflect:   {},
+		importStrconv:   {},
+		importStrings:   {},
+		importValidator: {},
+		s.Module:        {},
+	}
+	if shared.Cursor {
+		imports[importBase64] = struct{}{}
+		imports[importFmt] = struct{}{}
+	}
 	return routerData{
-		Package: pkgREST,
-		Imports: groupImports(map[string]struct{}{
-			importJSONv2:    {},
-			importJSON:      {},
-			importEncoding:  {},
-			importErrors:    {},
-			importMaps:      {},
-			importSlices:    {},
-			importNetURL:    {},
-			importSlog:      {},
-			importNetHTTP:   {},
-			importReflect:   {},
-			importStrconv:   {},
-			importStrings:   {},
-			importValidator: {},
-			s.Module:        {},
-		}, s.Module),
+		Package:  pkgREST,
+		Imports:  groupImports(imports, s.Module),
 		Domain:   s.Package,
-		Entities: entities,
+		Entities: shared.Routes,
+		Offset:   shared.Offset,
+		Cursor:   shared.Cursor,
 	}
 }
 
@@ -466,6 +486,8 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		CreateName: fmt.Sprintf(nameCreateRequest, name),
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 		ListParams: qualified(s, fmt.Sprintf(nameListParams, name)),
+		SortType:   qualified(s, fmt.Sprintf(nameSortType, name)),
+		SortDir:    qualified(s, nameSortDir),
 		PK: pkData{
 			GoName:   pascalCase(pk.Name),
 			Expr:     pp.expr,
@@ -541,6 +563,13 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	}
 	for _, so := range sortOptions(e) {
 		data.Sorts = append(data.Sorts, qualified(s, so.Name))
+	}
+	if e.CursorPagination() {
+		data.Cursor = unexport(fmt.Sprintf(nameCursor, name))
+		data.CursorType = qualified(s, fmt.Sprintf(nameCursor, name))
+		for _, f := range cursorFields(e) {
+			data.CursorFields = append(data.CursorFields, pascalCase(f.Name))
+		}
 	}
 	data.Imports = groupImports(imports, s.Module)
 	return data, nil
@@ -621,6 +650,17 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			return nil, err
 		}
 		add(f.Name, modelType(f, gt.expr), gt.imp, jsonTag(f))
+	}
+
+	if e.CursorPagination() {
+		data.CursorType = fmt.Sprintf(nameCursor, name)
+		for _, f := range cursorFields(e) {
+			gt, err := fieldType(f, byName)
+			if err != nil {
+				return nil, err
+			}
+			data.Cursor = append(data.Cursor, modelField{GoName: pascalCase(f.Name), GoType: gt.expr, Tag: jsonTag(f)})
+		}
 	}
 
 	data.Imports = groupImports(imports, s.Module)

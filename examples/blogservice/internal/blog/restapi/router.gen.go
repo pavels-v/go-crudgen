@@ -2,9 +2,11 @@ package restapi
 
 import (
 	"encoding"
+	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -114,7 +116,6 @@ func (s *statusRecorder) WriteHeader(status int)      { s.status = status }
 const (
 	pathParamID     = "id"
 	queryLimit      = "limit"
-	queryOffset     = "offset"
 	querySort       = "sort"
 	queryDir        = "dir"
 	contentTypeJSON = "application/json"
@@ -144,11 +145,20 @@ type errorDetail struct {
 	Reason string `json:"reason"`
 }
 
+const queryOffset = "offset"
+
 type offsetPage[T any] struct {
 	Items   []T  `json:"items"`
 	Limit   int  `json:"limit"`
 	Offset  int  `json:"offset"`
 	HasMore bool `json:"has_more"`
+}
+
+const queryCursor = "cursor"
+
+type cursorPage[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"next_cursor,omitzero"`
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
@@ -291,6 +301,32 @@ func (q *listQuery) offset() int {
 		q.invalid(queryOffset)
 	}
 	return n
+}
+
+// queryCursorValue returns nil when ?cursor= is absent, so the first page is
+// served.
+func queryCursorValue[C any](q *listQuery) *C {
+	if !q.values.Has(queryCursor) {
+		return nil
+	}
+	var c C
+	raw, err := base64.RawURLEncoding.DecodeString(q.values.Get(queryCursor))
+	if err == nil {
+		err = json.Unmarshal(raw, &c, json.RejectUnknownMembers(true))
+	}
+	if err != nil {
+		q.invalid(queryCursor)
+		return nil
+	}
+	return &c
+}
+
+func encodeCursor(c any) (string, error) {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("encode cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func (q *listQuery) dir() blog.SortDir {

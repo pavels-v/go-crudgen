@@ -4,6 +4,7 @@ module: example.com/blogservice/internal/blog # import path of the --out directo
 entities:
   - name: Post
     plural: posts         # optional; defaults to a naive pluralization
+    pagination: cursor    # ?cursor=<next_cursor>; offset (default) takes ?offset=
     fields:
       - name: id
         type: uuid

@@ -24,6 +24,15 @@ const (
 )
 {{- end }}
 
+{{- if .CursorType }}
+
+type {{ .CursorType }} struct {
+{{- range .Cursor }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
+{{- end }}
+}
+{{- end }}
+
 type {{ .ListParams }} struct {
 {{- range .Filters }}
 	{{ .GoName }} {{ .GoType }}
@@ -31,9 +40,14 @@ type {{ .ListParams }} struct {
 {{- if .Sorts }}
 	Sort {{ .SortType }}
 {{- end }}
-	Dir    SortDir
-	Limit  int
+	Dir SortDir
+{{- if .CursorType }}
+	After *{{ .CursorType }}
+{{- end }}
+	Limit int
+{{- if not .CursorType }}
 	Offset int
+{{- end }}
 }
 
 // {{ .Repo }} is the storage interface for {{ .Struct }}.

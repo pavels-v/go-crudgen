@@ -107,10 +107,9 @@ func TestIntegration(t *testing.T) {
 	})
 
 	t.Run("list returns persisted posts", func(t *testing.T) {
-		var list offsetPage[blog.Post]
+		var list cursorPage[blog.Post]
 		do(t, srv, http.MethodGet, "/posts?limit=10", nil, &list, http.StatusOK)
 		require.NotEmpty(t, list.Items)
-		require.Equal(t, 10, list.Limit)
 	})
 
 	t.Run("list filters and sorts in SQL", func(t *testing.T) {
@@ -125,7 +124,7 @@ func TestIntegration(t *testing.T) {
 		}
 
 		titles := func(query string) []string {
-			var list offsetPage[blog.Post]
+			var list cursorPage[blog.Post]
 			do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+query, nil, &list, http.StatusOK)
 			out := make([]string, len(list.Items))
 			for i, p := range list.Items {
@@ -139,12 +138,29 @@ func TestIntegration(t *testing.T) {
 		require.Equal(t, []string{"Alpha"}, titles("&published=true"))
 		require.Equal(t, []string{"Beta"}, titles("&published=false&sort=title&limit=1"))
 
-		var first, last offsetPage[blog.Post]
-		do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+"&sort=title&limit=2", nil, &first, http.StatusOK)
-		require.True(t, first.HasMore)
-		do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+"&sort=title&limit=2&offset=1", nil, &last, http.StatusOK)
-		require.Len(t, last.Items, 2)
-		require.False(t, last.HasMore, "offset 1 plus 2 rows reaches the last post")
+		walk := func(query string) []string {
+			var out []string
+			path := "/posts?author=" + author.ID.String() + "&limit=1" + query
+			next := path
+			for range 10 {
+				var list cursorPage[blog.Post]
+				do(t, srv, http.MethodGet, next, nil, &list, http.StatusOK)
+				for _, p := range list.Items {
+					out = append(out, p.Title)
+				}
+				if list.NextCursor == "" {
+					return out
+				}
+				next = path + "&cursor=" + list.NextCursor
+			}
+			require.Fail(t, "cursor walk did not end", query)
+			return nil
+		}
+		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, walk("&sort=title"))
+		require.Equal(t, []string{"Gamma", "Beta", "Alpha"}, walk("&sort=title&dir=desc"))
+		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, walk("&sort=views&dir=desc"))
+		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, walk("&sort=created_at"))
+		require.ElementsMatch(t, []string{"Alpha", "Beta", "Gamma"}, walk("&dir=desc"))
 	})
 
 	t.Run("constraint violations map to client errors", func(t *testing.T) {
@@ -217,6 +233,11 @@ func TestIntegration(t *testing.T) {
 		require.Zero(t, first.Likes)
 		require.WithinDuration(t, before, first.PostedAt, time.Minute)
 
+		var page offsetPage[blog.Comment]
+		do(t, srv, http.MethodGet, "/comments?post="+post.ID.String()+"&limit=1", nil, &page, http.StatusOK)
+		require.Len(t, page.Items, 1)
+		require.True(t, page.HasMore)
+
 		firstPath := "/comments/" + strconv.FormatInt(first.ID, 10)
 		do(t, srv, http.MethodDelete, firstPath, nil, nil, http.StatusNoContent)
 		do(t, srv, http.MethodGet, firstPath, nil, nil, http.StatusNotFound)
@@ -286,6 +307,11 @@ type offsetPage[T any] struct {
 	Limit   int  `json:"limit"`
 	Offset  int  `json:"offset"`
 	HasMore bool `json:"has_more"`
+}
+
+type cursorPage[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"next_cursor"`
 }
 
 type apiError struct {

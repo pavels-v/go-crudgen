@@ -64,6 +64,7 @@ const (
 	importMaps        = "maps"
 	importSlices      = "slices"
 	importNetURL      = "net/url"
+	importBase64      = "encoding/base64"
 )
 
 // driverInfo maps a --driver choice to its database/sql driver name and the
@@ -156,6 +157,7 @@ type repoData struct {
 	ListFilters []repoFilter
 	ListSorts   []sortOption // Name is the qualified domain constant
 	ListOrder   sortOption   // default ORDER BY, by primary key
+	Cursor      bool         // keyset pagination by p.After instead of OFFSET
 
 	InsertArgs string // create args, e.g. "row.ID, row.Title"
 	UpdateArgs string // update args: non-PK fields then PK, e.g. "row.Title, row.ID"
@@ -294,7 +296,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	for _, lf := range filters {
 		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, snakeCase(lf.Field.Name))})
 	}
-	if len(listFilterData) > 0 {
+	if len(listFilterData) > 0 || e.CursorPagination() {
 		impSet[importStrings] = struct{}{}
 	}
 	listSorts := sortOptions(e)
@@ -373,7 +375,8 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		ListParams:      qualified(s, fmt.Sprintf(nameListParams, name)),
 		ListFilters:     listFilterData,
 		ListSorts:       listSorts,
-		ListOrder:       sortOption{Asc: pkCol, Desc: fmt.Sprintf(exprOrderDesc, pkCol)},
+		ListOrder:       keyOrder(pk),
+		Cursor:          e.CursorPagination(),
 		UpdateSQL:       updateSQL,
 		DeleteSQL:       deleteSQL,
 		InsertArgs:      strings.Join(insArgs, argSep),

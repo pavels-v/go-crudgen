@@ -67,6 +67,7 @@ Developer tasks: `make help`.
 
 - `<entity>.gen.go` - model and repository interface, in the root package named by `package`.
 - `errors.gen.go` - sentinel errors shared by all layers.
+- `sort.gen.go` - `SortDir` for List ordering.
 - `date.gen.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
 - `restapi/<entity>.gen.go` - `Create`/`Update` request DTOs and CRUD handlers.
 - `restapi/router.gen.go` - `NewRouter`, `Deps`, JSON and pagination helpers.
@@ -79,12 +80,12 @@ Developer tasks: `make help`.
 | Method   | Path             | Action                                       |
 | -------- | ---------------- | -------------------------------------------- |
 | `POST`   | `/{plural}`      | Create                                       |
-| `GET`    | `/{plural}`      | List (`?limit`, `?offset`, `?sort`, `?dir`, filters) |
+| `GET`    | `/{plural}`      | List (`?limit`, `?offset` or `?cursor`, `?sort`, `?dir`, filters) |
 | `GET`    | `/{plural}/{id}` | Read                                         |
 | `PUT`    | `/{plural}/{id}` | Update                                       |
 | `DELETE` | `/{plural}/{id}` | Delete                                       |
 
-Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset", "has_more"}`), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
+Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset", "has_more"}`, or `{"items", "next_cursor"}` under cursor pagination), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
 
 Errors: `400` malformed body, id or query, `404` not found, `405` method not allowed, `409` unique violation or deleting a referenced row, `413` body over 1 MiB, `422` failed validation or unknown reference, `500` without internal details.
 
@@ -106,6 +107,7 @@ entities:
       - { name: updated_at, type: datetime, generate: on_write }
 ```
 
+- `pagination: cursor` on an entity pages List by an opaque `?cursor=` (keyset, sort fields must be NOT NULL) instead of `?offset=`.
 - `package` names the root package; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `sort`, `generate`.
@@ -125,6 +127,7 @@ entities:
 - [x] PostgreSQL repository (`sqlx` / `database/sql`)
 - [x] Migrations (goose SQL schema per entity)
 - [x] List endpoint: pagination (`?limit` / `?offset`)
+- [x] List endpoint: cursor pagination (`?cursor`)
 - [x] List endpoint: filtering (equality)
 - [x] List endpoint: sorting
 - [x] Relations (`belongs_to` / `has_many`)

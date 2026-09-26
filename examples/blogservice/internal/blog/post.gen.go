@@ -29,13 +29,20 @@ const (
 	PostSortCreatedAt PostSort = "created_at"
 )
 
+type PostCursor struct {
+	Title     string    `json:"title"`
+	Views     int64     `json:"views"`
+	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
+}
+
 type PostListParams struct {
 	Published *bool
 	Author    *uuid.UUID
 	Sort      PostSort
 	Dir       SortDir
+	After     *PostCursor
 	Limit     int
-	Offset    int
 }
 
 // PostRepository is the storage interface for Post.

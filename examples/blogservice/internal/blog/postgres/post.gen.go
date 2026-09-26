@@ -113,28 +113,60 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 	switch {
 	case p.Sort == blog.PostSortTitle && desc:
 		order = `title DESC, id DESC`
+		if p.After != nil {
+			where = append(where, `(title, id) < (?, ?)`)
+			args = append(args, p.After.Title, p.After.ID)
+		}
 	case p.Sort == blog.PostSortTitle:
 		order = `title, id`
+		if p.After != nil {
+			where = append(where, `(title, id) > (?, ?)`)
+			args = append(args, p.After.Title, p.After.ID)
+		}
 	case p.Sort == blog.PostSortViews && desc:
 		order = `views DESC, id DESC`
+		if p.After != nil {
+			where = append(where, `(views, id) < (?, ?)`)
+			args = append(args, p.After.Views, p.After.ID)
+		}
 	case p.Sort == blog.PostSortViews:
 		order = `views, id`
+		if p.After != nil {
+			where = append(where, `(views, id) > (?, ?)`)
+			args = append(args, p.After.Views, p.After.ID)
+		}
 	case p.Sort == blog.PostSortCreatedAt && desc:
 		order = `created_at DESC, id DESC`
+		if p.After != nil {
+			where = append(where, `(created_at, id) < (?, ?)`)
+			args = append(args, p.After.CreatedAt, p.After.ID)
+		}
 	case p.Sort == blog.PostSortCreatedAt:
 		order = `created_at, id`
+		if p.After != nil {
+			where = append(where, `(created_at, id) > (?, ?)`)
+			args = append(args, p.After.CreatedAt, p.After.ID)
+		}
 	case desc:
 		order = `id DESC`
+		if p.After != nil {
+			where = append(where, `id < ?`)
+			args = append(args, p.After.ID)
+		}
 	default:
 		order = `id`
+		if p.After != nil {
+			where = append(where, `id > ?`)
+			args = append(args, p.After.ID)
+		}
 	}
 
 	q := `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts`
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
-	args = append(args, p.Limit, p.Offset)
+	q += ` ORDER BY ` + order + ` LIMIT ?`
+	args = append(args, p.Limit)
 
 	var rows []postRow
 	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {

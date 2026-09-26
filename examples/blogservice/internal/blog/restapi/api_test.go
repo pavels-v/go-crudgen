@@ -100,6 +100,12 @@ func newServer() *httptest.Server {
 	return newServerWithPosts(newPostStore())
 }
 
+func newAuthorStore() *memStore[uuid.UUID, blog.Author, blog.AuthorListParams] {
+	s := newMemStore[uuid.UUID, blog.Author, blog.AuthorListParams](func(m *blog.Author) *uuid.UUID { return &m.ID }, uuid.New)
+	s.limit = func(p blog.AuthorListParams) int { return p.Limit }
+	return s
+}
+
 func newPostStore() *memStore[uuid.UUID, blog.Post, blog.PostListParams] {
 	s := newMemStore[uuid.UUID, blog.Post, blog.PostListParams](func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New)
 	s.limit = func(p blog.PostListParams) int { return p.Limit }
@@ -110,7 +116,7 @@ func newServerWithPosts(posts blog.PostRepository) *httptest.Server {
 	var commentSeq atomic.Int64
 	return httptest.NewServer(NewRouter(Deps{
 		Posts:    posts,
-		Authors:  newMemStore[uuid.UUID, blog.Author, blog.AuthorListParams](func(m *blog.Author) *uuid.UUID { return &m.ID }, uuid.New),
+		Authors:  newAuthorStore(),
 		Comments: newMemStore[int64, blog.Comment, blog.CommentListParams](func(m *blog.Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
 		Tags:     newMemStore[string, blog.Tag, blog.TagListParams](func(m *blog.Tag) *string { return &m.Slug }, nil),
 	}))
@@ -200,12 +206,10 @@ func TestPostCRUD(t *testing.T) {
 	do(t, srv, http.MethodGet, idPath, nil, &got, http.StatusOK)
 	require.Equal(t, "Hello", got.Title)
 
-	var list offsetPage[blog.Post]
-	do(t, srv, http.MethodGet, "/posts?limit=500", nil, &list, http.StatusOK)
+	var list cursorPage[blog.Post]
+	do(t, srv, http.MethodGet, "/posts", nil, &list, http.StatusOK)
 	require.Len(t, list.Items, 1)
-	require.Equal(t, maxLimit, list.Limit, "limit is clamped")
-	require.Zero(t, list.Offset)
-	require.False(t, list.HasMore)
+	require.Empty(t, list.NextCursor)
 
 	var updated blog.Post
 	do(t, srv, http.MethodPut, idPath,
@@ -283,7 +287,7 @@ func TestErrorResponses(t *testing.T) {
 			http.StatusBadRequest, codeInvalidID, nil,
 		},
 		{
-			"invalid page", http.MethodGet, "/posts?limit=abc&offset=-1", "",
+			"invalid page", http.MethodGet, "/authors?limit=abc&offset=-1", "",
 			http.StatusBadRequest, codeInvalidQuery,
 			[]errorDetail{{Field: queryLimit, Reason: reasonInvalidValue}, {Field: queryOffset, Reason: reasonInvalidValue}},
 		},
@@ -291,6 +295,16 @@ func TestErrorResponses(t *testing.T) {
 			"unknown query parameter", http.MethodGet, "/posts?" + unknownParam + "=x&limit=5", "",
 			http.StatusBadRequest, codeInvalidQuery,
 			[]errorDetail{{Field: unknownParam, Reason: reasonUnknownField}},
+		},
+		{
+			"offset on a cursor-paged entity", http.MethodGet, "/posts?offset=10", "",
+			http.StatusBadRequest, codeInvalidQuery,
+			[]errorDetail{{Field: queryOffset, Reason: reasonUnknownField}},
+		},
+		{
+			"malformed cursor", http.MethodGet, "/posts?cursor=not-a-cursor", "",
+			http.StatusBadRequest, codeInvalidQuery,
+			[]errorDetail{{Field: queryCursor, Reason: reasonInvalidValue}},
 		},
 		{
 			"repeated query parameter", http.MethodGet, "/posts?published=true&published=false", "",
@@ -357,8 +371,8 @@ func TestListParsesFiltersAndSort(t *testing.T) {
 	}{
 		{"defaults", "", blog.PostListParams{Dir: blog.SortAsc, Limit: defaultLimit + 1}},
 		{
-			"filters, sort and page", "?author=" + author.String() + "&published=true&sort=title&dir=desc&limit=5&offset=10",
-			blog.PostListParams{Author: &author, Published: new(true), Sort: blog.PostSortTitle, Dir: blog.SortDesc, Limit: 6, Offset: 10},
+			"filters, sort and page", "?author=" + author.String() + "&published=true&sort=title&dir=desc&limit=5",
+			blog.PostListParams{Author: &author, Published: new(true), Sort: blog.PostSortTitle, Dir: blog.SortDesc, Limit: 6},
 		},
 		{"ascending sort", "?sort=views&dir=asc", blog.PostListParams{Sort: blog.PostSortViews, Dir: blog.SortAsc, Limit: defaultLimit + 1}},
 		{"direction without sort", "?dir=desc", blog.PostListParams{Dir: blog.SortDesc, Limit: defaultLimit + 1}},
@@ -378,19 +392,21 @@ func TestListParsesFiltersAndSort(t *testing.T) {
 	}
 }
 
-func TestListReportsHasMore(t *testing.T) {
+func TestOffsetListReportsHasMore(t *testing.T) {
 	t.Parallel()
 
-	const posts = 3
+	const authors = 3
 	cases := []struct {
-		name     string
-		limit    int
-		wantLen  int
-		wantMore bool
+		name      string
+		limit     int
+		wantLimit int
+		wantLen   int
+		wantMore  bool
 	}{
-		{"more rows than limit", posts - 1, posts - 1, true},
-		{"exactly limit", posts, posts, false},
-		{"fewer rows than limit", posts + 1, posts, false},
+		{"more rows than limit", authors - 1, authors - 1, authors - 1, true},
+		{"exactly limit", authors, authors, authors, false},
+		{"fewer rows than limit", authors + 1, authors + 1, authors, false},
+		{"limit is clamped", maxLimit + 1, maxLimit, authors, false},
 	}
 
 	for _, tc := range cases {
@@ -399,15 +415,56 @@ func TestListReportsHasMore(t *testing.T) {
 
 			srv := newServer()
 			t.Cleanup(srv.Close)
-			for range posts {
-				do(t, srv, http.MethodPost, "/posts", CreatePostRequest{Title: "Hello"}, nil, http.StatusCreated)
+			for i := range authors {
+				req := CreateAuthorRequest{Email: "author" + strconv.Itoa(i) + "@example.com"}
+				do(t, srv, http.MethodPost, "/authors", req, nil, http.StatusCreated)
 			}
 
-			var list offsetPage[blog.Post]
-			do(t, srv, http.MethodGet, "/posts?limit="+strconv.Itoa(tc.limit), nil, &list, http.StatusOK)
+			var list offsetPage[blog.Author]
+			do(t, srv, http.MethodGet, "/authors?limit="+strconv.Itoa(tc.limit)+"&offset=0", nil, &list, http.StatusOK)
 			require.Len(t, list.Items, tc.wantLen)
-			require.Equal(t, tc.limit, list.Limit)
+			require.Equal(t, tc.wantLimit, list.Limit)
+			require.Zero(t, list.Offset)
 			require.Equal(t, tc.wantMore, list.HasMore)
+		})
+	}
+}
+
+func TestCursorListRoundTripsNextCursor(t *testing.T) {
+	t.Parallel()
+
+	posts := newPostStore()
+	srv := newServerWithPosts(posts)
+	t.Cleanup(srv.Close)
+	for _, title := range []string{"Alpha", "Beta", "Gamma"} {
+		do(t, srv, http.MethodPost, "/posts", CreatePostRequest{Title: title}, nil, http.StatusCreated)
+	}
+
+	const firstPage = "/posts?sort=title&dir=desc&limit=2"
+	var first cursorPage[blog.Post]
+	do(t, srv, http.MethodGet, firstPage, nil, &first, http.StatusOK)
+	require.Len(t, first.Items, 2)
+	require.NotEmpty(t, first.NextCursor)
+
+	last := first.Items[1]
+	var second cursorPage[blog.Post]
+	do(t, srv, http.MethodGet, firstPage+"&cursor="+first.NextCursor, nil, &second, http.StatusOK)
+	require.Equal(t, &blog.PostCursor{Title: last.Title, Views: last.Views, CreatedAt: last.CreatedAt, ID: last.ID}, posts.listed[1].After)
+
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"different sort", "?sort=views&dir=desc"},
+		{"different direction", "?sort=title&dir=asc"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := doError(t, srv, http.MethodGet, "/posts"+tc.query+"&cursor="+first.NextCursor, "", http.StatusBadRequest)
+			require.Equal(t, []errorDetail{{Field: queryCursor, Reason: reasonInvalidValue}}, got.Details)
 		})
 	}
 }

@@ -3,6 +3,7 @@ package generator
 import (
 	"go/parser"
 	"go/token"
+	"slices"
 	"strings"
 	"testing"
 
@@ -562,6 +563,129 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 	}
 }
 
+func TestRenderList_CursorPagination(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Module:  "example.com/blog",
+		Entities: []spec.Entity{
+			{Name: "Post", Plural: "posts", Pagination: spec.PaginationCursor, Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "title", Type: spec.TypeString, Required: true, Filter: true, Sort: true},
+				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate, Sort: true},
+			}},
+			{Name: "Tag", Pagination: spec.PaginationCursor, Fields: []spec.Field{
+				{Name: "slug", Type: spec.TypeString, Primary: true},
+			}},
+		},
+	}
+
+	cases := []struct {
+		name   string
+		render func(t *testing.T, s *spec.Spec, entity string) string
+		entity string
+		want   []string
+		absent []string
+	}{
+		{
+			name:   "domain cursor replaces offset",
+			render: render,
+			entity: "Post",
+			want: []string{
+				"type PostCursor struct { Title string `json:\"title\"` CreatedAt time.Time `json:\"created_at\"` ID uuid.UUID `json:\"id\"` }",
+				"type PostListParams struct { Title *string Sort PostSort Dir SortDir After *PostCursor Limit int }",
+			},
+			absent: []string{"Offset"},
+		},
+		{
+			name:   "repository seeks past the cursor",
+			render: renderRepoSrc,
+			entity: "Post",
+			want: []string{
+				"case p.Sort == blog.PostSortTitle && desc: order = `title DESC, id DESC` if p.After != nil { where = append(where, `(title, id) < (?, ?)`) args = append(args, p.After.Title, p.After.ID) }",
+				"case p.Sort == blog.PostSortCreatedAt: order = `created_at, id` if p.After != nil { where = append(where, `(created_at, id) > (?, ?)`)",
+				"case desc: order = `id DESC` if p.After != nil { where = append(where, `id < ?`) args = append(args, p.After.ID) }",
+				"default: order = `id` if p.After != nil { where = append(where, `id > ?`)",
+				"q += ` ORDER BY ` + order + ` LIMIT ?` args = append(args, p.Limit)",
+			},
+			absent: []string{"OFFSET"},
+		},
+		{
+			name:   "handler decodes and encodes the cursor",
+			render: renderHandlerSrc,
+			entity: "Post",
+			want: []string{
+				"type postCursor struct { Sort blog.PostSort `json:\"sort\"` Dir blog.SortDir `json:\"dir\"` After blog.PostCursor `json:\"after\"` }",
+				"q := newListQuery(r, queryCursor, queryPostTitle, querySort)",
+				"if c := queryCursorValue[postCursor](q); c != nil { if c.Sort != p.Sort || c.Dir != p.Dir { q.invalid(queryCursor) } p.After = &c.After }",
+				"page := cursorPage[blog.Post]{Items: items}",
+				"After: blog.PostCursor{ Title: last.Title, CreatedAt: last.CreatedAt, ID: last.ID, },",
+				"if page.NextCursor, err = encodeCursor(c); err != nil {",
+			},
+			absent: []string{"q.offset()", "offsetPage"},
+		},
+		{
+			name:   "cursor without sort fields carries only the key",
+			render: renderHandlerSrc,
+			entity: "Tag",
+			want: []string{
+				"type tagCursor struct { Dir blog.SortDir `json:\"dir\"` After blog.TagCursor `json:\"after\"` }",
+				"if c.Dir != p.Dir {",
+			},
+			absent: []string{"c.Sort"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.render(t, s, tc.entity)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
+	}
+}
+
+func TestRenderRouter_PaginationHelpers(t *testing.T) {
+	t.Parallel()
+
+	offset := []string{"const queryOffset", "type offsetPage[T any]", "func (q *listQuery) offset() int"}
+	cursor := []string{"const queryCursor", "type cursorPage[T any]", "func queryCursorValue[C any]", "func encodeCursor(", `"encoding/base64"`}
+	cases := []struct {
+		name   string
+		shared sharedFiles
+		want   []string
+		absent []string
+	}{
+		{"offset only", sharedFiles{Offset: true}, offset, cursor},
+		{"cursor only", sharedFiles{Cursor: true}, cursor, offset},
+		{"both", sharedFiles{Offset: true, Cursor: true}, slices.Concat(offset, cursor), nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			src, err := renderRouter(routerInfo(&spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared))
+			require.NoError(t, err)
+			requireParses(t, src)
+			got := string(src)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
+	}
+}
+
 func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 	t.Parallel()
 
@@ -971,9 +1095,9 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{Package: "blog", Module: "example.com/blog"}
-	src, err := renderRouter(routerInfo(s, []routerEntity{
+	src, err := renderRouter(routerInfo(s, sharedFiles{Offset: true, Routes: []routerEntity{
 		{Struct: "Post", Repo: "blog.PostRepository", DepsField: "Posts"},
-	}))
+	}}))
 	require.NoError(t, err)
 	requireParses(t, src)
 

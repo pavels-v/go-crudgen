@@ -11,12 +11,19 @@ const (
 	nameSortType   = "%sSort"
 	nameSortField  = "%sSort%s"
 	nameQueryParam = "query%s%s"
+	nameCursor     = "%sCursor"
+	nameSortDir    = "SortDir"
 )
 
 const (
 	exprWhereEqual = "%s = ?"
 	exprOrderDesc  = "%s DESC"
 	exprParseText  = "parseText[%s]"
+	exprAfterKey   = "%s %s ?"
+	exprAfterPair  = "(%s, %s) %s (?, ?)"
+	exprAfterField = "p.After.%s"
+	opGreater      = ">"
+	opLess         = "<"
 )
 
 const (
@@ -33,10 +40,13 @@ type listFilter struct {
 }
 
 type sortOption struct {
-	Name  string // domain constant, e.g. "PostSortTitle"
-	Value string // ?sort= value, e.g. "title"
-	Asc   string // ORDER BY, e.g. "title, id"
-	Desc  string // ORDER BY, e.g. "title DESC, id DESC"
+	Name      string // domain constant, e.g. "PostSortTitle"
+	Value     string // ?sort= value, e.g. "title"
+	Asc       string // ORDER BY, e.g. "title, id"
+	Desc      string // ORDER BY, e.g. "title DESC, id DESC"
+	AfterAsc  string // cursor WHERE, e.g. "(title, id) > (?, ?)"
+	AfterDesc string // cursor WHERE, e.g. "(title, id) < (?, ?)"
+	AfterArgs string // cursor WHERE args, e.g. "p.After.Title, p.After.ID"
 }
 
 func listFilters(e *spec.Entity, byName map[string]*spec.Entity) ([]listFilter, error) {
@@ -56,26 +66,53 @@ func listFilters(e *spec.Entity, byName map[string]*spec.Entity) ([]listFilter, 
 
 func sortOptions(e *spec.Entity) []sortOption {
 	name := pascalCase(e.Name)
-	pkCol := snakeCase(e.PrimaryKey()[0].Name)
+	pk := e.PrimaryKey()[0]
 	var out []sortOption
 	for _, f := range e.Fields {
 		if !f.Sort {
 			continue
 		}
-		col := snakeCase(f.Name)
-		asc, desc := col, fmt.Sprintf(exprOrderDesc, col)
+		so := keyOrder(pk)
 		if !f.Primary {
-			asc += argSep + pkCol
-			desc += argSep + fmt.Sprintf(exprOrderDesc, pkCol)
+			so = fieldOrder(f, pk)
 		}
-		out = append(out, sortOption{
-			Name:  fmt.Sprintf(nameSortField, name, pascalCase(f.Name)),
-			Value: f.Name,
-			Asc:   asc,
-			Desc:  desc,
-		})
+		so.Name = fmt.Sprintf(nameSortField, name, pascalCase(f.Name))
+		so.Value = f.Name
+		out = append(out, so)
 	}
 	return out
+}
+
+func keyOrder(pk spec.Field) sortOption {
+	col := snakeCase(pk.Name)
+	return sortOption{
+		Asc:       col,
+		Desc:      fmt.Sprintf(exprOrderDesc, col),
+		AfterAsc:  fmt.Sprintf(exprAfterKey, col, opGreater),
+		AfterDesc: fmt.Sprintf(exprAfterKey, col, opLess),
+		AfterArgs: fmt.Sprintf(exprAfterField, pascalCase(pk.Name)),
+	}
+}
+
+func fieldOrder(f, pk spec.Field) sortOption {
+	col, pkCol := snakeCase(f.Name), snakeCase(pk.Name)
+	return sortOption{
+		Asc:       col + argSep + pkCol,
+		Desc:      fmt.Sprintf(exprOrderDesc, col) + argSep + fmt.Sprintf(exprOrderDesc, pkCol),
+		AfterAsc:  fmt.Sprintf(exprAfterPair, col, pkCol, opGreater),
+		AfterDesc: fmt.Sprintf(exprAfterPair, col, pkCol, opLess),
+		AfterArgs: fmt.Sprintf(exprAfterField, pascalCase(f.Name)) + argSep + fmt.Sprintf(exprAfterField, pascalCase(pk.Name)),
+	}
+}
+
+func cursorFields(e *spec.Entity) []spec.Field {
+	var out []spec.Field
+	for _, f := range e.Fields {
+		if f.Sort && !f.Primary {
+			out = append(out, f)
+		}
+	}
+	return append(out, e.PrimaryKey()[0])
 }
 
 func queryParser(gt goType, s *spec.Spec) (parse, imp string) {

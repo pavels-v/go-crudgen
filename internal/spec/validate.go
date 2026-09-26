@@ -52,6 +52,7 @@ const (
 	queryOffset = "offset"
 	querySort   = "sort"
 	queryDir    = "dir"
+	queryCursor = "cursor"
 )
 
 var reservedQueryNames = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
@@ -59,6 +60,7 @@ var reservedQueryNames = map[string]struct{}{ //nolint:gochecknoglobals // read-
 	queryOffset: {},
 	querySort:   {},
 	queryDir:    {},
+	queryCursor: {},
 }
 
 // Validate checks the spec for structural errors.
@@ -86,6 +88,9 @@ func (s *Spec) Validate() error {
 
 		if len(e.Fields) == 0 {
 			return fmt.Errorf("entity %q has no fields", e.Name)
+		}
+		if e.Pagination != "" && e.Pagination != PaginationOffset && e.Pagination != PaginationCursor {
+			return fmt.Errorf("entity %q has unknown pagination %q: use %q or %q", e.Name, e.Pagination, PaginationOffset, PaginationCursor)
 		}
 		for _, f := range e.Fields {
 			if f.Name == "" {
@@ -161,8 +166,14 @@ func validateListModifiers(e *Entity, f Field) error {
 			return fmt.Errorf("entity %q field %q cannot be a filter: the name is a reserved query parameter", e.Name, f.Name)
 		}
 	}
-	if _, ok := unsortableTypes[f.Type]; ok && f.Sort {
+	if !f.Sort {
+		return nil
+	}
+	if _, ok := unsortableTypes[f.Type]; ok {
 		return fmt.Errorf("entity %q field %q of type %q cannot be sorted", e.Name, f.Name, f.Type)
+	}
+	if e.CursorPagination() && !f.Primary && !f.Required && f.Default == nil && f.Generate == "" {
+		return fmt.Errorf("entity %q field %q can be NULL, so cursor pagination cannot sort by it: make it required or give it a default", e.Name, f.Name)
 	}
 	return nil
 }
