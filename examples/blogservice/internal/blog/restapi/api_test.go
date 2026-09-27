@@ -254,6 +254,11 @@ func TestErrorResponses(t *testing.T) {
 			[]errorDetail{{Field: "/title", Reason: "max=200"}},
 		},
 		{
+			"rule on an optional field", http.MethodPost, "/authors", `{"email":"long@example.com","name":"` + strings.Repeat("x", 101) + `"}`,
+			http.StatusUnprocessableEntity, codeValidationFailed,
+			[]errorDetail{{Field: "/name", Reason: "max=100"}},
+		},
+		{
 			"missing reference key", http.MethodPost, "/comments", `{"body":"Orphan"}`,
 			http.StatusUnprocessableEntity, codeValidationFailed,
 			[]errorDetail{{Field: "/post", Reason: "required"}},

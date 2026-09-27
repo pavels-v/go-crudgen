@@ -1,8 +1,10 @@
 package generator
 
 import (
+	"encoding/json/jsontext"
 	"fmt"
 	"strconv"
+	"time"
 
 	"go-crudgen/internal/spec"
 )
@@ -13,13 +15,14 @@ type goType struct {
 	expr   string
 	imp    string // import path, "" for builtins
 	domain bool
+	sample any
 }
 
 func (gt goType) outside(s *spec.Spec) goType {
 	if !gt.domain {
 		return gt
 	}
-	return goType{expr: fmt.Sprintf(exprQualified, s.Package, gt.expr), imp: s.Module}
+	return goType{expr: fmt.Sprintf(exprQualified, s.Package, gt.expr), imp: s.Module, sample: gt.sample}
 }
 
 // Go type expressions emitted for spec field types. scalarType produces these and
@@ -67,23 +70,24 @@ type typeInfo struct {
 	goImport string // "" for builtins
 	sqlType  string
 	domain   bool
+	sample   any
 }
 
 // scalarTypes is the single source of truth mapping each non-reference spec field
 // type to its Go and SQL representations. scalarType and sqlType both read from
 // it, so a new field type is added in exactly one place.
 var scalarTypes = map[string]typeInfo{ //nolint:gochecknoglobals // read-only lookup table
-	spec.TypeString:   {goExpr: goString, sqlType: sqlText},
-	spec.TypeText:     {goExpr: goString, sqlType: sqlText},
-	spec.TypeInt32:    {goExpr: goInt32, sqlType: sqlInteger},
-	spec.TypeInt64:    {goExpr: goInt64, sqlType: sqlBigint},
-	spec.TypeFloat:    {goExpr: goFloat64, sqlType: sqlDouble},
-	spec.TypeBool:     {goExpr: goBool, sqlType: sqlBoolean},
-	spec.TypeDecimal:  {goExpr: goDecimal, goImport: importDecimal, sqlType: sqlNumeric},
-	spec.TypeDate:     {goExpr: goDate, sqlType: sqlDate, domain: true},
-	spec.TypeDatetime: {goExpr: goTime, goImport: importTime, sqlType: sqlTimestamptz},
-	spec.TypeUUID:     {goExpr: goUUID, goImport: importUUID, sqlType: sqlUUID},
-	spec.TypeJSON:     {goExpr: goJSON, goImport: importJSON, sqlType: sqlJSONB},
+	spec.TypeString:   {goExpr: goString, sqlType: sqlText, sample: ""},
+	spec.TypeText:     {goExpr: goString, sqlType: sqlText, sample: ""},
+	spec.TypeInt32:    {goExpr: goInt32, sqlType: sqlInteger, sample: int32(0)},
+	spec.TypeInt64:    {goExpr: goInt64, sqlType: sqlBigint, sample: int64(0)},
+	spec.TypeFloat:    {goExpr: goFloat64, sqlType: sqlDouble, sample: float64(0)},
+	spec.TypeBool:     {goExpr: goBool, sqlType: sqlBoolean, sample: false},
+	spec.TypeDecimal:  {goExpr: goDecimal, goImport: importDecimal, sqlType: sqlNumeric, sample: struct{}{}},
+	spec.TypeDate:     {goExpr: goDate, sqlType: sqlDate, domain: true, sample: time.Time{}},
+	spec.TypeDatetime: {goExpr: goTime, goImport: importTime, sqlType: sqlTimestamptz, sample: time.Time{}},
+	spec.TypeUUID:     {goExpr: goUUID, goImport: importUUID, sqlType: sqlUUID, sample: [16]byte{}},
+	spec.TypeJSON:     {goExpr: goJSON, goImport: importJSON, sqlType: sqlJSONB, sample: jsontext.Value{}},
 }
 
 // isNullable reports whether a field maps to a nullable column. It is the single
@@ -154,7 +158,7 @@ func scalarType(t string) (goType, bool) {
 	if !ok {
 		return goType{}, false
 	}
-	return goType{expr: ti.goExpr, imp: ti.goImport, domain: ti.domain}, true
+	return goType{expr: ti.goExpr, imp: ti.goImport, domain: ti.domain, sample: ti.sample}, true
 }
 
 const exprQualified = "%s.%s"

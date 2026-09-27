@@ -64,7 +64,9 @@ const (
 
 const (
 	ruleRequired = "required"
+	ruleOmitNil  = "omitnil"
 	ruleSep      = ","
+	ruleOr       = "|"
 )
 
 const (
@@ -99,8 +101,15 @@ func Generate(s *spec.Spec, opts Options) error {
 		return fmt.Errorf("unknown driver %q (supported: pgx, pq)", opts.Driver)
 	}
 
+	byName := make(map[string]*spec.Entity, len(s.Entities))
+	for i := range s.Entities {
+		byName[s.Entities[i].Name] = &s.Entities[i]
+	}
 	for i := range s.Entities {
 		if err := checkColumns(&s.Entities[i]); err != nil {
+			return err
+		}
+		if err := checkRules(&s.Entities[i], byName); err != nil {
 			return err
 		}
 	}
@@ -686,6 +695,9 @@ func fieldTag(f spec.Field) string {
 	var rules []string
 	if f.Required && !strings.Contains(f.Validate, ruleRequired) {
 		rules = append(rules, ruleRequired)
+	}
+	if f.Validate != "" && (isNullable(f) || hasRequestDefault(f)) {
+		rules = append(rules, ruleOmitNil)
 	}
 	if f.Validate != "" {
 		rules = append(rules, f.Validate)
