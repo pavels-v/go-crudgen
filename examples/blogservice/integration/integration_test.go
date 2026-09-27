@@ -114,7 +114,7 @@ func TestIntegration(t *testing.T) {
 
 	t.Run("list filters, orders and pages in SQL", func(t *testing.T) {
 		var author blog.Author
-		do(t, srv, http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: "sorted@example.com"}, &author, http.StatusCreated)
+		do(t, srv, http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: "ordered@example.com"}, &author, http.StatusCreated)
 		for _, req := range []restapi.CreatePostRequest{
 			{Title: "Beta", Author: &author.ID, Views: new(int64(2))},
 			{Title: "Alpha", Author: &author.ID, Views: new(int64(3)), Published: new(true)},

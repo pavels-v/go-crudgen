@@ -37,7 +37,7 @@ type listFilter struct {
 	Type   goType
 }
 
-type sortOption struct {
+type ordering struct {
 	Asc       string // ORDER BY, e.g. "title, id"
 	Desc      string // ORDER BY, e.g. "title DESC, id DESC"
 	AfterAsc  string // cursor WHERE, e.g. "(title, id) > (?, ?)"
@@ -60,7 +60,7 @@ func listFilters(e *spec.Entity, byName map[string]*spec.Entity) ([]listFilter, 
 	return out, nil
 }
 
-func listOrder(e *spec.Entity) sortOption {
+func listOrder(e *spec.Entity) ordering {
 	pk := e.PrimaryKey()[0]
 	f, _ := e.OrderField()
 	if f.Primary {
@@ -69,9 +69,9 @@ func listOrder(e *spec.Entity) sortOption {
 	return fieldOrder(f, pk)
 }
 
-func keyOrder(pk spec.Field) sortOption {
+func keyOrder(pk spec.Field) ordering {
 	col := snakeCase(pk.Name)
-	return sortOption{
+	return ordering{
 		Asc:       col,
 		Desc:      fmt.Sprintf(exprOrderDesc, col),
 		AfterAsc:  fmt.Sprintf(exprAfterKey, col, opGreater),
@@ -80,9 +80,9 @@ func keyOrder(pk spec.Field) sortOption {
 	}
 }
 
-func fieldOrder(f, pk spec.Field) sortOption {
+func fieldOrder(f, pk spec.Field) ordering {
 	col, pkCol := snakeCase(f.Name), snakeCase(pk.Name)
-	return sortOption{
+	return ordering{
 		Asc:       col + argSep + pkCol,
 		Desc:      fmt.Sprintf(exprOrderDesc, col) + argSep + fmt.Sprintf(exprOrderDesc, pkCol),
 		AfterAsc:  fmt.Sprintf(exprAfterPair, col, pkCol, opGreater),

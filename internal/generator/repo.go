@@ -156,7 +156,7 @@ type repoData struct {
 	ListParams  string // qualified domain params, e.g. "blog.PostListParams"
 	ListDynamic bool   // WHERE is assembled from ListFilters and the cursor
 	ListFilters []repoFilter
-	ListOrder   sortOption
+	ListOrder   ordering
 	Cursor      bool // keyset pagination by p.After instead of OFFSET
 
 	InsertArgs string // create args, e.g. "row.ID, row.Title"
