@@ -95,6 +95,11 @@ func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, err
 }
 
 func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blog.Post, error) {
+	order, after := `created_at, id`, `(created_at, id) > (?, ?)`
+	if p.Dir == blog.SortDesc {
+		order, after = `created_at DESC, id DESC`, `(created_at, id) < (?, ?)`
+	}
+
 	var (
 		where []string
 		args  []any
@@ -107,13 +112,8 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 		where = append(where, `author = ?`)
 		args = append(args, *p.Author)
 	}
-	desc := p.Dir == blog.SortDesc
 	if p.After != nil {
-		if desc {
-			where = append(where, `(created_at, id) < (?, ?)`)
-		} else {
-			where = append(where, `(created_at, id) > (?, ?)`)
-		}
+		where = append(where, after)
 		args = append(args, p.After.CreatedAt, p.After.ID)
 	}
 
@@ -121,11 +121,7 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	if desc {
-		q += ` ORDER BY created_at DESC, id DESC LIMIT ?`
-	} else {
-		q += ` ORDER BY created_at, id LIMIT ?`
-	}
+	q += ` ORDER BY ` + order + ` LIMIT ?`
 	args = append(args, p.Limit)
 
 	var rows []postRow

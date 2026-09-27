@@ -78,7 +78,19 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Mod
 }
 
 func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .Model }}, error) {
+{{- if .Cursor }}
+	order, after := `{{ .ListOrder.Asc }}`, `{{ .ListOrder.AfterAsc }}`
+	if p.Dir == {{ .Domain }}.SortDesc {
+		order, after = `{{ .ListOrder.Desc }}`, `{{ .ListOrder.AfterDesc }}`
+	}
+{{- else }}
+	order := `{{ .ListOrder.Asc }}`
+	if p.Dir == {{ .Domain }}.SortDesc {
+		order = `{{ .ListOrder.Desc }}`
+	}
+{{- end }}
 {{- if .ListDynamic }}
+
 	var (
 		where []string
 		args  []any
@@ -89,14 +101,9 @@ func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .
 		args = append(args, *p.{{ .GoName }})
 	}
 {{- end }}
-	desc := p.Dir == {{ .Domain }}.SortDesc
 {{- if .Cursor }}
 	if p.After != nil {
-		if desc {
-			where = append(where, `{{ .ListOrder.AfterDesc }}`)
-		} else {
-			where = append(where, `{{ .ListOrder.AfterAsc }}`)
-		}
+		where = append(where, after)
 		args = append(args, {{ .ListOrder.AfterArgs }})
 	}
 {{- end }}
@@ -106,30 +113,19 @@ func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
 {{- if .Cursor }}
-	if desc {
-		q += ` ORDER BY {{ .ListOrder.Desc }} LIMIT ?`
-	} else {
-		q += ` ORDER BY {{ .ListOrder.Asc }} LIMIT ?`
-	}
+	q += ` ORDER BY ` + order + ` LIMIT ?`
 	args = append(args, p.Limit)
 {{- else }}
-	if desc {
-		q += ` ORDER BY {{ .ListOrder.Desc }} LIMIT ? OFFSET ?`
-	} else {
-		q += ` ORDER BY {{ .ListOrder.Asc }} LIMIT ? OFFSET ?`
-	}
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	args = append(args, p.Limit, p.Offset)
 {{- end }}
 
 	var rows []{{ .RowStruct }}
 	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 {{- else }}
-	q := `{{ .ListSQL }}`
-	if p.Dir == {{ .Domain }}.SortDesc {
-		q = `{{ .ListDesc }}`
-	}
 
 	var rows []{{ .RowStruct }}
+	q := `{{ .ListSQL }} ORDER BY ` + order + ` LIMIT $1 OFFSET $2`
 	if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset); err != nil {
 {{- end }}
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)

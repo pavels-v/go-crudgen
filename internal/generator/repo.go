@@ -149,8 +149,7 @@ type repoData struct {
 
 	CreateSQL string
 	GetSQL    string
-	ListSQL   string // full ascending query, or the SELECT ... FROM prefix when ListDynamic
-	ListDesc  string // full descending query, unless ListDynamic
+	ListSQL   string // SELECT ... FROM prefix; WHERE, ORDER BY and paging are appended
 	UpdateSQL string
 	DeleteSQL string
 
@@ -303,11 +302,6 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 	listOrd := listOrder(e)
 	listSQL := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, ", "), table)
-	var listDesc string
-	if !listDynamic {
-		listDesc = fmt.Sprintf("%s ORDER BY %s LIMIT $1 OFFSET $2", listSQL, listOrd.Desc)
-		listSQL = fmt.Sprintf("%s ORDER BY %s LIMIT $1 OFFSET $2", listSQL, listOrd.Asc)
-	}
 
 	// UPDATE: non-PK fields get placeholders $1..$n, the PK gets $n+1; on_write
 	// columns are reset to now(), and every generated column is returned so the
@@ -377,7 +371,6 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		GetSQL:          getSQL,
 		ListSQL:         listSQL,
 		ListParams:      qualified(s, fmt.Sprintf(nameListParams, name)),
-		ListDesc:        listDesc,
 		ListDynamic:     listDynamic,
 		ListFilters:     listFilterData,
 		ListOrder:       listOrd,

@@ -411,7 +411,7 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"m.ID = uuid.New() row := newPostRow(m)",
 		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
-		"q := `SELECT id, title, body, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`",
+		"q := `SELECT id, title, body, created_at, updated_at FROM posts ORDER BY ` + order + ` LIMIT $1 OFFSET $2`",
 		// the primary key is the trailing placeholder in the update
 		"UPDATE posts SET title = $1, body = $2, updated_at = now() WHERE id = $3 RETURNING created_at, updated_at",
 		"DELETE FROM posts WHERE id = $1",
@@ -438,8 +438,8 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	got := renderRepoSrc(t, s, "Account")
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
-		"q := `SELECT id, name FROM accounts ORDER BY id LIMIT $1 OFFSET $2` if p.Dir == app.SortDesc { q = `SELECT id, name FROM accounts ORDER BY id DESC LIMIT $1 OFFSET $2` }",
-		"r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
+		"order := `id` if p.Dir == app.SortDesc { order = `id DESC` }",
+		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
@@ -514,18 +514,19 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 				"if p.PublishedOn != nil { where = append(where, `published_on = ?`)",
 				"q := `SELECT id, title, author, published_on, views, published FROM posts`",
 				"q += ` WHERE ` + strings.Join(where, ` AND `)",
-				"if desc { q += ` ORDER BY title DESC, id DESC LIMIT ? OFFSET ?` } else { q += ` ORDER BY title, id LIMIT ? OFFSET ?` }",
-				"args = append(args, p.Limit, p.Offset)",
+				"order := `title, id` if p.Dir == blog.SortDesc { order = `title DESC, id DESC` }",
+				"q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
 				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
 				`"strings"`,
 			},
 		},
 		{
-			name:   "no filters keeps two static queries",
+			name:   "no filters keeps one inline query",
 			render: renderRepoSrc,
 			entity: "Tag",
 			want: []string{
-				"q := `SELECT slug, label FROM tags ORDER BY label, slug LIMIT $1 OFFSET $2` if p.Dir == blog.SortDesc { q = `SELECT slug, label FROM tags ORDER BY label DESC, slug DESC LIMIT $1 OFFSET $2` }",
+				"order := `label, slug` if p.Dir == blog.SortDesc { order = `label DESC, slug DESC` }",
+				"q := `SELECT slug, label FROM tags ORDER BY ` + order + ` LIMIT $1 OFFSET $2`",
 			},
 			absent: []string{"where = append", "Rebind", `"strings"`},
 		},
@@ -596,8 +597,9 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			render: renderRepoSrc,
 			entity: "Post",
 			want: []string{
-				"desc := p.Dir == blog.SortDesc if p.After != nil { if desc { where = append(where, `(created_at, id) < (?, ?)`) } else { where = append(where, `(created_at, id) > (?, ?)`) } args = append(args, p.After.CreatedAt, p.After.ID) }",
-				"if desc { q += ` ORDER BY created_at DESC, id DESC LIMIT ?` } else { q += ` ORDER BY created_at, id LIMIT ?` } args = append(args, p.Limit)",
+				"order, after := `created_at, id`, `(created_at, id) > (?, ?)` if p.Dir == blog.SortDesc { order, after = `created_at DESC, id DESC`, `(created_at, id) < (?, ?)` }",
+				"if p.After != nil { where = append(where, after) args = append(args, p.After.CreatedAt, p.After.ID) }",
+				"q += ` ORDER BY ` + order + ` LIMIT ?` args = append(args, p.Limit)",
 			},
 			absent: []string{"OFFSET"},
 		},
@@ -606,7 +608,8 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			render: renderRepoSrc,
 			entity: "Tag",
 			want: []string{
-				"where = append(where, `slug < ?`) } else { where = append(where, `slug > ?`) } args = append(args, p.After.Slug)",
+				"order, after := `slug`, `slug > ?` if p.Dir == blog.SortDesc { order, after = `slug DESC`, `slug < ?` }",
+				"args = append(args, p.After.Slug)",
 			},
 		},
 		{
