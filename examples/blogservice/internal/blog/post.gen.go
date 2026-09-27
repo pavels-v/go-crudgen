@@ -21,23 +21,17 @@ type Post struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
-type PostSort string
-
-const (
-	PostSortTitle         PostSort = "title"
-	PostSortTitleDesc     PostSort = "-title"
-	PostSortViews         PostSort = "views"
-	PostSortViewsDesc     PostSort = "-views"
-	PostSortCreatedAt     PostSort = "created_at"
-	PostSortCreatedAtDesc PostSort = "-created_at"
-)
+type PostCursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
+}
 
 type PostListParams struct {
 	Published *bool
 	Author    *uuid.UUID
-	Sort      PostSort
+	Dir       SortDir
+	After     *PostCursor
 	Limit     int
-	Offset    int
 }
 
 // PostRepository is the storage interface for Post.

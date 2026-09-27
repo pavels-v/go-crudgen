@@ -4,6 +4,8 @@ module: example.com/blogservice/internal/blog # import path of the --out directo
 entities:
   - name: Post
     plural: posts         # optional; defaults to a naive pluralization
+    pagination: cursor    # ?cursor=<next_cursor>; offset (default) takes ?offset=
+    order: created_at     # List order, ?dir=asc|desc; defaults to the primary key
     fields:
       - name: id
         type: uuid
@@ -12,7 +14,6 @@ entities:
         type: string
         required: true
         validate: "min=1,max=200"
-        sort: true         # ?sort=title or ?sort=-title
       - name: body
         type: text
       - name: published
@@ -22,7 +23,6 @@ entities:
       - name: views
         type: int64
         default: 0
-        sort: true
       - name: metadata
         type: json
       - name: author
@@ -32,7 +32,6 @@ entities:
       - name: created_at
         type: datetime
         generate: on_create  # now() on insert, read-only
-        sort: true
       - name: updated_at
         type: datetime
         generate: on_write   # now() on insert and every update, read-only
@@ -52,9 +51,9 @@ entities:
         type: string
       - name: born_on
         type: date
-        sort: true
 
   - name: Comment
+    order: posted_at
     fields:
       - name: id
         type: int64
@@ -76,7 +75,6 @@ entities:
       - name: posted_at
         type: datetime
         default: now
-        sort: true
 
   - name: Tag
     fields:

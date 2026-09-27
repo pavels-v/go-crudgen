@@ -10,9 +10,11 @@ type Spec struct {
 
 // Entity describes a single resource to generate CRUD endpoints for.
 type Entity struct {
-	Name   string  `yaml:"name"`
-	Plural string  `yaml:"plural"` // optional; defaults to a naive pluralization
-	Fields []Field `yaml:"fields"`
+	Name       string  `yaml:"name"`
+	Plural     string  `yaml:"plural"`     // optional; defaults to a naive pluralization
+	Pagination string  `yaml:"pagination"` // offset (default) or cursor
+	Order      string  `yaml:"order"`      // field List orders by; defaults to the primary key
+	Fields     []Field `yaml:"fields"`
 }
 
 const (
@@ -35,6 +37,11 @@ const DefaultNow = "now"
 const OnDeleteCascade = "cascade"
 
 const (
+	PaginationOffset = "offset"
+	PaginationCursor = "cursor"
+)
+
+const (
 	GenerateOnCreate = "on_create"
 	GenerateOnWrite  = "on_write"
 )
@@ -48,12 +55,27 @@ type Field struct {
 	Unique   bool   `yaml:"unique"`
 	Index    bool   `yaml:"index"`
 	Filter   bool   `yaml:"filter"` // List accepts ?<name>= for equality
-	Sort     bool   `yaml:"sort"`   // List accepts ?sort=<name> and ?sort=-<name>
 	Default  any    `yaml:"default"`
 	Validate string `yaml:"validate"` // go-playground/validator rule string
 	Target   string `yaml:"target"`   // referenced entity, when Type == "references"
 	OnDelete string `yaml:"on_delete"`
 	Generate string `yaml:"generate"` // the server sets now() on create, or on every write
+}
+
+func (e *Entity) CursorPagination() bool {
+	return e.Pagination == PaginationCursor
+}
+
+func (e *Entity) OrderField() (Field, bool) {
+	if e.Order == "" {
+		return e.PrimaryKey()[0], true
+	}
+	for _, f := range e.Fields {
+		if f.Name == e.Order {
+			return f, true
+		}
+	}
+	return Field{}, false
 }
 
 // PrimaryKey returns the fields marked primary, in declaration order. A valid

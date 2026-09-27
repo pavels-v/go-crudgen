@@ -64,6 +64,7 @@ const (
 	importMaps        = "maps"
 	importSlices      = "slices"
 	importNetURL      = "net/url"
+	importBase64      = "encoding/base64"
 )
 
 // driverInfo maps a --driver choice to its database/sql driver name and the
@@ -148,15 +149,15 @@ type repoData struct {
 
 	CreateSQL string
 	GetSQL    string
-	ListSQL   string // full query, or the SELECT ... FROM prefix when ListDynamic
+	ListSQL   string // SELECT ... FROM prefix; WHERE, ORDER BY and paging are appended
 	UpdateSQL string
 	DeleteSQL string
 
 	ListParams  string // qualified domain params, e.g. "blog.PostListParams"
-	ListDynamic bool   // WHERE and ORDER BY are assembled from ListFilters and ListSorts
+	ListDynamic bool   // WHERE is assembled from ListFilters and the cursor
 	ListFilters []repoFilter
-	ListSorts   []sortOption // Name is the qualified domain constant
-	ListOrder   string       // default ORDER BY
+	ListOrder   ordering
+	Cursor      bool // keyset pagination by p.After instead of OFFSET
 
 	InsertArgs string // create args, e.g. "row.ID, row.Title"
 	UpdateArgs string // update args: non-PK fields then PK, e.g. "row.Title, row.ID"
@@ -295,20 +296,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	for _, lf := range filters {
 		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, snakeCase(lf.Field.Name))})
 	}
-	if len(listFilterData) > 0 {
+	listDynamic := len(listFilterData) > 0 || e.CursorPagination()
+	if listDynamic {
 		impSet[importStrings] = struct{}{}
 	}
-	listSorts := sortOptions(e)
-	for i := range listSorts {
-		listSorts[i].Name = qualified(s, listSorts[i].Name)
-	}
-	listDynamic := len(listFilterData) > 0 || len(listSorts) > 0
-
-	listSQL := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s LIMIT $1 OFFSET $2",
-		strings.Join(selectCols, ", "), table, pkCol)
-	if listDynamic {
-		listSQL = fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, ", "), table)
-	}
+	listOrd := listOrder(e)
+	listSQL := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, ", "), table)
 
 	// UPDATE: non-PK fields get placeholders $1..$n, the PK gets $n+1; on_write
 	// columns are reset to now(), and every generated column is returned so the
@@ -380,8 +373,8 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		ListParams:      qualified(s, fmt.Sprintf(nameListParams, name)),
 		ListDynamic:     listDynamic,
 		ListFilters:     listFilterData,
-		ListSorts:       listSorts,
-		ListOrder:       pkCol,
+		ListOrder:       listOrd,
+		Cursor:          e.CursorPagination(),
 		UpdateSQL:       updateSQL,
 		DeleteSQL:       deleteSQL,
 		InsertArgs:      strings.Join(insArgs, argSep),

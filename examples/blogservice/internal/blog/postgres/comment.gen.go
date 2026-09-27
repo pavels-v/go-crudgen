@@ -83,6 +83,11 @@ func (r *CommentRepository) Get(ctx context.Context, id int64) (*blog.Comment, e
 }
 
 func (r *CommentRepository) List(ctx context.Context, p blog.CommentListParams) ([]blog.Comment, error) {
+	order := `posted_at, id`
+	if p.Dir == blog.SortDesc {
+		order = `posted_at DESC, id DESC`
+	}
+
 	var (
 		where []string
 		args  []any
@@ -96,15 +101,7 @@ func (r *CommentRepository) List(ctx context.Context, p blog.CommentListParams) 
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	switch p.Sort {
-	case blog.CommentSortPostedAt:
-		q += ` ORDER BY posted_at, id`
-	case blog.CommentSortPostedAtDesc:
-		q += ` ORDER BY posted_at DESC, id`
-	default:
-		q += ` ORDER BY id`
-	}
-	q += ` LIMIT ? OFFSET ?`
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	args = append(args, p.Limit, p.Offset)
 
 	var rows []commentRow

@@ -16,10 +16,10 @@ func validSpec() *Spec {
 			{Name: "Author", Fields: []Field{
 				{Name: "id", Type: TypeUUID, Primary: true},
 			}},
-			{Name: "Post", Fields: []Field{
+			{Name: "Post", Pagination: PaginationCursor, Order: "created_at", Fields: []Field{
 				{Name: "id", Type: TypeUUID, Primary: true},
-				{Name: "author", Type: TypeReferences, Target: "Author", OnDelete: OnDeleteCascade, Filter: true, Sort: true},
-				{Name: "created_at", Type: TypeDatetime, Generate: GenerateOnCreate, Sort: true},
+				{Name: "author", Type: TypeReferences, Target: "Author", OnDelete: OnDeleteCascade, Filter: true},
+				{Name: "created_at", Type: TypeDatetime, Generate: GenerateOnCreate},
 				{Name: "updated_at", Type: TypeDatetime, Generate: GenerateOnWrite},
 			}},
 		},
@@ -30,6 +30,35 @@ func TestValidate_OK(t *testing.T) {
 	t.Parallel()
 
 	require.NoError(t, validSpec().Validate())
+}
+
+func TestValidate_OrderByNotNullFields(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		field Field
+	}{
+		{"primary", Field{Name: "code", Type: TypeString, Primary: true}},
+		{"required", Field{Name: "title", Type: TypeString, Required: true}},
+		{"default", Field{Name: "views", Type: TypeInt64, Default: 0}},
+		{"generated", Field{Name: "created_at", Type: TypeDatetime, Generate: GenerateOnCreate}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := validSpec()
+			s.Entities[0].Order = tc.field.Name
+			if tc.field.Primary {
+				s.Entities[0].Fields = []Field{tc.field}
+			} else {
+				s.Entities[0].Fields = append(s.Entities[0].Fields, tc.field)
+			}
+			require.NoError(t, s.Validate())
+		})
+	}
 }
 
 func TestValidate_Defaults(t *testing.T) {
@@ -118,15 +147,26 @@ func TestValidate_Errors(t *testing.T) {
 		{"filter named like a paging parameter", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "limit", Type: TypeInt32, Filter: true})
 		}},
-		{"sort on bool", func(s *Spec) {
-			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "done", Type: TypeBool, Sort: true})
+		{"filter named like the direction parameter", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: queryDir, Type: TypeString, Filter: true})
+		}},
+		{"order by bool", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "done", Type: TypeBool, Default: false})
+			s.Entities[1].Order = "done"
 		}},
 		{"unknown generate", func(s *Spec) { s.Entities[1].Fields[2].Generate = "on_update" }},
 		{"generate on non-datetime", func(s *Spec) { s.Entities[1].Fields[2].Type = TypeDate }},
 		{"generate with default", func(s *Spec) { s.Entities[1].Fields[2].Default = DefaultNow }},
 		{"generate with required", func(s *Spec) { s.Entities[1].Fields[3].Required = true }},
-		{"sort on json", func(s *Spec) {
-			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "meta", Type: TypeJSON, Sort: true})
+		{"unknown pagination", func(s *Spec) { s.Entities[1].Pagination = "keyset" }},
+		{"order by nullable field", func(s *Spec) { s.Entities[1].Order = "author" }},
+		{"order by unknown field", func(s *Spec) { s.Entities[1].Order = "ghost" }},
+		{"filter named like the cursor parameter", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: queryCursor, Type: TypeString, Filter: true})
+		}},
+		{"order by json", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "meta", Type: TypeJSON, Required: true})
+			s.Entities[1].Order = "meta"
 		}},
 	}
 

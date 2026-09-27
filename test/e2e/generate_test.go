@@ -55,7 +55,7 @@ func TestGenerateBlogExample(t *testing.T) {
 
 	for _, f := range []string{
 		"post.gen.go", "author.gen.go", "comment.gen.go", "tag.gen.go",
-		"errors.gen.go", "date.gen.go",
+		"errors.gen.go", "date.gen.go", "sort.gen.go",
 		filepath.Join("restapi", "post.gen.go"),
 		filepath.Join("restapi", "author.gen.go"),
 		filepath.Join("restapi", "comment.gen.go"),

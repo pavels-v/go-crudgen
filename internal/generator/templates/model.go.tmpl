@@ -13,26 +13,27 @@ type {{ .Struct }} struct {
 {{- end }}
 }
 
-{{- if .Sorts }}
+{{- if .CursorType }}
 
-type {{ .SortType }} string
-
-const (
-{{- range .Sorts }}
-	{{ .Name }} {{ $.SortType }} = {{ printf "%q" .Value }}
+type {{ .CursorType }} struct {
+{{- range .Cursor }}
+	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
 {{- end }}
-)
+}
 {{- end }}
 
 type {{ .ListParams }} struct {
 {{- range .Filters }}
 	{{ .GoName }} {{ .GoType }}
 {{- end }}
-{{- if .Sorts }}
-	Sort {{ .SortType }}
+	Dir SortDir
+{{- if .CursorType }}
+	After *{{ .CursorType }}
 {{- end }}
-	Limit  int
+	Limit int
+{{- if not .CursorType }}
 	Offset int
+{{- end }}
 }
 
 // {{ .Repo }} is the storage interface for {{ .Struct }}.

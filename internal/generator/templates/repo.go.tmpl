@@ -78,8 +78,19 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Mod
 }
 
 func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .Model }}, error) {
+{{- if .Cursor }}
+	order, after := `{{ .ListOrder.Asc }}`, `{{ .ListOrder.AfterAsc }}`
+	if p.Dir == {{ .Domain }}.SortDesc {
+		order, after = `{{ .ListOrder.Desc }}`, `{{ .ListOrder.AfterDesc }}`
+	}
+{{- else }}
+	order := `{{ .ListOrder.Asc }}`
+	if p.Dir == {{ .Domain }}.SortDesc {
+		order = `{{ .ListOrder.Desc }}`
+	}
+{{- end }}
 {{- if .ListDynamic }}
-{{- if .ListFilters }}
+
 	var (
 		where []string
 		args  []any
@@ -90,36 +101,32 @@ func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .
 		args = append(args, *p.{{ .GoName }})
 	}
 {{- end }}
-{{- else }}
-	var args []any
+{{- if .Cursor }}
+	if p.After != nil {
+		where = append(where, after)
+		args = append(args, {{ .ListOrder.AfterArgs }})
+	}
 {{- end }}
 
 	q := `{{ .ListSQL }}`
-{{- if .ListFilters }}
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-{{- end }}
-{{- if .ListSorts }}
-	switch p.Sort {
-{{- range .ListSorts }}
-	case {{ .Name }}:
-		q += ` ORDER BY {{ .OrderBy }}`
-{{- end }}
-	default:
-		q += ` ORDER BY {{ .ListOrder }}`
-	}
+{{- if .Cursor }}
+	q += ` ORDER BY ` + order + ` LIMIT ?`
+	args = append(args, p.Limit)
 {{- else }}
-	q += ` ORDER BY {{ .ListOrder }}`
-{{- end }}
-	q += ` LIMIT ? OFFSET ?`
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	args = append(args, p.Limit, p.Offset)
+{{- end }}
 
 	var rows []{{ .RowStruct }}
 	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 {{- else }}
+
 	var rows []{{ .RowStruct }}
-	if err := r.db.SelectContext(ctx, &rows, `{{ .ListSQL }}`, p.Limit, p.Offset); err != nil {
+	q := `{{ .ListSQL }} ORDER BY ` + order + ` LIMIT $1 OFFSET $2`
+	if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset); err != nil {
 {{- end }}
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
 	}

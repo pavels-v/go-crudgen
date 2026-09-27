@@ -15,6 +15,11 @@ const (
 	queryPostAuthor    = "author"
 )
 
+type postCursor struct {
+	Dir   blog.SortDir    `json:"dir"`
+	After blog.PostCursor `json:"after"`
+}
+
 // CreatePostRequest is the request body for creating the post entity.
 type CreatePostRequest struct {
 	Title     string          `json:"title" validate:"required,min=1,max=200"`
@@ -94,13 +99,20 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryPostPublished, queryPostAuthor, querySort)
+	q := newListQuery(r, queryCursor, queryPostPublished, queryPostAuthor)
+	limit := q.limit()
 	p := blog.PostListParams{
 		Published: queryValue(q, queryPostPublished, strconv.ParseBool),
 		Author:    queryValue(q, queryPostAuthor, parseText[uuid.UUID]),
-		Sort:      querySortValue(q, blog.PostSortTitle, blog.PostSortTitleDesc, blog.PostSortViews, blog.PostSortViewsDesc, blog.PostSortCreatedAt, blog.PostSortCreatedAtDesc),
+		Dir:       q.dir(),
+		Limit:     limit + 1,
 	}
-	p.Limit, p.Offset = q.page()
+	if c := queryCursorValue[postCursor](q); c != nil {
+		if c.Dir != p.Dir {
+			q.invalid(queryCursor)
+		}
+		p.After = &c.After
+	}
 	if q.details != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
 		return
@@ -110,7 +122,23 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, page[blog.Post]{Items: items, Limit: p.Limit, Offset: p.Offset})
+	items, more := trimPage(items, limit)
+	page := cursorPage[blog.Post]{Items: items}
+	if more {
+		last := items[len(items)-1]
+		c := postCursor{
+			Dir: p.Dir,
+			After: blog.PostCursor{
+				CreatedAt: last.CreatedAt,
+				ID:        last.ID,
+			},
+		}
+		if page.NextCursor, err = encodeCursor(c); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	writeBody(w, http.StatusOK, page)
 }
 
 func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {

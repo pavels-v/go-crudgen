@@ -80,6 +80,11 @@ func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Author,
 }
 
 func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([]blog.Author, error) {
+	order := `id`
+	if p.Dir == blog.SortDesc {
+		order = `id DESC`
+	}
+
 	var (
 		where []string
 		args  []any
@@ -93,15 +98,7 @@ func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	switch p.Sort {
-	case blog.AuthorSortBornOn:
-		q += ` ORDER BY born_on, id`
-	case blog.AuthorSortBornOnDesc:
-		q += ` ORDER BY born_on DESC, id`
-	default:
-		q += ` ORDER BY id`
-	}
-	q += ` LIMIT ? OFFSET ?`
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	args = append(args, p.Limit, p.Offset)
 
 	var rows []authorRow

@@ -16,16 +16,9 @@ type Comment struct {
 	PostedAt time.Time `json:"posted_at"`
 }
 
-type CommentSort string
-
-const (
-	CommentSortPostedAt     CommentSort = "posted_at"
-	CommentSortPostedAtDesc CommentSort = "-posted_at"
-)
-
 type CommentListParams struct {
 	Post   *uuid.UUID
-	Sort   CommentSort
+	Dir    SortDir
 	Limit  int
 	Offset int
 }

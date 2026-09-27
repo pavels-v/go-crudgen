@@ -67,6 +67,7 @@ Developer tasks: `make help`.
 
 - `<entity>.gen.go` - model and repository interface, in the root package named by `package`.
 - `errors.gen.go` - sentinel errors shared by all layers.
+- `sort.gen.go` - `SortDir` for List ordering.
 - `date.gen.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
 - `restapi/<entity>.gen.go` - `Create`/`Update` request DTOs and CRUD handlers.
 - `restapi/router.gen.go` - `NewRouter`, `Deps`, JSON and pagination helpers.
@@ -79,12 +80,12 @@ Developer tasks: `make help`.
 | Method   | Path             | Action                                       |
 | -------- | ---------------- | -------------------------------------------- |
 | `POST`   | `/{plural}`      | Create                                       |
-| `GET`    | `/{plural}`      | List (`?limit`, `?offset`, `?sort`, filters) |
+| `GET`    | `/{plural}`      | List (`?limit`, `?offset` or `?cursor`, `?dir`, filters) |
 | `GET`    | `/{plural}/{id}` | Read                                         |
 | `PUT`    | `/{plural}/{id}` | Update                                       |
 | `DELETE` | `/{plural}/{id}` | Delete                                       |
 
-Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset"}`), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
+Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset", "has_more"}`, or `{"items", "next_cursor"}` under cursor pagination), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
 
 Errors: `400` malformed body, id or query, `404` not found, `405` method not allowed, `409` unique violation or deleting a referenced row, `413` body over 1 MiB, `422` failed validation or unknown reference, `500` without internal details.
 
@@ -106,11 +107,13 @@ entities:
       - { name: updated_at, type: datetime, generate: on_write }
 ```
 
+- `order: <field>` sets the List order (default: primary key, ties broken by it); clients pick `?dir=asc|desc` (default `asc`); the field must be NOT NULL.
+- `pagination: cursor` pages List by an opaque keyset `?cursor=` instead of `?offset=`.
 - `package` names the root package; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
-- Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `sort`, `generate`.
+- Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
 - `generate: on_create` sets a `datetime` to `now()` on insert, `generate: on_write` on insert and every update; both are read-only in the API.
-- `filter: true` makes List accept `?<name>=<value>` (equality); `sort: true` accepts `?sort=<name>` or `?sort=-<name>`; unknown or repeated query parameters are rejected; pair them with `index: true`.
+- `filter: true` makes List accept `?<name>=<value>` (equality); unknown or repeated query parameters are rejected; pair filters and `order` with `index: true`.
 - Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
 - `uuid` keys are generated in Go (v4) with `gen_random_uuid()` as the column default; `int32` and `int64` keys use `IDENTITY`; other keys are required in Create.
 - `default` takes a literal of the field's type (`string`, `text`, `int32`, `int64`, `float`, `bool`) or `now` for `datetime`; the column is `NOT NULL DEFAULT` and the handler fills an omitted value.
@@ -125,8 +128,9 @@ entities:
 - [x] PostgreSQL repository (`sqlx` / `database/sql`)
 - [x] Migrations (goose SQL schema per entity)
 - [x] List endpoint: pagination (`?limit` / `?offset`)
+- [x] List endpoint: cursor pagination (`?cursor`)
 - [x] List endpoint: filtering (equality)
-- [x] List endpoint: sorting
+- [x] List endpoint: ordering (`order` + `?dir`)
 - [x] Relations (`belongs_to` / `has_many`)
   - [x] `belongs_to` via `references` fields
   - [x] `has_many` via `filter: true` on the reference field

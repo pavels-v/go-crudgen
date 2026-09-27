@@ -77,8 +77,14 @@ func (r *TagRepository) Get(ctx context.Context, id string) (*blog.Tag, error) {
 }
 
 func (r *TagRepository) List(ctx context.Context, p blog.TagListParams) ([]blog.Tag, error) {
+	order := `slug`
+	if p.Dir == blog.SortDesc {
+		order = `slug DESC`
+	}
+
 	var rows []tagRow
-	if err := r.db.SelectContext(ctx, &rows, `SELECT slug, label, color, weight FROM tags ORDER BY slug LIMIT $1 OFFSET $2`, p.Limit, p.Offset); err != nil {
+	q := `SELECT slug, label, color, weight FROM tags ORDER BY ` + order + ` LIMIT $1 OFFSET $2`
+	if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset); err != nil {
 		return nil, fmt.Errorf("list tag: %w", err)
 	}
 	out := make([]blog.Tag, len(rows))

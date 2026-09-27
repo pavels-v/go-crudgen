@@ -50,13 +50,15 @@ var unsortableTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-onl
 const (
 	queryLimit  = "limit"
 	queryOffset = "offset"
-	querySort   = "sort"
+	queryDir    = "dir"
+	queryCursor = "cursor"
 )
 
 var reservedQueryNames = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	queryLimit:  {},
 	queryOffset: {},
-	querySort:   {},
+	queryDir:    {},
+	queryCursor: {},
 }
 
 // Validate checks the spec for structural errors.
@@ -84,6 +86,9 @@ func (s *Spec) Validate() error {
 
 		if len(e.Fields) == 0 {
 			return fmt.Errorf("entity %q has no fields", e.Name)
+		}
+		if e.Pagination != "" && e.Pagination != PaginationOffset && e.Pagination != PaginationCursor {
+			return fmt.Errorf("entity %q has unknown pagination %q: use %q or %q", e.Name, e.Pagination, PaginationOffset, PaginationCursor)
 		}
 		for _, f := range e.Fields {
 			if f.Name == "" {
@@ -124,6 +129,9 @@ func (s *Spec) Validate() error {
 		default:
 			return fmt.Errorf("entity %q has a composite primary key, which is not supported: mark exactly one field with primary: true", e.Name)
 		}
+		if err := validateOrder(e); err != nil {
+			return err
+		}
 	}
 
 	// Reference targets are validated in a second pass so they may point at any
@@ -159,10 +167,25 @@ func validateListModifiers(e *Entity, f Field) error {
 			return fmt.Errorf("entity %q field %q cannot be a filter: the name is a reserved query parameter", e.Name, f.Name)
 		}
 	}
-	if _, ok := unsortableTypes[f.Type]; ok && f.Sort {
-		return fmt.Errorf("entity %q field %q of type %q cannot be sorted", e.Name, f.Name, f.Type)
+	return nil
+}
+
+func validateOrder(e *Entity) error {
+	f, ok := e.OrderField()
+	switch {
+	case !ok:
+		return fmt.Errorf("entity %q orders by unknown field %q", e.Name, e.Order)
+	case isUnsortable(f.Type):
+		return fmt.Errorf("entity %q cannot order by field %q of type %q", e.Name, f.Name, f.Type)
+	case !f.Primary && !f.Required && f.Default == nil && f.Generate == "":
+		return fmt.Errorf("entity %q cannot order by field %q, which can be NULL: make it required or give it a default", e.Name, f.Name)
 	}
 	return nil
+}
+
+func isUnsortable(fieldType string) bool {
+	_, ok := unsortableTypes[fieldType]
+	return ok
 }
 
 func validateGenerate(e *Entity, f Field) error {

@@ -107,15 +107,14 @@ func TestIntegration(t *testing.T) {
 	})
 
 	t.Run("list returns persisted posts", func(t *testing.T) {
-		var list page[blog.Post]
+		var list cursorPage[blog.Post]
 		do(t, srv, http.MethodGet, "/posts?limit=10", nil, &list, http.StatusOK)
 		require.NotEmpty(t, list.Items)
-		require.Equal(t, 10, list.Limit)
 	})
 
-	t.Run("list filters and sorts in SQL", func(t *testing.T) {
+	t.Run("list filters, orders and pages in SQL", func(t *testing.T) {
 		var author blog.Author
-		do(t, srv, http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: "sorted@example.com"}, &author, http.StatusCreated)
+		do(t, srv, http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: "ordered@example.com"}, &author, http.StatusCreated)
 		for _, req := range []restapi.CreatePostRequest{
 			{Title: "Beta", Author: &author.ID, Views: new(int64(2))},
 			{Title: "Alpha", Author: &author.ID, Views: new(int64(3)), Published: new(true)},
@@ -125,7 +124,7 @@ func TestIntegration(t *testing.T) {
 		}
 
 		titles := func(query string) []string {
-			var list page[blog.Post]
+			var list cursorPage[blog.Post]
 			do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+query, nil, &list, http.StatusOK)
 			out := make([]string, len(list.Items))
 			for i, p := range list.Items {
@@ -133,11 +132,32 @@ func TestIntegration(t *testing.T) {
 			}
 			return out
 		}
-		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=title"))
-		require.Equal(t, []string{"Gamma", "Beta", "Alpha"}, titles("&sort=-title"))
-		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=-views"))
+		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, titles(""))
+		require.Equal(t, []string{"Gamma", "Alpha", "Beta"}, titles("&dir=desc"))
 		require.Equal(t, []string{"Alpha"}, titles("&published=true"))
-		require.Equal(t, []string{"Beta"}, titles("&published=false&sort=title&limit=1"))
+		require.Equal(t, []string{"Beta"}, titles("&published=false&limit=1"))
+
+		walk := func(query string) []string {
+			var out []string
+			path := "/posts?author=" + author.ID.String() + "&limit=1" + query
+			next := path
+			for range 10 {
+				var list cursorPage[blog.Post]
+				do(t, srv, http.MethodGet, next, nil, &list, http.StatusOK)
+				for _, p := range list.Items {
+					out = append(out, p.Title)
+				}
+				if list.NextCursor == "" {
+					return out
+				}
+				next = path + "&cursor=" + list.NextCursor
+			}
+			require.Fail(t, "cursor walk did not end", query)
+			return nil
+		}
+		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, walk(""))
+		require.Equal(t, []string{"Gamma", "Alpha", "Beta"}, walk("&dir=desc"))
+		require.Equal(t, []string{"Beta", "Gamma"}, walk("&published=false"))
 	})
 
 	t.Run("constraint violations map to client errors", func(t *testing.T) {
@@ -210,12 +230,17 @@ func TestIntegration(t *testing.T) {
 		require.Zero(t, first.Likes)
 		require.WithinDuration(t, before, first.PostedAt, time.Minute)
 
+		var page offsetPage[blog.Comment]
+		do(t, srv, http.MethodGet, "/comments?post="+post.ID.String()+"&limit=1", nil, &page, http.StatusOK)
+		require.Len(t, page.Items, 1)
+		require.True(t, page.HasMore)
+
 		firstPath := "/comments/" + strconv.FormatInt(first.ID, 10)
 		do(t, srv, http.MethodDelete, firstPath, nil, nil, http.StatusNoContent)
 		do(t, srv, http.MethodGet, firstPath, nil, nil, http.StatusNotFound)
 		do(t, srv, http.MethodDelete, firstPath, nil, nil, http.StatusNotFound)
 
-		var list page[blog.Comment]
+		var list offsetPage[blog.Comment]
 		do(t, srv, http.MethodGet, "/comments?post="+post.ID.String(), nil, &list, http.StatusOK)
 		require.Len(t, list.Items, 1)
 		require.Equal(t, second.ID, list.Items[0].ID)
@@ -274,10 +299,16 @@ type envelope struct {
 	Error jsontext.Value `json:"error"`
 }
 
-type page[T any] struct {
-	Items  []T `json:"items"`
-	Limit  int `json:"limit"`
-	Offset int `json:"offset"`
+type offsetPage[T any] struct {
+	Items   []T  `json:"items"`
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"has_more"`
+}
+
+type cursorPage[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"next_cursor"`
 }
 
 type apiError struct {
