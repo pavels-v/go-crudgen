@@ -149,15 +149,16 @@ type repoData struct {
 
 	CreateSQL string
 	GetSQL    string
-	ListSQL   string // SELECT ... FROM prefix; WHERE, ORDER BY and paging are appended
+	ListSQL   string // full ascending query, or the SELECT ... FROM prefix when ListDynamic
+	ListDesc  string // full descending query, unless ListDynamic
 	UpdateSQL string
 	DeleteSQL string
 
 	ListParams  string // qualified domain params, e.g. "blog.PostListParams"
+	ListDynamic bool   // WHERE is assembled from ListFilters and the cursor
 	ListFilters []repoFilter
-	ListSorts   []sortOption // Name is the qualified domain constant
-	ListOrder   sortOption   // default ORDER BY, by primary key
-	Cursor      bool         // keyset pagination by p.After instead of OFFSET
+	ListOrder   sortOption
+	Cursor      bool // keyset pagination by p.After instead of OFFSET
 
 	InsertArgs string // create args, e.g. "row.ID, row.Title"
 	UpdateArgs string // update args: non-PK fields then PK, e.g. "row.Title, row.ID"
@@ -296,14 +297,17 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	for _, lf := range filters {
 		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, snakeCase(lf.Field.Name))})
 	}
-	if len(listFilterData) > 0 || e.CursorPagination() {
+	listDynamic := len(listFilterData) > 0 || e.CursorPagination()
+	if listDynamic {
 		impSet[importStrings] = struct{}{}
 	}
-	listSorts := sortOptions(e)
-	for i := range listSorts {
-		listSorts[i].Name = qualified(s, listSorts[i].Name)
-	}
+	listOrd := listOrder(e)
 	listSQL := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, ", "), table)
+	var listDesc string
+	if !listDynamic {
+		listDesc = fmt.Sprintf("%s ORDER BY %s LIMIT $1 OFFSET $2", listSQL, listOrd.Desc)
+		listSQL = fmt.Sprintf("%s ORDER BY %s LIMIT $1 OFFSET $2", listSQL, listOrd.Asc)
+	}
 
 	// UPDATE: non-PK fields get placeholders $1..$n, the PK gets $n+1; on_write
 	// columns are reset to now(), and every generated column is returned so the
@@ -373,9 +377,10 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		GetSQL:          getSQL,
 		ListSQL:         listSQL,
 		ListParams:      qualified(s, fmt.Sprintf(nameListParams, name)),
+		ListDesc:        listDesc,
+		ListDynamic:     listDynamic,
 		ListFilters:     listFilterData,
-		ListSorts:       listSorts,
-		ListOrder:       keyOrder(pk),
+		ListOrder:       listOrd,
 		Cursor:          e.CursorPagination(),
 		UpdateSQL:       updateSQL,
 		DeleteSQL:       deleteSQL,

@@ -87,11 +87,10 @@ func (h *CommentHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryOffset, queryCommentPost, querySort)
+	q := newListQuery(r, queryOffset, queryCommentPost)
 	limit := q.limit()
 	p := blog.CommentListParams{
 		Post:   queryValue(q, queryCommentPost, parseText[uuid.UUID]),
-		Sort:   querySortValue(q, blog.CommentSortPostedAt),
 		Dir:    q.dir(),
 		Limit:  limit + 1,
 		Offset: q.offset(),

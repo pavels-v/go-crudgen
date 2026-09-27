@@ -411,7 +411,7 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"m.ID = uuid.New() row := newPostRow(m)",
 		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
-		"case desc: order = `id DESC` default: order = `id` }",
+		"q := `SELECT id, title, body, created_at, updated_at FROM posts ORDER BY id LIMIT $1 OFFSET $2`",
 		// the primary key is the trailing placeholder in the update
 		"UPDATE posts SET title = $1, body = $2, updated_at = now() WHERE id = $3 RETURNING created_at, updated_at",
 		"DELETE FROM posts WHERE id = $1",
@@ -438,8 +438,8 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	got := renderRepoSrc(t, s, "Account")
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
-		"var args []any desc := p.Dir == app.SortDesc var order string switch { case desc: order = `id DESC` default: order = `id` }",
-		"q := `SELECT id, name FROM accounts` q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
+		"q := `SELECT id, name FROM accounts ORDER BY id LIMIT $1 OFFSET $2` if p.Dir == app.SortDesc { q = `SELECT id, name FROM accounts ORDER BY id DESC LIMIT $1 OFFSET $2` }",
+		"r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
@@ -449,7 +449,7 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	}
 }
 
-func TestRenderList_FiltersAndSort(t *testing.T) {
+func TestRenderList_FiltersAndOrder(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{
@@ -457,17 +457,17 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 		Module:  "example.com/blog",
 		Entities: []spec.Entity{
 			{Name: "Author", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
-			{Name: "Post", Plural: "posts", Fields: []spec.Field{
-				{Name: "id", Type: spec.TypeUUID, Primary: true, Sort: true},
-				{Name: "title", Type: spec.TypeString, Required: true, Filter: true, Sort: true},
+			{Name: "Post", Plural: "posts", Order: "title", Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "title", Type: spec.TypeString, Required: true, Filter: true},
 				{Name: "author", Type: spec.TypeReferences, Target: "Author", Filter: true},
 				{Name: "published_on", Type: spec.TypeDate, Filter: true},
 				{Name: "views", Type: spec.TypeInt32, Filter: true},
 				{Name: "published", Type: spec.TypeBool, Filter: true},
 			}},
-			{Name: "Tag", Fields: []spec.Field{
+			{Name: "Tag", Order: "label", Fields: []spec.Field{
 				{Name: "slug", Type: spec.TypeString, Primary: true},
-				{Name: "label", Type: spec.TypeString, Sort: true},
+				{Name: "label", Type: spec.TypeString, Required: true},
 			}},
 		},
 	}
@@ -480,36 +480,33 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 		absent []string
 	}{
 		{
-			name:   "domain params and sort constants",
+			name:   "domain params",
 			render: render,
 			entity: "Post",
 			want: []string{
-				"type PostSort string",
-				`PostSortID PostSort = "id"`,
-				`PostSortTitle PostSort = "title"`,
-				"type PostListParams struct { Title *string Author *uuid.UUID PublishedOn *Date Views *int32 Published *bool Sort PostSort Dir SortDir Limit int Offset int }",
+				"type PostListParams struct { Title *string Author *uuid.UUID PublishedOn *Date Views *int32 Published *bool Dir SortDir Limit int Offset int }",
 				"List(ctx context.Context, p PostListParams) ([]Post, error)",
 			},
 		},
 		{
-			name:   "handler parses filters and sort",
+			name:   "handler parses filters and direction",
 			render: renderHandlerSrc,
 			entity: "Post",
 			want: []string{
 				`queryPostTitle = "title"`,
 				`queryPostPublishedOn = "published_on"`,
-				"q := newListQuery(r, queryOffset, queryPostTitle, queryPostAuthor, queryPostPublishedOn, queryPostViews, queryPostPublished, querySort)",
+				"q := newListQuery(r, queryOffset, queryPostTitle, queryPostAuthor, queryPostPublishedOn, queryPostViews, queryPostPublished)",
 				"Title: queryValue(q, queryPostTitle, parseString),",
 				"Author: queryValue(q, queryPostAuthor, parseText[uuid.UUID]),",
 				"PublishedOn: queryValue(q, queryPostPublishedOn, parseText[blog.Date]),",
 				"Views: queryValue(q, queryPostViews, parseInt32),",
 				"Published: queryValue(q, queryPostPublished, strconv.ParseBool),",
-				"Sort: querySortValue(q, blog.PostSortID, blog.PostSortTitle), Dir: q.dir(),",
+				"Dir: q.dir(),",
 				`"strconv"`,
 			},
 		},
 		{
-			name:   "repository assembles where and order by",
+			name:   "repository assembles where and orders by the entity field",
 			render: renderRepoSrc,
 			entity: "Post",
 			want: []string{
@@ -517,32 +514,28 @@ func TestRenderList_FiltersAndSort(t *testing.T) {
 				"if p.PublishedOn != nil { where = append(where, `published_on = ?`)",
 				"q := `SELECT id, title, author, published_on, views, published FROM posts`",
 				"q += ` WHERE ` + strings.Join(where, ` AND `)",
-				"case p.Sort == blog.PostSortID && desc: order = `id DESC` case p.Sort == blog.PostSortID: order = `id`",
-				"case p.Sort == blog.PostSortTitle && desc: order = `title DESC, id DESC` case p.Sort == blog.PostSortTitle: order = `title, id`",
-				"case desc: order = `id DESC` default: order = `id` }",
-				"q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
+				"if desc { q += ` ORDER BY title DESC, id DESC LIMIT ? OFFSET ?` } else { q += ` ORDER BY title, id LIMIT ? OFFSET ?` }",
+				"args = append(args, p.Limit, p.Offset)",
 				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
 				`"strings"`,
 			},
 		},
 		{
-			name:   "sort without filters",
+			name:   "no filters keeps two static queries",
 			render: renderRepoSrc,
 			entity: "Tag",
 			want: []string{
-				"var args []any desc := p.Dir == blog.SortDesc",
-				"case p.Sort == blog.TagSortLabel && desc: order = `label DESC, slug DESC`",
-				"q := `SELECT slug, label FROM tags` q += ` ORDER BY `",
+				"q := `SELECT slug, label FROM tags ORDER BY label, slug LIMIT $1 OFFSET $2` if p.Dir == blog.SortDesc { q = `SELECT slug, label FROM tags ORDER BY label DESC, slug DESC LIMIT $1 OFFSET $2` }",
 			},
-			absent: []string{"where = append", `"strings"`},
+			absent: []string{"where = append", "Rebind", `"strings"`},
 		},
 		{
-			name:   "handler without filters accepts only sort",
+			name:   "handler without filters accepts only paging and direction",
 			render: renderHandlerSrc,
 			entity: "Tag",
 			want: []string{
-				"q := newListQuery(r, queryOffset, querySort)",
-				"p := blog.TagListParams{ Sort: querySortValue(q, blog.TagSortLabel), Dir: q.dir(),",
+				"q := newListQuery(r, queryOffset)",
+				"p := blog.TagListParams{ Dir: q.dir(),",
 			},
 			absent: []string{"queryValue("},
 		},
@@ -570,10 +563,10 @@ func TestRenderList_CursorPagination(t *testing.T) {
 		Package: "blog",
 		Module:  "example.com/blog",
 		Entities: []spec.Entity{
-			{Name: "Post", Plural: "posts", Pagination: spec.PaginationCursor, Fields: []spec.Field{
+			{Name: "Post", Plural: "posts", Pagination: spec.PaginationCursor, Order: "created_at", Fields: []spec.Field{
 				{Name: "id", Type: spec.TypeUUID, Primary: true},
-				{Name: "title", Type: spec.TypeString, Required: true, Filter: true, Sort: true},
-				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate, Sort: true},
+				{Name: "title", Type: spec.TypeString, Required: true, Filter: true},
+				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate},
 			}},
 			{Name: "Tag", Pagination: spec.PaginationCursor, Fields: []spec.Field{
 				{Name: "slug", Type: spec.TypeString, Primary: true},
@@ -593,8 +586,8 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			render: render,
 			entity: "Post",
 			want: []string{
-				"type PostCursor struct { Title string `json:\"title\"` CreatedAt time.Time `json:\"created_at\"` ID uuid.UUID `json:\"id\"` }",
-				"type PostListParams struct { Title *string Sort PostSort Dir SortDir After *PostCursor Limit int }",
+				"type PostCursor struct { CreatedAt time.Time `json:\"created_at\"` ID uuid.UUID `json:\"id\"` }",
+				"type PostListParams struct { Title *string Dir SortDir After *PostCursor Limit int }",
 			},
 			absent: []string{"Offset"},
 		},
@@ -603,37 +596,32 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			render: renderRepoSrc,
 			entity: "Post",
 			want: []string{
-				"case p.Sort == blog.PostSortTitle && desc: order = `title DESC, id DESC` if p.After != nil { where = append(where, `(title, id) < (?, ?)`) args = append(args, p.After.Title, p.After.ID) }",
-				"case p.Sort == blog.PostSortCreatedAt: order = `created_at, id` if p.After != nil { where = append(where, `(created_at, id) > (?, ?)`)",
-				"case desc: order = `id DESC` if p.After != nil { where = append(where, `id < ?`) args = append(args, p.After.ID) }",
-				"default: order = `id` if p.After != nil { where = append(where, `id > ?`)",
-				"q += ` ORDER BY ` + order + ` LIMIT ?` args = append(args, p.Limit)",
+				"desc := p.Dir == blog.SortDesc if p.After != nil { if desc { where = append(where, `(created_at, id) < (?, ?)`) } else { where = append(where, `(created_at, id) > (?, ?)`) } args = append(args, p.After.CreatedAt, p.After.ID) }",
+				"if desc { q += ` ORDER BY created_at DESC, id DESC LIMIT ?` } else { q += ` ORDER BY created_at, id LIMIT ?` } args = append(args, p.Limit)",
 			},
 			absent: []string{"OFFSET"},
+		},
+		{
+			name:   "key-ordered repository compares the key alone",
+			render: renderRepoSrc,
+			entity: "Tag",
+			want: []string{
+				"where = append(where, `slug < ?`) } else { where = append(where, `slug > ?`) } args = append(args, p.After.Slug)",
+			},
 		},
 		{
 			name:   "handler decodes and encodes the cursor",
 			render: renderHandlerSrc,
 			entity: "Post",
 			want: []string{
-				"type postCursor struct { Sort blog.PostSort `json:\"sort\"` Dir blog.SortDir `json:\"dir\"` After blog.PostCursor `json:\"after\"` }",
-				"q := newListQuery(r, queryCursor, queryPostTitle, querySort)",
-				"if c := queryCursorValue[postCursor](q); c != nil { if c.Sort != p.Sort || c.Dir != p.Dir { q.invalid(queryCursor) } p.After = &c.After }",
+				"type postCursor struct { Dir blog.SortDir `json:\"dir\"` After blog.PostCursor `json:\"after\"` }",
+				"q := newListQuery(r, queryCursor, queryPostTitle)",
+				"if c := queryCursorValue[postCursor](q); c != nil { if c.Dir != p.Dir { q.invalid(queryCursor) } p.After = &c.After }",
 				"page := cursorPage[blog.Post]{Items: items}",
-				"After: blog.PostCursor{ Title: last.Title, CreatedAt: last.CreatedAt, ID: last.ID, },",
+				"c := postCursor{ Dir: p.Dir, After: blog.PostCursor{ CreatedAt: last.CreatedAt, ID: last.ID, }, }",
 				"if page.NextCursor, err = encodeCursor(c); err != nil {",
 			},
 			absent: []string{"q.offset()", "offsetPage"},
-		},
-		{
-			name:   "cursor without sort fields carries only the key",
-			render: renderHandlerSrc,
-			entity: "Tag",
-			want: []string{
-				"type tagCursor struct { Dir blog.SortDir `json:\"dir\"` After blog.TagCursor `json:\"after\"` }",
-				"if c.Dir != p.Dir {",
-			},
-			absent: []string{"c.Sort"},
 		},
 	}
 

@@ -317,9 +317,7 @@ type modelData struct {
 	PKGoType   string
 	Fields     []modelField
 	ListParams string // e.g. "PostListParams"
-	SortType   string // e.g. "PostSort"
 	Filters    []modelField
-	Sorts      []sortOption
 	CursorType string // e.g. "PostCursor", empty under offset pagination
 	Cursor     []modelField
 }
@@ -349,8 +347,6 @@ type handlerData struct {
 	UpdateAssign []assign // fields assigned from the update request (PK excluded)
 	ListParams   string   // qualified domain params, e.g. "blog.PostListParams"
 	Filters      []handlerFilter
-	Sorts        []string // qualified domain sort constants
-	SortType     string   // qualified, e.g. "blog.PostSort"
 	SortDir      string   // qualified, e.g. "blog.SortDir"
 	Cursor       string   // wire cursor type, e.g. "postCursor", empty under offset pagination
 	CursorType   string   // qualified domain cursor, e.g. "blog.PostCursor"
@@ -486,7 +482,6 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		CreateName: fmt.Sprintf(nameCreateRequest, name),
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 		ListParams: qualified(s, fmt.Sprintf(nameListParams, name)),
-		SortType:   qualified(s, fmt.Sprintf(nameSortType, name)),
 		SortDir:    qualified(s, nameSortDir),
 		PK: pkData{
 			GoName:   pascalCase(pk.Name),
@@ -561,9 +556,6 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			Parse:  parse,
 		})
 	}
-	for _, so := range sortOptions(e) {
-		data.Sorts = append(data.Sorts, qualified(s, so.Name))
-	}
 	if e.CursorPagination() {
 		data.Cursor = unexport(fmt.Sprintf(nameCursor, name))
 		data.CursorType = qualified(s, fmt.Sprintf(nameCursor, name))
@@ -627,8 +619,6 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		Repo:       fmt.Sprintf(nameRepo, name),
 		PKGoType:   pkType.expr,
 		ListParams: fmt.Sprintf(nameListParams, name),
-		SortType:   fmt.Sprintf(nameSortType, name),
-		Sorts:      sortOptions(e),
 	}
 	imports := map[string]struct{}{importContext: {}}
 	for _, lf := range filters {

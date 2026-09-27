@@ -112,7 +112,7 @@ func TestIntegration(t *testing.T) {
 		require.NotEmpty(t, list.Items)
 	})
 
-	t.Run("list filters and sorts in SQL", func(t *testing.T) {
+	t.Run("list filters, orders and pages in SQL", func(t *testing.T) {
 		var author blog.Author
 		do(t, srv, http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: "sorted@example.com"}, &author, http.StatusCreated)
 		for _, req := range []restapi.CreatePostRequest{
@@ -132,11 +132,10 @@ func TestIntegration(t *testing.T) {
 			}
 			return out
 		}
-		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=title"))
-		require.Equal(t, []string{"Gamma", "Beta", "Alpha"}, titles("&sort=title&dir=desc"))
-		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, titles("&sort=views&dir=desc"))
+		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, titles(""))
+		require.Equal(t, []string{"Gamma", "Alpha", "Beta"}, titles("&dir=desc"))
 		require.Equal(t, []string{"Alpha"}, titles("&published=true"))
-		require.Equal(t, []string{"Beta"}, titles("&published=false&sort=title&limit=1"))
+		require.Equal(t, []string{"Beta"}, titles("&published=false&limit=1"))
 
 		walk := func(query string) []string {
 			var out []string
@@ -156,11 +155,9 @@ func TestIntegration(t *testing.T) {
 			require.Fail(t, "cursor walk did not end", query)
 			return nil
 		}
-		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, walk("&sort=title"))
-		require.Equal(t, []string{"Gamma", "Beta", "Alpha"}, walk("&sort=title&dir=desc"))
-		require.Equal(t, []string{"Alpha", "Beta", "Gamma"}, walk("&sort=views&dir=desc"))
-		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, walk("&sort=created_at"))
-		require.ElementsMatch(t, []string{"Alpha", "Beta", "Gamma"}, walk("&dir=desc"))
+		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, walk(""))
+		require.Equal(t, []string{"Gamma", "Alpha", "Beta"}, walk("&dir=desc"))
+		require.Equal(t, []string{"Beta", "Gamma"}, walk("&published=false"))
 	})
 
 	t.Run("constraint violations map to client errors", func(t *testing.T) {

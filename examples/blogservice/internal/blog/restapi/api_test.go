@@ -312,12 +312,11 @@ func TestErrorResponses(t *testing.T) {
 			[]errorDetail{{Field: queryPostPublished, Reason: reasonDuplicateField}},
 		},
 		{
-			"invalid filter and sort", http.MethodGet, "/posts?author=nope&published=maybe&sort=body&dir=up", "",
+			"invalid filter and direction", http.MethodGet, "/posts?author=nope&published=maybe&dir=up", "",
 			http.StatusBadRequest, codeInvalidQuery,
 			[]errorDetail{
 				{Field: queryPostPublished, Reason: reasonInvalidValue},
 				{Field: queryPostAuthor, Reason: reasonInvalidValue},
-				{Field: querySort, Reason: reasonInvalidValue},
 				{Field: queryDir, Reason: reasonInvalidValue},
 			},
 		},
@@ -360,7 +359,7 @@ func TestErrorResponses(t *testing.T) {
 	}
 }
 
-func TestListParsesFiltersAndSort(t *testing.T) {
+func TestListParsesFiltersAndDirection(t *testing.T) {
 	t.Parallel()
 
 	author := uuid.New()
@@ -371,11 +370,10 @@ func TestListParsesFiltersAndSort(t *testing.T) {
 	}{
 		{"defaults", "", blog.PostListParams{Dir: blog.SortAsc, Limit: defaultLimit + 1}},
 		{
-			"filters, sort and page", "?author=" + author.String() + "&published=true&sort=title&dir=desc&limit=5",
-			blog.PostListParams{Author: &author, Published: new(true), Sort: blog.PostSortTitle, Dir: blog.SortDesc, Limit: 6},
+			"filters, direction and limit", "?author=" + author.String() + "&published=true&dir=desc&limit=5",
+			blog.PostListParams{Author: &author, Published: new(true), Dir: blog.SortDesc, Limit: 6},
 		},
-		{"ascending sort", "?sort=views&dir=asc", blog.PostListParams{Sort: blog.PostSortViews, Dir: blog.SortAsc, Limit: defaultLimit + 1}},
-		{"direction without sort", "?dir=desc", blog.PostListParams{Dir: blog.SortDesc, Limit: defaultLimit + 1}},
+		{"explicit ascending", "?dir=asc", blog.PostListParams{Dir: blog.SortAsc, Limit: defaultLimit + 1}},
 	}
 
 	for _, tc := range cases {
@@ -440,7 +438,7 @@ func TestCursorListRoundTripsNextCursor(t *testing.T) {
 		do(t, srv, http.MethodPost, "/posts", CreatePostRequest{Title: title}, nil, http.StatusCreated)
 	}
 
-	const firstPage = "/posts?sort=title&dir=desc&limit=2"
+	const firstPage = "/posts?dir=desc&limit=2"
 	var first cursorPage[blog.Post]
 	do(t, srv, http.MethodGet, firstPage, nil, &first, http.StatusOK)
 	require.Len(t, first.Items, 2)
@@ -449,24 +447,10 @@ func TestCursorListRoundTripsNextCursor(t *testing.T) {
 	last := first.Items[1]
 	var second cursorPage[blog.Post]
 	do(t, srv, http.MethodGet, firstPage+"&cursor="+first.NextCursor, nil, &second, http.StatusOK)
-	require.Equal(t, &blog.PostCursor{Title: last.Title, Views: last.Views, CreatedAt: last.CreatedAt, ID: last.ID}, posts.listed[1].After)
+	require.Equal(t, &blog.PostCursor{CreatedAt: last.CreatedAt, ID: last.ID}, posts.listed[1].After)
 
-	cases := []struct {
-		name  string
-		query string
-	}{
-		{"different sort", "?sort=views&dir=desc"},
-		{"different direction", "?sort=title&dir=asc"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := doError(t, srv, http.MethodGet, "/posts"+tc.query+"&cursor="+first.NextCursor, "", http.StatusBadRequest)
-			require.Equal(t, []errorDetail{{Field: queryCursor, Reason: reasonInvalidValue}}, got.Details)
-		})
-	}
+	got := doError(t, srv, http.MethodGet, "/posts?dir=asc&cursor="+first.NextCursor, "", http.StatusBadRequest)
+	require.Equal(t, []errorDetail{{Field: queryCursor, Reason: reasonInvalidValue}}, got.Details, "a cursor keeps its direction")
 }
 
 func TestMethodNotAllowedListsAllowedMethods(t *testing.T) {

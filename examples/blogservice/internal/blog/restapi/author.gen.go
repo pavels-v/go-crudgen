@@ -82,11 +82,10 @@ func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryOffset, queryAuthorEmail, querySort)
+	q := newListQuery(r, queryOffset, queryAuthorEmail)
 	limit := q.limit()
 	p := blog.AuthorListParams{
 		Email:  queryValue(q, queryAuthorEmail, parseString),
-		Sort:   querySortValue(q, blog.AuthorSortBornOn),
 		Dir:    q.dir(),
 		Limit:  limit + 1,
 		Offset: q.offset(),

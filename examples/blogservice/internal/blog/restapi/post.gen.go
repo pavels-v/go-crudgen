@@ -16,7 +16,6 @@ const (
 )
 
 type postCursor struct {
-	Sort  blog.PostSort   `json:"sort"`
 	Dir   blog.SortDir    `json:"dir"`
 	After blog.PostCursor `json:"after"`
 }
@@ -100,17 +99,16 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryCursor, queryPostPublished, queryPostAuthor, querySort)
+	q := newListQuery(r, queryCursor, queryPostPublished, queryPostAuthor)
 	limit := q.limit()
 	p := blog.PostListParams{
 		Published: queryValue(q, queryPostPublished, strconv.ParseBool),
 		Author:    queryValue(q, queryPostAuthor, parseText[uuid.UUID]),
-		Sort:      querySortValue(q, blog.PostSortTitle, blog.PostSortViews, blog.PostSortCreatedAt),
 		Dir:       q.dir(),
 		Limit:     limit + 1,
 	}
 	if c := queryCursorValue[postCursor](q); c != nil {
-		if c.Sort != p.Sort || c.Dir != p.Dir {
+		if c.Dir != p.Dir {
 			q.invalid(queryCursor)
 		}
 		p.After = &c.After
@@ -129,11 +127,8 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 	if more {
 		last := items[len(items)-1]
 		c := postCursor{
-			Sort: p.Sort,
-			Dir:  p.Dir,
+			Dir: p.Dir,
 			After: blog.PostCursor{
-				Title:     last.Title,
-				Views:     last.Views,
 				CreatedAt: last.CreatedAt,
 				ID:        last.ID,
 			},

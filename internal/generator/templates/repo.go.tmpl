@@ -78,7 +78,7 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Mod
 }
 
 func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .Model }}, error) {
-{{- if or .ListFilters .Cursor }}
+{{- if .ListDynamic }}
 	var (
 		where []string
 		args  []any
@@ -89,65 +89,49 @@ func (r *{{ .Receiver }}) List(ctx context.Context, p {{ .ListParams }}) ([]{{ .
 		args = append(args, *p.{{ .GoName }})
 	}
 {{- end }}
-{{- else }}
-	var args []any
-{{- end }}
-
 	desc := p.Dir == {{ .Domain }}.SortDesc
-	var order string
-	switch {
-{{- range .ListSorts }}
-	case p.Sort == {{ .Name }} && desc:
-		order = `{{ .Desc }}`
-{{- if $.Cursor }}
-		if p.After != nil {
-			where = append(where, `{{ .AfterDesc }}`)
-			args = append(args, {{ .AfterArgs }})
-		}
-{{- end }}
-	case p.Sort == {{ .Name }}:
-		order = `{{ .Asc }}`
-{{- if $.Cursor }}
-		if p.After != nil {
-			where = append(where, `{{ .AfterAsc }}`)
-			args = append(args, {{ .AfterArgs }})
-		}
-{{- end }}
-{{- end }}
-	case desc:
-		order = `{{ .ListOrder.Desc }}`
-{{- if $.Cursor }}
-		if p.After != nil {
+{{- if .Cursor }}
+	if p.After != nil {
+		if desc {
 			where = append(where, `{{ .ListOrder.AfterDesc }}`)
-			args = append(args, {{ .ListOrder.AfterArgs }})
-		}
-{{- end }}
-	default:
-		order = `{{ .ListOrder.Asc }}`
-{{- if $.Cursor }}
-		if p.After != nil {
+		} else {
 			where = append(where, `{{ .ListOrder.AfterAsc }}`)
-			args = append(args, {{ .ListOrder.AfterArgs }})
 		}
-{{- end }}
+		args = append(args, {{ .ListOrder.AfterArgs }})
 	}
+{{- end }}
 
 	q := `{{ .ListSQL }}`
-{{- if or .ListFilters .Cursor }}
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-{{- end }}
 {{- if .Cursor }}
-	q += ` ORDER BY ` + order + ` LIMIT ?`
+	if desc {
+		q += ` ORDER BY {{ .ListOrder.Desc }} LIMIT ?`
+	} else {
+		q += ` ORDER BY {{ .ListOrder.Asc }} LIMIT ?`
+	}
 	args = append(args, p.Limit)
 {{- else }}
-	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
+	if desc {
+		q += ` ORDER BY {{ .ListOrder.Desc }} LIMIT ? OFFSET ?`
+	} else {
+		q += ` ORDER BY {{ .ListOrder.Asc }} LIMIT ? OFFSET ?`
+	}
 	args = append(args, p.Limit, p.Offset)
 {{- end }}
 
 	var rows []{{ .RowStruct }}
 	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
+{{- else }}
+	q := `{{ .ListSQL }}`
+	if p.Dir == {{ .Domain }}.SortDesc {
+		q = `{{ .ListDesc }}`
+	}
+
+	var rows []{{ .RowStruct }}
+	if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset); err != nil {
+{{- end }}
 		return nil, fmt.Errorf("list {{ .LowerStruct }}: %w", err)
 	}
 	out := make([]{{ .Model }}, len(rows))

@@ -116,7 +116,6 @@ func (s *statusRecorder) WriteHeader(status int)      { s.status = status }
 const (
 	pathParamID     = "id"
 	queryLimit      = "limit"
-	querySort       = "sort"
 	queryDir        = "dir"
 	contentTypeJSON = "application/json"
 	tagJSON         = "json"
@@ -361,15 +360,6 @@ func queryValue[T any](q *listQuery, key string, parse func(string) (T, error)) 
 		return nil
 	}
 	return &v
-}
-
-func querySortValue[S ~string](q *listQuery, allowed ...S) S {
-	v := S(q.values.Get(querySort))
-	if v == "" || slices.Contains(allowed, v) {
-		return v
-	}
-	q.invalid(querySort)
-	return ""
 }
 
 func parseString(s string) (string, error) {

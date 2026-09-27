@@ -14,15 +14,8 @@ type Author struct {
 	BornOn *Date     `json:"born_on,omitzero"`
 }
 
-type AuthorSort string
-
-const (
-	AuthorSortBornOn AuthorSort = "born_on"
-)
-
 type AuthorListParams struct {
 	Email  *string
-	Sort   AuthorSort
 	Dir    SortDir
 	Limit  int
 	Offset int

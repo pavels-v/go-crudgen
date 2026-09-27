@@ -13,6 +13,7 @@ type Entity struct {
 	Name       string  `yaml:"name"`
 	Plural     string  `yaml:"plural"`     // optional; defaults to a naive pluralization
 	Pagination string  `yaml:"pagination"` // offset (default) or cursor
+	Order      string  `yaml:"order"`      // field List orders by; defaults to the primary key
 	Fields     []Field `yaml:"fields"`
 }
 
@@ -54,7 +55,6 @@ type Field struct {
 	Unique   bool   `yaml:"unique"`
 	Index    bool   `yaml:"index"`
 	Filter   bool   `yaml:"filter"` // List accepts ?<name>= for equality
-	Sort     bool   `yaml:"sort"`   // List accepts ?sort=<name>, ordered by ?dir=asc|desc
 	Default  any    `yaml:"default"`
 	Validate string `yaml:"validate"` // go-playground/validator rule string
 	Target   string `yaml:"target"`   // referenced entity, when Type == "references"
@@ -64,6 +64,18 @@ type Field struct {
 
 func (e *Entity) CursorPagination() bool {
 	return e.Pagination == PaginationCursor
+}
+
+func (e *Entity) OrderField() (Field, bool) {
+	if e.Order == "" {
+		return e.PrimaryKey()[0], true
+	}
+	for _, f := range e.Fields {
+		if f.Name == e.Order {
+			return f, true
+		}
+	}
+	return Field{}, false
 }
 
 // PrimaryKey returns the fields marked primary, in declaration order. A valid
