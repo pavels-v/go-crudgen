@@ -6,3 +6,11 @@ const (
 	SortAsc  SortDir = "asc"
 	SortDesc SortDir = "desc"
 )
+
+func ParseSortDir(s string) (SortDir, bool) {
+	switch d := SortDir(s); d {
+	case SortAsc, SortDesc:
+		return d, true
+	}
+	return SortAsc, s == ""
+}

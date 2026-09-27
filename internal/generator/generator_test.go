@@ -1105,7 +1105,7 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 		"type errorResponse struct { Error apiError `json:\"error\"` }",
 		"type apiError struct { Code string `json:\"code\"` Message string `json:\"message\"` Details []errorDetail `json:\"details\"` }",
 		"type offsetPage[T any] struct { Items []T `json:\"items\"` Limit int `json:\"limit\"` Offset int `json:\"offset\"` HasMore bool `json:\"has_more\"` }",
-		"func (q *listQuery) dir() blog.SortDir {",
+		"func (q *listQuery) dir() blog.SortDir { d, ok := blog.ParseSortDir(q.values.Get(queryDir)) if !ok { q.invalid(queryDir) } return d }",
 		"func trimPage[T any](items []T, limit int) ([]T, bool) {",
 		"writeError(w, http.StatusUnprocessableEntity, codeValidationFailed,",
 		"writeError(w, http.StatusInternalServerError, codeInternal, http.StatusText(http.StatusInternalServerError), nil)",
@@ -1443,6 +1443,7 @@ func TestRenderSort_Directions(t *testing.T) {
 	require.NoError(t, err)
 	requireParses(t, src)
 	wantContains(t, string(src), `type SortDir string const ( SortAsc SortDir = "asc" SortDesc SortDir = "desc" )`)
+	wantContains(t, string(src), `func ParseSortDir(s string) (SortDir, bool) { switch d := SortDir(s); d { case SortAsc, SortDesc: return d, true } return SortAsc, s == "" }`)
 }
 
 func TestCheckCollisions(t *testing.T) {

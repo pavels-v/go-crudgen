@@ -323,15 +323,11 @@ func encodeCursor(c any) (string, error) {
 {{- end }}
 
 func (q *listQuery) dir() {{ .Domain }}.SortDir {
-	v := {{ .Domain }}.SortDir(q.values.Get(queryDir))
-	switch v {
-	case "":
-		return {{ .Domain }}.SortAsc
-	case {{ .Domain }}.SortAsc, {{ .Domain }}.SortDesc:
-		return v
+	d, ok := {{ .Domain }}.ParseSortDir(q.values.Get(queryDir))
+	if !ok {
+		q.invalid(queryDir)
 	}
-	q.invalid(queryDir)
-	return {{ .Domain }}.SortAsc
+	return d
 }
 
 // trimPage drops the extra row fetched past limit, which only tells whether

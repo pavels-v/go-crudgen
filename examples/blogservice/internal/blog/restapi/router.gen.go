@@ -329,15 +329,11 @@ func encodeCursor(c any) (string, error) {
 }
 
 func (q *listQuery) dir() blog.SortDir {
-	v := blog.SortDir(q.values.Get(queryDir))
-	switch v {
-	case "":
-		return blog.SortAsc
-	case blog.SortAsc, blog.SortDesc:
-		return v
+	d, ok := blog.ParseSortDir(q.values.Get(queryDir))
+	if !ok {
+		q.invalid(queryDir)
 	}
-	q.invalid(queryDir)
-	return blog.SortAsc
+	return d
 }
 
 // trimPage drops the extra row fetched past limit, which only tells whether
