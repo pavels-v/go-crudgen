@@ -136,7 +136,6 @@ entities:
 - [x] Relations (`belongs_to` / `has_many`)
   - [x] `belongs_to` via `references` fields
   - [x] `has_many` via `filter: true` on the reference field
-- [ ] OpenAPI 3 document export
 - [ ] Pluggable storage backends (SQLite, in-memory)
 - [ ] Auth/middleware hooks
 
