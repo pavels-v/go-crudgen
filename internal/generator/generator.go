@@ -34,6 +34,8 @@ const (
 	tmplQuery     = "query.go.tmpl"
 	tmplRoutes    = "routes.go.tmpl"
 	tmplRouter    = "router.go.tmpl"
+	tmplMain      = "main.go.tmpl"
+	tmplEmbed     = "embed.go.tmpl"
 	tmplRepo      = "repo.go.tmpl"
 	tmplNulls     = "nulls.go.tmpl"
 	tmplDate      = "date.go.tmpl"
@@ -58,6 +60,10 @@ const (
 	fileQuery     = pkgREST + "/query.go"
 	fileRoutes    = pkgREST + "/routes.go"
 	fileRouter    = pkgREST + "/router.go"
+	fileEmbed     = dirMigrations + "/embed.go"
+	fileMain      = "main.go"
+	fileGoMod     = "go.mod"
+	dirCmd        = "cmd"
 	fileRepo      = pkgPostgres + "/%s.go"
 	fileDB        = pkgPostgres + "/db.go"
 	fileNulls     = pkgPostgres + "/nulls.go"
@@ -121,6 +127,8 @@ type Options struct {
 	Router bool   // also emit restapi.NewRouter and Deps
 
 	MigrationTime time.Time // version of the first migration, the next ones follow a second apart; zero means now
+	Main          bool      // emit main.go and migrations/embed.go
+	MainDir       string    // directory for main.go; empty means cmd/<package> next to the nearest go.mod
 }
 
 type genFile struct {
@@ -173,6 +181,15 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	if opts.MigrationTime.IsZero() {
 		opts.MigrationTime = time.Now()
+	}
+
+	if opts.Main && opts.MainDir == "" {
+		dir, err := defaultMainDir(opts.OutDir, s.Package)
+		if err != nil {
+			return err
+		}
+
+		opts.MainDir = dir
 	}
 
 	files, err := renderFiles(s, byName, driverName, driverImp, opts)
@@ -334,11 +351,120 @@ func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, drive
 		shared.Routes = append(shared.Routes, routerEntity{
 			Struct:    hd.Struct,
 			Repo:      hd.Repo,
+			RepoCtor:  fmt.Sprintf(nameRepoCtor, hd.Struct),
 			DepsField: pascalCase(hd.Plural),
 		})
 	}
 
+	if opts.Main {
+		mf, err := mainFiles(s, shared, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		files = append(files, mf...)
+	}
+
 	return appendShared(files, s, driverName, driverImp, shared)
+}
+
+type mainData struct {
+	Imports  []string
+	Router   bool
+	Entities []routerEntity
+}
+
+func mainFiles(s *spec.Spec, shared sharedFiles, opts Options) ([]genFile, error) {
+	mainPath, err := mainFilePath(opts.OutDir, opts.MainDir)
+	if err != nil {
+		return nil, err
+	}
+
+	imports := map[string]struct{}{
+		importContext:                      {},
+		importDatabaseSQL:                  {},
+		importErrors:                       {},
+		importFmt:                          {},
+		importSlog:                         {},
+		importNetHTTP:                      {},
+		importOS:                           {},
+		importOSSignal:                     {},
+		importSyscall:                      {},
+		importTime:                         {},
+		importGoose:                        {},
+		importSQLx:                         {},
+		path.Join(s.Module, dirMigrations): {},
+		path.Join(s.Module, pkgPostgres):   {},
+		path.Join(s.Module, pkgREST):       {},
+	}
+
+	msrc, err := renderTemplate(tmplMain, mainData{
+		Imports:  groupImports(imports, s.Module),
+		Router:   shared.Router,
+		Entities: shared.Routes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("generate main: %w", err)
+	}
+
+	esrc, err := renderTemplate(tmplEmbed, packageData{Package: dirMigrations})
+	if err != nil {
+		return nil, fmt.Errorf("generate migrations embed: %w", err)
+	}
+
+	return []genFile{{Path: fileEmbed, Src: esrc}, {Path: mainPath, Src: msrc}}, nil
+}
+
+func defaultMainDir(outDir, pkg string) (string, error) {
+	if outDir == "" {
+		return filepath.Join(dirCmd, pkg), nil
+	}
+
+	dir, err := filepath.Abs(outDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output directory: %w", err)
+	}
+
+	for {
+		_, err := os.Stat(filepath.Join(dir, fileGoMod))
+		if err == nil {
+			return filepath.Join(dir, dirCmd, pkg), nil
+		}
+
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("find go.mod: %w", err)
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no go.mod above %s to place main.go next to: pass --main <dir> or --no-main", outDir)
+		}
+
+		dir = parent
+	}
+}
+
+func mainFilePath(outDir, mainDir string) (string, error) {
+	if outDir == "" {
+		return path.Join(filepath.ToSlash(filepath.Clean(mainDir)), fileMain), nil
+	}
+
+	absOut, err := filepath.Abs(outDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output directory: %w", err)
+	}
+
+	absMain, err := filepath.Abs(mainDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve main directory: %w", err)
+	}
+
+	rel, err := filepath.Rel(absOut, absMain)
+	if err != nil {
+		return "", fmt.Errorf("resolve main directory: %w", err)
+	}
+
+	return path.Join(filepath.ToSlash(rel), fileMain), nil
 }
 
 func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, shared sharedFiles) ([]genFile, error) {
@@ -535,6 +661,7 @@ type restData struct {
 type routerEntity struct {
 	Struct    string
 	Repo      string // qualified repository interface
+	RepoCtor  string // postgres repository constructor, e.g. "NewPostRepository"
 	DepsField string // field name in Deps, e.g. "Posts"
 }
 

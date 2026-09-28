@@ -73,11 +73,12 @@ func TestGenerateBlogExample(t *testing.T) {
 	outDir := filepath.Join(blogDir, "internal", "blog")
 
 	clean(t, outDir)
+	require.NoError(t, os.RemoveAll(filepath.Join(blogDir, "cmd")), "remove cmd")
 	t.Setenv("SOURCE_DATE_EPOCH", exampleEpoch)
 
-	// Regenerate the example with the default (pgx) driver and NewRouter.
+	// Regenerate the example with the defaults: pgx, NewRouter and main.go.
 	run(t, root, "go", "run", "./cmd/go-crudgen", "generate",
-		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog", "--router")
+		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog")
 
 	for _, f := range []string{
 		"post.go", "author.go", "comment.go", "tag.go",
@@ -101,17 +102,20 @@ func TestGenerateBlogExample(t *testing.T) {
 		filepath.Join("migrations", "20260101000001_create_posts.sql"),
 		filepath.Join("migrations", "20260101000002_create_comments.sql"),
 		filepath.Join("migrations", "20260101000003_create_tags.sql"),
+		filepath.Join("migrations", "embed.go"),
+		filepath.Join("..", "..", "cmd", "blog", "main.go"),
 	} {
 		require.FileExists(t, filepath.Join(outDir, f), "expected generated file")
 	}
 
 	again := exec.Command("go", "run", "./cmd/go-crudgen", "generate",
-		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog", "--router")
+		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog")
 	again.Dir = root
 	out, err := again.CombinedOutput()
 	require.Errorf(t, err, "second generation should fail:\n%s", out)
 	require.Contains(t, string(out), "already has generated code")
 
 	// Prove the freshly generated module compiles and its handler tests pass.
+	run(t, blogDir, "go", "build", "./...")
 	run(t, blogDir, "go", "test", "./...")
 }

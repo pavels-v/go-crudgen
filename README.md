@@ -42,15 +42,18 @@ Among the tools we found, none generates every layer (validation, handlers, rout
 ## Usage
 
 ```bash
-go install ./cmd/go-crudgen                                         # from a clone of this repo
-go-crudgen generate --spec ./api.yaml                               # preview on stdout
-go-crudgen generate --spec ./api.yaml --out ./internal/api          # write files
+go install ./cmd/go-crudgen                                                      # from a clone of this repo
+go-crudgen generate --spec ./api.yaml                                            # preview on stdout
+go-crudgen generate --spec ./api.yaml --out ./internal/api                       # write files
 go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
-go-crudgen generate --spec ./api.yaml --out ./internal/api --router # also emit restapi.NewRouter
+go-crudgen generate --spec ./api.yaml --out ./internal/api --main ./cmd/api      # main.go elsewhere than cmd/<package>
+go-crudgen generate --spec ./api.yaml --out ./internal/api --no-router --no-main # wire the service yourself
 cd ./internal/api && go mod tidy
 ```
 
 `--out` must hold none of the files to be written, no code but tests in `restapi/` and `postgres/`, and nothing in `migrations/`; to start over, delete them and generate again.
+
+With `--no-router --no-main` the wiring is yours:
 
 ```go
 db, err := postgres.NewDB(dsn)
@@ -75,11 +78,12 @@ Developer tasks: `make help`.
 - `restapi/<entity>.go` - `Create`/`Update` request DTOs, CRUD handlers and `RegisterRoutes`.
 - `restapi/request.go`, `response.go`, `query.go` - request decoding, response envelope, List query parsing.
 - `restapi/routes.go` - `WithRouteErrors`: the JSON envelope for unmatched routes.
-- `restapi/router.go` - `NewRouter` and `Deps` wiring every entity, with `--router`.
+- `restapi/router.go` - `NewRouter` and `Deps` wiring every entity, unless `--no-router`.
 - `postgres/<entity>.go` - `sqlx` PostgreSQL repository.
 - `postgres/db.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
 - `postgres/nulls.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
 - `migrations/<timestamp>_create_<table>.sql` - goose migrations, a second apart in foreign-key order; `SOURCE_DATE_EPOCH` pins the first timestamp.
+- `migrations/embed.go` and `cmd/<package>/main.go` next to the nearest `go.mod` (or `--main <dir>`), unless `--no-main`: a service that reads `DATABASE_URL` and `HTTP_ADDR` (default `:8080`), applies the embedded migrations, serves the API and shuts down gracefully.
 - Generation fails when an entity name collides with a generated declaration or file.
 
 | Method   | Path             | Action                                                   |
@@ -142,9 +146,9 @@ entities:
 - [x] Relations (`belongs_to` / `has_many`)
   - [x] `belongs_to` via `references` fields
   - [x] `has_many` via `filter: true` on the reference field
-- [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, optional `--router`
+- [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, `NewRouter` unless `--no-router`
 - [x] Reject `validate` rules the validator ignores or misapplies (`min`/`max` on `date` and `datetime`, rules on `decimal`, length rules on `uuid`)
-- [ ] Service entry point: optional `main.go` with config, `NewDB`, migrations, routes and graceful shutdown (`--main`)
+- [x] Service entry point: `main.go` with config, `NewDB`, migrations, routes and graceful shutdown, unless `--no-main`
 - [ ] Handler test scaffold: `restapi/<entity>_test.go` with a fake repository and table-driven tests
 
 ## License
