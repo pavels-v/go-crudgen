@@ -77,7 +77,7 @@ func (s *Spec) Validate() error {
 	}
 
 	if !token.IsIdentifier(s.Package) || s.Package == pkgMain || s.Package == blankIdent {
-		return fmt.Errorf("package %q is not an importable Go package name", s.Package)
+		return fmt.Errorf("package %q cannot name cmd/<package>: use a Go identifier other than main or _", s.Package)
 	}
 
 	if len(s.Entities) == 0 {

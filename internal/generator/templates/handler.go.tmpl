@@ -46,6 +46,15 @@ type {{ .UpdateName }} struct {
 {{- end }}
 }
 
+// {{ .Repo }} is the storage the {{ .Struct }} handlers depend on.
+type {{ .Repo }} interface {
+	Create(ctx context.Context, m *{{ .Model }}) error
+	Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Model }}, error)
+	List(ctx context.Context, p {{ .ListParams }}) ([]{{ .Model }}, error)
+	Update(ctx context.Context, m *{{ .Model }}) error
+	Delete(ctx context.Context, id {{ .PKGoType }}) error
+}
+
 // {{ .Struct }}Handler serves the CRUD endpoints for {{ .Struct }}.
 type {{ .Struct }}Handler struct {
 	repo {{ .Repo }}

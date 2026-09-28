@@ -89,14 +89,14 @@ func dbInfo(s *spec.Spec, driverName, driverImp string) dbData {
 	return dbData{
 		Package: pkgPostgres,
 		Imports: groupImports(map[string]struct{}{
-			importErrors: {},
-			importFmt:    {},
-			importTime:   {},
-			importSQLx:   {},
-			driverImp:    {},
-			s.Module:     {},
+			importErrors:    {},
+			importFmt:       {},
+			importTime:      {},
+			importSQLx:      {},
+			driverImp:       {},
+			domainImport(s): {},
 		}, s.Module),
-		Domain:       domainAlias,
+		Domain:       pkgDomain,
 		DriverName:   driverName,
 		DriverImport: driverImp,
 	}
@@ -138,7 +138,6 @@ type repoData struct {
 	Struct          string
 	Model           string // qualified domain model, e.g. "domain.Post"
 	LowerStruct     string // struct name lower-cased, for error messages
-	Repo            string // qualified interface name, e.g. "domain.PostRepository"
 	Receiver        string // concrete type, e.g. "PostRepository"
 	Constructor     string // e.g. "NewPostRepository"
 	PKGoType        string
@@ -208,7 +207,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	pkGoName := pascalCase(pk.Name)
 
 	impSet := map[string]struct{}{
-		importContext: {}, importDatabaseSQL: {}, importErrors: {}, importFmt: {}, importSQLx: {}, s.Module: {},
+		importContext: {}, importDatabaseSQL: {}, importErrors: {}, importFmt: {}, importSQLx: {}, domainImport(s): {},
 	}
 
 	// Persisted columns in struct order. Each column contributes a row-struct
@@ -388,11 +387,10 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 
 	return repoData{
 		Package:         pkgPostgres,
-		Domain:          domainAlias,
+		Domain:          pkgDomain,
 		Struct:          name,
 		Model:           qualified(name),
 		LowerStruct:     strings.ToLower(name),
-		Repo:            qualified(fmt.Sprintf(nameRepo, name)),
 		Receiver:        fmt.Sprintf(nameRepo, name),
 		Constructor:     fmt.Sprintf(nameRepoCtor, name),
 		PKGoType:        gt.expr,

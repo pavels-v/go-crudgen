@@ -1,11 +1,12 @@
 package restapi
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/google/uuid"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 const (
@@ -26,13 +27,22 @@ type UpdateAuthorRequest struct {
 	BornOn *domain.Date `json:"born_on,omitzero"`
 }
 
+// AuthorRepository is the storage the Author handlers depend on.
+type AuthorRepository interface {
+	Create(ctx context.Context, m *domain.Author) error
+	Get(ctx context.Context, id uuid.UUID) (*domain.Author, error)
+	List(ctx context.Context, p domain.AuthorListParams) ([]domain.Author, error)
+	Update(ctx context.Context, m *domain.Author) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 // AuthorHandler serves the CRUD endpoints for Author.
 type AuthorHandler struct {
-	repo domain.AuthorRepository
+	repo AuthorRepository
 }
 
 // NewAuthorHandler returns a handler backed by repo.
-func NewAuthorHandler(repo domain.AuthorRepository) *AuthorHandler {
+func NewAuthorHandler(repo AuthorRepository) *AuthorHandler {
 	return &AuthorHandler{repo: repo}
 }
 

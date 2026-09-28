@@ -1,9 +1,10 @@
 package restapi
 
 import (
+	"context"
 	"net/http"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 const (
@@ -33,13 +34,22 @@ type UpdateTagRequest struct {
 	Group  *string  `json:"group"`
 }
 
+// TagRepository is the storage the Tag handlers depend on.
+type TagRepository interface {
+	Create(ctx context.Context, m *domain.Tag) error
+	Get(ctx context.Context, id string) (*domain.Tag, error)
+	List(ctx context.Context, p domain.TagListParams) ([]domain.Tag, error)
+	Update(ctx context.Context, m *domain.Tag) error
+	Delete(ctx context.Context, id string) error
+}
+
 // TagHandler serves the CRUD endpoints for Tag.
 type TagHandler struct {
-	repo domain.TagRepository
+	repo TagRepository
 }
 
 // NewTagHandler returns a handler backed by repo.
-func NewTagHandler(repo domain.TagRepository) *TagHandler {
+func NewTagHandler(repo TagRepository) *TagHandler {
 	return &TagHandler{repo: repo}
 }
 

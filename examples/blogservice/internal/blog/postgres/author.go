@@ -10,12 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
-// authorRow is the database representation of domain.Author. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newAuthorRow and toModel convert to and from the pointer fields on domain.Author.
+// authorRow is the database representation of domain.Author.
 type authorRow struct {
 	ID     uuid.UUID             `db:"id"`
 	Email  string                `db:"email"`
@@ -23,8 +21,7 @@ type authorRow struct {
 	BornOn sql.Null[domain.Date] `db:"born_on"`
 }
 
-// newAuthorRow builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// newAuthorRow builds the row written by Create and Update.
 func newAuthorRow(m *domain.Author) authorRow {
 	return authorRow{
 		ID:     m.ID,
@@ -44,9 +41,7 @@ func (row authorRow) toModel() domain.Author {
 	}
 }
 
-// AuthorRepository is a PostgreSQL-backed domain.AuthorRepository. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// AuthorRepository stores domain.Author in PostgreSQL.
 type AuthorRepository struct {
 	db *sqlx.DB
 }
@@ -56,13 +51,15 @@ func NewAuthorRepository(db *sqlx.DB) *AuthorRepository {
 	return &AuthorRepository{db: db}
 }
 
-var _ domain.AuthorRepository = (*AuthorRepository)(nil)
-
 func (r *AuthorRepository) Create(ctx context.Context, m *domain.Author) error {
 	m.ID = uuid.New()
 	row := newAuthorRow(m)
 
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`, row.ID, row.Email, row.Name, row.BornOn); err != nil {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`,
+		row.ID, row.Email, row.Name, row.BornOn,
+	)
+	if err != nil {
 		return fmt.Errorf("create author: %w", mapWriteError(err))
 	}
 
@@ -71,7 +68,12 @@ func (r *AuthorRepository) Create(ctx context.Context, m *domain.Author) error {
 
 func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*domain.Author, error) {
 	var row authorRow
-	if err := r.db.GetContext(ctx, &row, `SELECT id, email, name, born_on FROM authors WHERE id = $1`, id); err != nil {
+
+	err := r.db.GetContext(ctx, &row,
+		`SELECT id, email, name, born_on FROM authors WHERE id = $1`,
+		id,
+	)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
@@ -109,7 +111,12 @@ func (r *AuthorRepository) List(ctx context.Context, p domain.AuthorListParams) 
 	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 
 	var rows []authorRow
-	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
+
+	err := r.db.SelectContext(ctx, &rows,
+		r.db.Rebind(q),
+		args...,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("list author: %w", err)
 	}
 
@@ -124,7 +131,10 @@ func (r *AuthorRepository) List(ctx context.Context, p domain.AuthorListParams) 
 func (r *AuthorRepository) Update(ctx context.Context, m *domain.Author) error {
 	row := newAuthorRow(m)
 
-	res, err := r.db.ExecContext(ctx, `UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`, row.Email, row.Name, row.BornOn, row.ID)
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`,
+		row.Email, row.Name, row.BornOn, row.ID,
+	)
 	if err != nil {
 		return fmt.Errorf("update author: %w", mapWriteError(err))
 	}
@@ -142,7 +152,10 @@ func (r *AuthorRepository) Update(ctx context.Context, m *domain.Author) error {
 }
 
 func (r *AuthorRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM authors WHERE id = $1`, id)
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM authors WHERE id = $1`,
+		id,
+	)
 	if err != nil {
 		return fmt.Errorf("delete author: %w", mapDeleteError(err))
 	}

@@ -12,12 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
-// postRow is the database representation of domain.Post. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newPostRow and toModel convert to and from the pointer fields on domain.Post.
+// postRow is the database representation of domain.Post.
 type postRow struct {
 	ID        uuid.UUID                `db:"id"`
 	Title     string                   `db:"title"`
@@ -30,8 +28,7 @@ type postRow struct {
 	UpdatedAt time.Time                `db:"updated_at"`
 }
 
-// newPostRow builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// newPostRow builds the row written by Create and Update.
 func newPostRow(m *domain.Post) postRow {
 	return postRow{
 		ID:        m.ID,
@@ -59,9 +56,7 @@ func (row postRow) toModel() domain.Post {
 	}
 }
 
-// PostRepository is a PostgreSQL-backed domain.PostRepository. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// PostRepository stores domain.Post in PostgreSQL.
 type PostRepository struct {
 	db *sqlx.DB
 }
@@ -71,13 +66,15 @@ func NewPostRepository(db *sqlx.DB) *PostRepository {
 	return &PostRepository{db: db}
 }
 
-var _ domain.PostRepository = (*PostRepository)(nil)
-
 func (r *PostRepository) Create(ctx context.Context, m *domain.Post) error {
 	m.ID = uuid.New()
 	row := newPostRow(m)
 
-	if err := r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+	err := r.db.QueryRowContext(ctx,
+		`INSERT INTO posts (id, title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now()) RETURNING created_at, updated_at`,
+		row.ID, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author,
+	).Scan(&m.CreatedAt, &m.UpdatedAt)
+	if err != nil {
 		return fmt.Errorf("create post: %w", mapWriteError(err))
 	}
 
@@ -86,7 +83,12 @@ func (r *PostRepository) Create(ctx context.Context, m *domain.Post) error {
 
 func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*domain.Post, error) {
 	var row postRow
-	if err := r.db.GetContext(ctx, &row, `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts WHERE id = $1`, id); err != nil {
+
+	err := r.db.GetContext(ctx, &row,
+		`SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts WHERE id = $1`,
+		id,
+	)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
@@ -134,7 +136,12 @@ func (r *PostRepository) List(ctx context.Context, p domain.PostListParams) ([]d
 	q += ` ORDER BY ` + order + ` LIMIT ?`
 
 	var rows []postRow
-	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
+
+	err := r.db.SelectContext(ctx, &rows,
+		r.db.Rebind(q),
+		args...,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("list post: %w", err)
 	}
 
@@ -149,7 +156,11 @@ func (r *PostRepository) List(ctx context.Context, p domain.PostListParams) ([]d
 func (r *PostRepository) Update(ctx context.Context, m *domain.Post) error {
 	row := newPostRow(m)
 
-	if err := r.db.QueryRowContext(ctx, `UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author, row.ID).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
+	err := r.db.QueryRowContext(ctx,
+		`UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`,
+		row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author, row.ID,
+	).Scan(&m.CreatedAt, &m.UpdatedAt)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}
@@ -161,7 +172,10 @@ func (r *PostRepository) Update(ctx context.Context, m *domain.Post) error {
 }
 
 func (r *PostRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM posts WHERE id = $1`, id)
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM posts WHERE id = $1`,
+		id,
+	)
 	if err != nil {
 		return fmt.Errorf("delete post: %w", mapDeleteError(err))
 	}

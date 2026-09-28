@@ -80,7 +80,7 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 
 	got := render(t, s, "Product")
 	for _, want := range []string{
-		"package shop",
+		"package domain",
 		`"github.com/google/uuid"`,
 		`"github.com/shopspring/decimal"`,
 		`"encoding/json/jsontext"`,
@@ -96,11 +96,11 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 		"ReleasedAt *time.Time",
 		"LaunchedOn *Date",
 		"Metadata *jsontext.Value",
-		"type ProductRepository interface {",
-		"Get(ctx context.Context, id uuid.UUID) (*Product, error)",
 	} {
 		wantContains(t, got, want)
 	}
+
+	require.NotContains(t, got, "interface {", "domain model should not declare the repository interface")
 
 	require.NotContains(t, got, `db:"`, "API model should not carry db struct tags")
 	require.NotContains(t, got, `validate:"`, "API model should not carry validate tags")
@@ -326,7 +326,7 @@ func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
 	}
 
 	repo := renderRepoSrc(t, s, "Tag")
-	wantContains(t, repo, "r.db.ExecContext(ctx, `INSERT INTO tags (slug, published) VALUES ($1, $2)`, row.Slug, row.Published)")
+	wantContains(t, repo, "r.db.ExecContext(ctx, `INSERT INTO tags (slug, published) VALUES ($1, $2)`, row.Slug, row.Published, )")
 }
 
 func TestRenderHandler_GeneratedKeyNotAssigned(t *testing.T) {
@@ -373,8 +373,9 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		`mux.HandleFunc("GET /posts/{id}", h.Get)`,
 		`mux.HandleFunc("PUT /posts/{id}", h.Update)`,
 		`mux.HandleFunc("DELETE /posts/{id}", h.Delete)`,
-		`domain "example.com/blog"`,
-		"repo domain.PostRepository",
+		`"example.com/blog/domain"`,
+		"type PostRepository interface { Create(ctx context.Context, m *domain.Post) error Get(ctx context.Context, id uuid.UUID) (*domain.Post, error) List(ctx context.Context, p domain.PostListParams) ([]domain.Post, error)",
+		"repo PostRepository",
 		"m := domain.Post{",
 		"id, ok := pathID(w, r, parseText[uuid.UUID]) if !ok { return }",
 		"writeDecodeError(w, r, err)",
@@ -421,7 +422,7 @@ func TestRenderHandler_Int32PKUsesParseInt32(t *testing.T) {
 
 	wantContains(t, renderHandlerSrc(t, s, "Widget"), "id, ok := pathID(w, r, parseInt32)")
 
-	wantContains(t, render(t, s, "Widget"), "Get(ctx context.Context, id int32) (*Widget, error)")
+	wantContains(t, renderHandlerSrc(t, s, "Widget"), "Get(ctx context.Context, id int32) (*domain.Widget, error)")
 }
 
 // renderRepoSrc runs repoInfo + renderRepo for the named entity and returns the
@@ -442,7 +443,7 @@ func renderRepoSrc(t *testing.T, s *spec.Spec, entity string) string {
 	return string(src)
 }
 
-func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
+func TestRenderRepo_SQL(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{
@@ -463,10 +464,8 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 
 	got := renderRepoSrc(t, s, "Post")
 	for _, want := range []string{
-		// compile-time check that the concrete type implements the interface
 		"package postgres",
-		`domain "example.com/blog"`,
-		"var _ domain.PostRepository = (*PostRepository)(nil)",
+		`"example.com/blog/domain"`,
 		"func NewPostRepository(db *sqlx.DB) *PostRepository",
 		"func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*domain.Post, error)",
 		"return nil, domain.ErrNotFound",
@@ -480,13 +479,13 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"Body: toNull(m.Body)",
 		"Body: fromNull(row.Body)",
 		// sqlx scans into the row, which is then converted to the API model
-		"r.db.GetContext(ctx, &row, `SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1`, id)",
+		"r.db.GetContext(ctx, &row, `SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1`, id, )",
 		"m := row.toModel()",
 		"errors.Is(err, sql.ErrNoRows)",
 		// generated columns take now() on insert and are returned into the struct
 		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
 		"m.ID = uuid.New() row := newPostRow(m)",
-		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
+		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body, ).Scan(&m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
 		"q := `SELECT id, title, body, created_at, updated_at FROM posts ORDER BY ` + order + ` LIMIT $1 OFFSET $2`",
 		// the primary key is the trailing placeholder in the update
@@ -516,7 +515,7 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
 		"order := `id` if p.Dir == domain.SortDesc { order = `id DESC` }",
-		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` var rows []accountRow if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
+		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` var rows []accountRow err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset, ) if err != nil {",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
@@ -562,7 +561,6 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 			entity: "Post",
 			want: []string{
 				"type PostListParams struct { Title *string Author *uuid.UUID PublishedOn *Date Views *int32 Published *bool Dir SortDir Limit int Offset int }",
-				"List(ctx context.Context, p PostListParams) ([]Post, error)",
 			},
 		},
 		{
@@ -593,7 +591,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 				"q += ` WHERE ` + strings.Join(where, ` AND `)",
 				"order := `title, id` if p.Dir == domain.SortDesc { order = `title DESC, id DESC` }",
 				"args = append(args, p.Limit, p.Offset) q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`",
-				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
+				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args..., )",
 				`"strings"`,
 			},
 		},
@@ -812,7 +810,7 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 
 	got := renderRepoSrc(t, s, "Tag")
 	for _, want := range []string{
-		"r.db.GetContext(ctx, &exists, `SELECT 1 FROM tags WHERE id = $1`, row.ID)",
+		"r.db.GetContext(ctx, &exists, `SELECT 1 FROM tags WHERE id = $1`, row.ID, )",
 		"return domain.ErrNotFound",
 	} {
 		wantContains(t, got, want)
@@ -837,7 +835,7 @@ func TestRenderRepo_GeneratedColumns(t *testing.T) {
 			fields: []spec.Field{id, name, {Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate}},
 			want: []string{
 				"INSERT INTO events (name, created_at) VALUES ($1, now()) RETURNING id, created_at",
-				"UPDATE events SET name = $1 WHERE id = $2 RETURNING created_at`, row.Name, row.ID).Scan(&m.CreatedAt)",
+				"UPDATE events SET name = $1 WHERE id = $2 RETURNING created_at`, row.Name, row.ID, ).Scan(&m.CreatedAt)",
 			},
 		},
 		{
@@ -851,7 +849,7 @@ func TestRenderRepo_GeneratedColumns(t *testing.T) {
 			name:   "nothing writable still reads back on_create",
 			fields: []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate}},
 			want: []string{
-				"r.db.QueryRowContext(ctx, `SELECT created_at FROM events WHERE id = $1`, row.ID).Scan(&m.CreatedAt)",
+				"r.db.QueryRowContext(ctx, `SELECT created_at FROM events WHERE id = $1`, row.ID, ).Scan(&m.CreatedAt)",
 			},
 		},
 	}
@@ -1241,7 +1239,7 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			wantContains(t, got, "db.SetMaxOpenConns(maxOpenConns)")
 			wantContains(t, got, `sqlStateUniqueViolation = "23505"`)
 			wantContains(t, got, "package postgres")
-			wantContains(t, got, `"example.com/blog" )`)
+			wantContains(t, got, `"example.com/blog/domain" )`)
 			wantContains(t, got, `return fmt.Errorf("%w: %v", domain.ErrAlreadyExists, err)`)
 			wantContains(t, got, `return fmt.Errorf("%w: %v", domain.ErrStillReferenced, err)`)
 		})
@@ -1673,12 +1671,12 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 
 	s := &spec.Spec{Package: "blog", Module: "example.com/blog"}
 	got := renderRESTSrc(t, s, sharedFiles{Offset: true, Router: true, Defaults: true, Routes: []routerEntity{
-		{Struct: "Post", Repo: "domain.PostRepository", DepsField: "Posts"},
+		{Struct: "Post", Repo: "PostRepository", DepsField: "Posts"},
 	}})
 
 	for _, want := range []string{
 		"package restapi",
-		`domain "example.com/blog"`,
+		`"example.com/blog/domain"`,
 		"domain.ErrNotFound: {status: http.StatusNotFound, code: codeNotFound},",
 		"domain.ErrAlreadyExists: {status: http.StatusConflict, code: codeAlreadyExists},",
 		"domain.ErrReferenceNotFound: {status: http.StatusUnprocessableEntity, code: codeReferenceNotFound},",
@@ -1698,7 +1696,7 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 		"func NewRouter(deps Deps) http.Handler {",
 		"func WithRouteErrors(mux *http.ServeMux) http.Handler {",
 		"return WithRouteErrors(mux)",
-		"Posts domain.PostRepository",
+		"Posts PostRepository",
 		"NewPostHandler(deps.Posts).RegisterRoutes(mux)",
 	} {
 		wantContains(t, got, want)
@@ -1797,9 +1795,9 @@ func TestGroupImports(t *testing.T) {
 			want: []string{importContext, importTime, "", importUUID, importSQLx},
 		},
 		{
-			name: "own module aliased in its own group",
+			name: "own module in its own group",
 			in:   []string{importNetHTTP, testModule, importUUID},
-			want: []string{importNetHTTP, "", importUUID, "", `domain "example.com/blog"`},
+			want: []string{importNetHTTP, "", importUUID, "", testModule},
 		},
 		{
 			name: "own subpackage in its own group",
@@ -1810,7 +1808,7 @@ func TestGroupImports(t *testing.T) {
 			name:   "dotless module is not grouped with stdlib",
 			module: "blogservice/internal/blog",
 			in:     []string{importNetHTTP, "blogservice/internal/blog", importUUID},
-			want:   []string{importNetHTTP, "", importUUID, "", `domain "blogservice/internal/blog"`},
+			want:   []string{importNetHTTP, "", importUUID, "", "blogservice/internal/blog"},
 		},
 	}
 
@@ -1932,7 +1930,7 @@ func TestRenderRepo_KeyOnlyEntityInsertsDefaults(t *testing.T) {
 	}}}
 
 	got := renderRepoSrc(t, s, "Counter")
-	wantContains(t, got, "`INSERT INTO counters DEFAULT VALUES RETURNING my_id`).Scan(&m.MyId)")
+	wantContains(t, got, "`INSERT INTO counters DEFAULT VALUES RETURNING my_id`, ).Scan(&m.MyId)")
 
 	_, create, ok := strings.Cut(got, "func (r *CounterRepository) Create(")
 	require.True(t, ok)

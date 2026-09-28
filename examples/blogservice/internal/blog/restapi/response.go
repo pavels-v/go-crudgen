@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 const (

@@ -1,7 +1,6 @@
-package blog
+package domain
 
 import (
-	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,13 +20,4 @@ type CommentListParams struct {
 	Dir    SortDir
 	Limit  int
 	Offset int
-}
-
-// CommentRepository is the storage interface for Comment.
-type CommentRepository interface {
-	Create(ctx context.Context, m *Comment) error
-	Get(ctx context.Context, id int64) (*Comment, error)
-	List(ctx context.Context, p CommentListParams) ([]Comment, error)
-	Update(ctx context.Context, m *Comment) error
-	Delete(ctx context.Context, id int64) error
 }

@@ -9,12 +9,10 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
-// tagRow is the database representation of domain.Tag. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newTagRow and toModel convert to and from the pointer fields on domain.Tag.
+// tagRow is the database representation of domain.Tag.
 type tagRow struct {
 	Slug   string  `db:"slug"`
 	Label  string  `db:"label"`
@@ -23,8 +21,7 @@ type tagRow struct {
 	Group  string  `db:"group"`
 }
 
-// newTagRow builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// newTagRow builds the row written by Create and Update.
 func newTagRow(m *domain.Tag) tagRow {
 	return tagRow{
 		Slug:   m.Slug,
@@ -46,9 +43,7 @@ func (row tagRow) toModel() domain.Tag {
 	}
 }
 
-// TagRepository is a PostgreSQL-backed domain.TagRepository. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// TagRepository stores domain.Tag in PostgreSQL.
 type TagRepository struct {
 	db *sqlx.DB
 }
@@ -58,12 +53,14 @@ func NewTagRepository(db *sqlx.DB) *TagRepository {
 	return &TagRepository{db: db}
 }
 
-var _ domain.TagRepository = (*TagRepository)(nil)
-
 func (r *TagRepository) Create(ctx context.Context, m *domain.Tag) error {
 	row := newTagRow(m)
 
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO tags (slug, label, color, weight, "group") VALUES ($1, $2, $3, $4, $5)`, row.Slug, row.Label, row.Color, row.Weight, row.Group); err != nil {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO tags (slug, label, color, weight, "group") VALUES ($1, $2, $3, $4, $5)`,
+		row.Slug, row.Label, row.Color, row.Weight, row.Group,
+	)
+	if err != nil {
 		return fmt.Errorf("create tag: %w", mapWriteError(err))
 	}
 
@@ -72,7 +69,12 @@ func (r *TagRepository) Create(ctx context.Context, m *domain.Tag) error {
 
 func (r *TagRepository) Get(ctx context.Context, id string) (*domain.Tag, error) {
 	var row tagRow
-	if err := r.db.GetContext(ctx, &row, `SELECT slug, label, color, weight, "group" FROM tags WHERE slug = $1`, id); err != nil {
+
+	err := r.db.GetContext(ctx, &row,
+		`SELECT slug, label, color, weight, "group" FROM tags WHERE slug = $1`,
+		id,
+	)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
@@ -110,7 +112,12 @@ func (r *TagRepository) List(ctx context.Context, p domain.TagListParams) ([]dom
 	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 
 	var rows []tagRow
-	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
+
+	err := r.db.SelectContext(ctx, &rows,
+		r.db.Rebind(q),
+		args...,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("list tag: %w", err)
 	}
 
@@ -125,7 +132,10 @@ func (r *TagRepository) List(ctx context.Context, p domain.TagListParams) ([]dom
 func (r *TagRepository) Update(ctx context.Context, m *domain.Tag) error {
 	row := newTagRow(m)
 
-	res, err := r.db.ExecContext(ctx, `UPDATE tags SET label = $1, color = $2, weight = $3, "group" = $4 WHERE slug = $5`, row.Label, row.Color, row.Weight, row.Group, row.Slug)
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE tags SET label = $1, color = $2, weight = $3, "group" = $4 WHERE slug = $5`,
+		row.Label, row.Color, row.Weight, row.Group, row.Slug,
+	)
 	if err != nil {
 		return fmt.Errorf("update tag: %w", mapWriteError(err))
 	}
@@ -143,7 +153,10 @@ func (r *TagRepository) Update(ctx context.Context, m *domain.Tag) error {
 }
 
 func (r *TagRepository) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM tags WHERE slug = $1`, id)
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM tags WHERE slug = $1`,
+		id,
+	)
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", mapDeleteError(err))
 	}

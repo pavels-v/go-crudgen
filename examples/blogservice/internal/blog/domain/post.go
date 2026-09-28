@@ -1,7 +1,6 @@
-package blog
+package domain
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"time"
 
@@ -32,13 +31,4 @@ type PostListParams struct {
 	Dir       SortDir
 	After     *PostCursor
 	Limit     int
-}
-
-// PostRepository is the storage interface for Post.
-type PostRepository interface {
-	Create(ctx context.Context, m *Post) error
-	Get(ctx context.Context, id uuid.UUID) (*Post, error)
-	List(ctx context.Context, p PostListParams) ([]Post, error)
-	Update(ctx context.Context, m *Post) error
-	Delete(ctx context.Context, id uuid.UUID) error
 }

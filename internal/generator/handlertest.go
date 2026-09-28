@@ -76,13 +76,13 @@ type sample struct {
 
 func renderFakeTest(s *spec.Spec) ([]byte, error) {
 	imports := map[string]struct{}{
-		importContext:  {},
-		importNetHTTP:  {},
-		importHTTPTest: {},
-		importStrings:  {},
-		importSync:     {},
-		importTesting:  {},
-		s.Module:       {},
+		importContext:   {},
+		importNetHTTP:   {},
+		importHTTPTest:  {},
+		importStrings:   {},
+		importSync:      {},
+		importTesting:   {},
+		domainImport(s): {},
 	}
 
 	return renderTemplate(tmplFakeTest, restData{Package: pkgREST, Imports: groupImports(imports, s.Module)})
@@ -113,12 +113,12 @@ func renderHandlerTest(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Ent
 	}
 
 	imports := map[string]struct{}{
-		importJSONv2:  {},
-		importJSON:    {},
-		importNetHTTP: {},
-		importTesting: {},
-		importRequire: {},
-		s.Module:      {},
+		importJSONv2:    {},
+		importJSON:      {},
+		importNetHTTP:   {},
+		importTesting:   {},
+		importRequire:   {},
+		domainImport(s): {},
 	}
 
 	switch gt.expr {

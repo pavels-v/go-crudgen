@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 type memStore[K comparable, M, P any] struct {
@@ -48,7 +48,7 @@ func (s *memStore[K, M, P]) Create(_ context.Context, m *M) error {
 
 	k := *s.key(m)
 	if _, ok := s.data[k]; ok {
-		return blog.ErrAlreadyExists
+		return domain.ErrAlreadyExists
 	}
 
 	s.data[k] = *m
@@ -62,7 +62,7 @@ func (s *memStore[K, M, P]) Get(_ context.Context, id K) (*M, error) {
 
 	m, ok := s.data[id]
 	if !ok {
-		return nil, blog.ErrNotFound
+		return nil, domain.ErrNotFound
 	}
 
 	return &m, nil
@@ -92,7 +92,7 @@ func (s *memStore[K, M, P]) Update(_ context.Context, m *M) error {
 
 	k := *s.key(m)
 	if _, ok := s.data[k]; !ok {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	s.data[k] = *m
@@ -105,7 +105,7 @@ func (s *memStore[K, M, P]) Delete(_ context.Context, id K) error {
 	defer s.mu.Unlock()
 
 	if _, ok := s.data[id]; !ok {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	delete(s.data, id)
@@ -117,28 +117,28 @@ func newServer() *httptest.Server {
 	return newServerWithPosts(newPostStore())
 }
 
-func newAuthorStore() *memStore[uuid.UUID, blog.Author, blog.AuthorListParams] {
-	s := newMemStore[uuid.UUID, blog.Author, blog.AuthorListParams](func(m *blog.Author) *uuid.UUID { return &m.ID }, uuid.New)
-	s.limit = func(p blog.AuthorListParams) int { return p.Limit }
+func newAuthorStore() *memStore[uuid.UUID, domain.Author, domain.AuthorListParams] {
+	s := newMemStore[uuid.UUID, domain.Author, domain.AuthorListParams](func(m *domain.Author) *uuid.UUID { return &m.ID }, uuid.New)
+	s.limit = func(p domain.AuthorListParams) int { return p.Limit }
 
 	return s
 }
 
-func newPostStore() *memStore[uuid.UUID, blog.Post, blog.PostListParams] {
-	s := newMemStore[uuid.UUID, blog.Post, blog.PostListParams](func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New)
-	s.limit = func(p blog.PostListParams) int { return p.Limit }
+func newPostStore() *memStore[uuid.UUID, domain.Post, domain.PostListParams] {
+	s := newMemStore[uuid.UUID, domain.Post, domain.PostListParams](func(m *domain.Post) *uuid.UUID { return &m.ID }, uuid.New)
+	s.limit = func(p domain.PostListParams) int { return p.Limit }
 
 	return s
 }
 
-func newServerWithPosts(posts blog.PostRepository) *httptest.Server {
+func newServerWithPosts(posts PostRepository) *httptest.Server {
 	var commentSeq atomic.Int64
 
 	return httptest.NewServer(NewRouter(Deps{
 		Posts:    posts,
 		Authors:  newAuthorStore(),
-		Comments: newMemStore[int64, blog.Comment, blog.CommentListParams](func(m *blog.Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
-		Tags:     newMemStore[string, blog.Tag, blog.TagListParams](func(m *blog.Tag) *string { return &m.Slug }, nil),
+		Comments: newMemStore[int64, domain.Comment, domain.CommentListParams](func(m *domain.Comment) *int64 { return &m.ID }, func() int64 { return commentSeq.Add(1) }),
+		Tags:     newMemStore[string, domain.Tag, domain.TagListParams](func(m *domain.Tag) *string { return &m.Slug }, nil),
 	}))
 }
 
@@ -222,7 +222,7 @@ func TestPostCRUD(t *testing.T) {
 
 	authorID := uuid.New()
 
-	var created blog.Post
+	var created domain.Post
 	do(t, srv, http.MethodPost, "/posts",
 		CreatePostRequest{Title: "Hello", Body: new("world"), Author: &authorID},
 		&created, http.StatusCreated)
@@ -232,16 +232,16 @@ func TestPostCRUD(t *testing.T) {
 	require.False(t, created.Published)
 	idPath := "/posts/" + created.ID.String()
 
-	var got blog.Post
+	var got domain.Post
 	do(t, srv, http.MethodGet, idPath, nil, &got, http.StatusOK)
 	require.Equal(t, "Hello", got.Title)
 
-	var list cursorPage[blog.Post]
+	var list cursorPage[domain.Post]
 	do(t, srv, http.MethodGet, "/posts", nil, &list, http.StatusOK)
 	require.Len(t, list.Items, 1)
 	require.Empty(t, list.NextCursor)
 
-	var updated blog.Post
+	var updated domain.Post
 	do(t, srv, http.MethodPut, idPath,
 		UpdatePostRequest{Title: "Updated", Body: new("body2"), Author: &authorID},
 		&updated, http.StatusOK)
@@ -403,14 +403,14 @@ func TestListParsesFiltersAndDirection(t *testing.T) {
 	cases := []struct {
 		name  string
 		query string
-		want  blog.PostListParams
+		want  domain.PostListParams
 	}{
-		{"defaults", "", blog.PostListParams{Dir: blog.SortAsc, Limit: defaultLimit + 1}},
+		{"defaults", "", domain.PostListParams{Dir: domain.SortAsc, Limit: defaultLimit + 1}},
 		{
 			"filters, direction and limit", "?author=" + author.String() + "&published=true&dir=desc&limit=5",
-			blog.PostListParams{Author: &author, Published: new(true), Dir: blog.SortDesc, Limit: 6},
+			domain.PostListParams{Author: &author, Published: new(true), Dir: domain.SortDesc, Limit: 6},
 		},
-		{"explicit ascending", "?dir=asc", blog.PostListParams{Dir: blog.SortAsc, Limit: defaultLimit + 1}},
+		{"explicit ascending", "?dir=asc", domain.PostListParams{Dir: domain.SortAsc, Limit: defaultLimit + 1}},
 	}
 
 	for _, tc := range cases {
@@ -422,7 +422,7 @@ func TestListParsesFiltersAndDirection(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			do(t, srv, http.MethodGet, "/posts"+tc.query, nil, nil, http.StatusOK)
-			require.Equal(t, []blog.PostListParams{tc.want}, posts.listed)
+			require.Equal(t, []domain.PostListParams{tc.want}, posts.listed)
 		})
 	}
 }
@@ -456,7 +456,7 @@ func TestOffsetListReportsHasMore(t *testing.T) {
 				do(t, srv, http.MethodPost, "/authors", req, nil, http.StatusCreated)
 			}
 
-			var list offsetPage[blog.Author]
+			var list offsetPage[domain.Author]
 			do(t, srv, http.MethodGet, "/authors?limit="+strconv.Itoa(tc.limit)+"&offset=0", nil, &list, http.StatusOK)
 			require.Len(t, list.Items, tc.wantLen)
 			require.Equal(t, tc.wantLimit, list.Limit)
@@ -478,15 +478,15 @@ func TestCursorListRoundTripsNextCursor(t *testing.T) {
 	}
 
 	const firstPage = "/posts?dir=desc&limit=2"
-	var first cursorPage[blog.Post]
+	var first cursorPage[domain.Post]
 	do(t, srv, http.MethodGet, firstPage, nil, &first, http.StatusOK)
 	require.Len(t, first.Items, 2)
 	require.NotEmpty(t, first.NextCursor)
 
 	last := first.Items[1]
-	var second cursorPage[blog.Post]
+	var second cursorPage[domain.Post]
 	do(t, srv, http.MethodGet, firstPage+"&cursor="+first.NextCursor, nil, &second, http.StatusOK)
-	require.Equal(t, &blog.PostCursor{CreatedAt: last.CreatedAt, ID: last.ID}, posts.listed[1].After)
+	require.Equal(t, &domain.PostCursor{CreatedAt: last.CreatedAt, ID: last.ID}, posts.listed[1].After)
 
 	got := doError(t, srv, http.MethodGet, "/posts?dir=asc&cursor="+first.NextCursor, "", http.StatusBadRequest)
 	require.Equal(t, []errorDetail{{Field: queryCursor, Reason: reasonInvalidValue}}, got.Details, "a cursor keeps its direction")
@@ -559,7 +559,7 @@ func TestPostCreateAppliesDefault(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			var created blog.Post
+			var created domain.Post
 			do(t, srv, http.MethodPost, "/posts",
 				CreatePostRequest{Title: "Hello", Published: tc.published},
 				&created, http.StatusCreated)
@@ -575,7 +575,7 @@ func TestCommentDefaults(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	before := time.Now()
-	var created blog.Comment
+	var created domain.Comment
 	do(t, srv, http.MethodPost, "/comments",
 		CreateCommentRequest{Post: new(uuid.New()), Body: "Nice"},
 		&created, http.StatusCreated)
@@ -583,7 +583,7 @@ func TestCommentDefaults(t *testing.T) {
 	require.Zero(t, created.Likes)
 	require.False(t, created.PostedAt.Before(before), "posted_at defaults to now")
 
-	var got blog.Comment
+	var got domain.Comment
 	do(t, srv, http.MethodGet, "/comments/"+strconv.FormatInt(created.ID, 10), nil, &got, http.StatusOK)
 	require.Equal(t, created.Body, got.Body)
 }
@@ -596,16 +596,16 @@ func TestTagClientKey(t *testing.T) {
 
 	const slug = "go"
 
-	var created blog.Tag
+	var created domain.Tag
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Go"}, &created, http.StatusCreated)
-	require.Equal(t, blog.Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1, Group: "general"}, created)
+	require.Equal(t, domain.Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1, Group: "general"}, created)
 
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Again"}, nil, http.StatusConflict)
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Label: "No slug"}, nil, http.StatusUnprocessableEntity)
 
-	var updated blog.Tag
+	var updated domain.Tag
 	do(t, srv, http.MethodPut, "/tags/"+slug, UpdateTagRequest{Label: "Golang", Color: new("blue")}, &updated, http.StatusOK)
-	require.Equal(t, blog.Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1, Group: "general"}, updated)
+	require.Equal(t, domain.Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1, Group: "general"}, updated)
 }
 
 func TestAuthorDateWireFormat(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 func newTagTestHandler() (http.Handler, *fakeRepository[string, domain.Tag, domain.TagListParams]) {

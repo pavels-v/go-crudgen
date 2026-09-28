@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 func newPostTestHandler() (http.Handler, *fakeRepository[uuid.UUID, domain.Post, domain.PostListParams]) {

@@ -96,7 +96,7 @@ func (gt goType) outside(s *spec.Spec) goType {
 		return gt
 	}
 
-	return goType{expr: fmt.Sprintf(exprQualified, domainAlias, gt.expr), imp: s.Module, sample: gt.sample}
+	return goType{expr: fmt.Sprintf(exprQualified, pkgDomain, gt.expr), imp: domainImport(s), sample: gt.sample}
 }
 
 // typeInfo is the complete mapping for one scalar spec field type: its Go type

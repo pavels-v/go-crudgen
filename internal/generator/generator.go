@@ -48,15 +48,16 @@ const (
 )
 
 const (
+	pkgDomain   = "domain"
 	pkgREST     = "restapi"
 	pkgPostgres = "postgres"
 )
 
 const (
-	fileModel     = "%s.go"
-	fileErrors    = "errors.go"
-	fileDate      = "date.go"
-	fileSort      = "sort.go"
+	fileModel     = pkgDomain + "/%s.go"
+	fileErrors    = pkgDomain + "/errors.go"
+	fileDate      = pkgDomain + "/date.go"
+	fileSort      = pkgDomain + "/sort.go"
 	fileHandler   = pkgREST + "/%s.go"
 	fileRequest   = pkgREST + "/request.go"
 	fileResponse  = pkgREST + "/response.go"
@@ -82,11 +83,9 @@ const (
 )
 
 const (
-	importPathSep  = "/"
-	importHostDot  = "."
-	importAliasSep = " "
-	domainAlias    = "domain"
-	typeParamOpen  = "["
+	importPathSep = "/"
+	importHostDot = "."
+	typeParamOpen = "["
 )
 
 var listParamFields = []string{listParamDir, listParamAfter, listParamLimit, listParamOffset} //nolint:gochecknoglobals // read-only lookup table
@@ -150,7 +149,7 @@ type genFile struct {
 }
 
 // Generate produces a Go service from the spec: the domain package (models,
-// repository interfaces, errors) in the output root, the HTTP layer in restapi/,
+// List params, errors) in domain/, the HTTP layer in restapi/,
 // the PostgreSQL repositories in postgres/ and goose migrations in migrations/.
 //
 // When opts.OutDir is empty the generated code is written to stdout; otherwise
@@ -299,6 +298,7 @@ func checkOutDir(dir string, files []genFile) error {
 	}
 
 	patterns := []string{
+		path.Join(pkgDomain, globGo),
 		path.Join(pkgREST, globGo),
 		path.Join(pkgPostgres, globGo),
 		path.Join(dirMigrations, globAny),
@@ -527,14 +527,14 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 		files = append(files, genFile{Path: path, Src: src})
 	}
 
-	esrc, err := renderErrors(packageData{Package: s.Package})
+	esrc, err := renderErrors(packageData{Package: pkgDomain})
 	if err != nil {
 		return nil, fmt.Errorf("generate errors: %w", err)
 	}
 
 	add(fileErrors, esrc)
 
-	sortSrc, err := renderSort(packageData{Package: s.Package})
+	sortSrc, err := renderSort(packageData{Package: pkgDomain})
 	if err != nil {
 		return nil, fmt.Errorf("generate sort direction: %w", err)
 	}
@@ -567,7 +567,7 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 	}
 
 	if shared.Date {
-		dsrc, err := renderDate(packageData{Package: s.Package})
+		dsrc, err := renderDate(packageData{Package: pkgDomain})
 		if err != nil {
 			return nil, fmt.Errorf("generate date type: %w", err)
 		}
@@ -627,14 +627,12 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 }
 
 // modelData is the template input for a single entity's domain file: the model
-// struct and its repository interface.
+// struct and its List params.
 type modelData struct {
 	Package    string
 	Imports    []string
 	Struct     string
 	Lower      string // struct name lower-cased, for the doc comment
-	Repo       string // e.g. "PostRepository"
-	PKGoType   string
 	Fields     []modelField
 	ListParams string // e.g. "PostListParams"
 	Filters    []modelField
@@ -648,15 +646,16 @@ type modelField struct {
 	Tag    string
 }
 
-// handlerData is the template input for one entity's restapi file: the request
-// DTOs and the CRUD handlers.
+// handlerData is the template input for one entity's restapi file: the
+// repository interface, the request DTOs and the CRUD handlers.
 type handlerData struct {
 	Package      string
 	Imports      []string
 	Struct       string
 	Lower        string
 	Model        string // qualified domain model, e.g. "domain.Post"
-	Repo         string // qualified repository interface, e.g. "domain.PostRepository"
+	Repo         string // repository interface, e.g. "PostRepository"
+	PKGoType     string // qualified primary key type, e.g. "uuid.UUID"
 	Plural       string // route segment, e.g. "posts"
 	CreateName   string
 	UpdateName   string
@@ -715,7 +714,7 @@ type restData struct {
 
 type routerEntity struct {
 	Struct    string
-	Repo      string // qualified repository interface
+	Repo      string // repository interface
 	RepoCtor  string // postgres repository constructor, e.g. "NewPostRepository"
 	DepsField string // field name in Deps, e.g. "Posts"
 }
@@ -729,7 +728,7 @@ type restFile struct {
 func restFiles(s *spec.Spec, shared sharedFiles) ([]genFile, error) {
 	data := restData{
 		Package:     pkgREST,
-		Domain:      domainAlias,
+		Domain:      pkgDomain,
 		Entities:    shared.Routes,
 		Offset:      shared.Offset,
 		Cursor:      shared.Cursor,
@@ -750,19 +749,19 @@ func restFiles(s *spec.Spec, shared sharedFiles) ([]genFile, error) {
 		request = append(request, importEncoding)
 	}
 
-	query := []string{importMaps, importNetHTTP, importNetURL, importSlices, importStrconv, s.Module}
+	query := []string{importMaps, importNetHTTP, importNetURL, importSlices, importStrconv, domainImport(s)}
 	if data.Cursor {
 		query = append(query, importBase64, importFmt, importJSONv2)
 	}
 
 	parts := []restFile{
 		{path: fileRequest, tmpl: tmplRequest, imports: request},
-		{path: fileResponse, tmpl: tmplResponse, imports: []string{importJSON, importJSONv2, importErrors, importSlog, importNetHTTP, importValidator, s.Module}},
+		{path: fileResponse, tmpl: tmplResponse, imports: []string{importJSON, importJSONv2, importErrors, importSlog, importNetHTTP, importValidator, domainImport(s)}},
 		{path: fileQuery, tmpl: tmplQuery, imports: query},
 		{path: fileRoutes, tmpl: tmplRoutes, imports: []string{importNetHTTP}},
 	}
 	if shared.Router {
-		parts = append(parts, restFile{path: fileRouter, tmpl: tmplRouter, imports: []string{importNetHTTP, s.Module}})
+		parts = append(parts, restFile{path: fileRouter, tmpl: tmplRouter, imports: []string{importNetHTTP}})
 	}
 
 	files := make([]genFile, 0, len(parts))
@@ -786,7 +785,11 @@ func restFiles(s *spec.Spec, shared sharedFiles) ([]genFile, error) {
 }
 
 func qualified(name string) string {
-	return fmt.Sprintf(exprQualified, domainAlias, name)
+	return fmt.Sprintf(exprQualified, pkgDomain, name)
+}
+
+func domainImport(s *spec.Spec) string {
+	return path.Join(s.Module, pkgDomain)
 }
 
 func checkColumns(e *spec.Entity) error {
@@ -859,7 +862,8 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		Struct:     name,
 		Lower:      strings.ToLower(name),
 		Model:      qualified(name),
-		Repo:       qualified(fmt.Sprintf(nameRepo, name)),
+		Repo:       fmt.Sprintf(nameRepo, name),
+		PKGoType:   pkType.outside(s).expr,
 		Plural:     plural(e.Name, e.Plural),
 		CreateName: fmt.Sprintf(nameCreateRequest, name),
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
@@ -871,7 +875,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 	data.PK = pkData{GoName: pascalCase(pk.Name), Parse: pkParse}
 	data.parsers = append(data.parsers, pkParse)
 
-	imports := map[string]struct{}{importNetHTTP: {}, s.Module: {}}
+	imports := map[string]struct{}{importContext: {}, importNetHTTP: {}, domainImport(s): {}}
 	if pkImp != "" {
 		imports[pkImp] = struct{}{}
 	}
@@ -1007,11 +1011,6 @@ func renderSort(data packageData) ([]byte, error)    { return renderTemplate(tmp
 
 // renderModel builds, executes, and gofmt-formats the domain file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
-	_, pkType, err := serveKey(e, byName)
-	if err != nil {
-		return nil, err
-	}
-
 	filters, err := listFilters(e, byName)
 	if err != nil {
 		return nil, err
@@ -1019,14 +1018,12 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 
 	name := pascalCase(e.Name)
 	data := modelData{
-		Package:    s.Package,
+		Package:    pkgDomain,
 		Struct:     name,
 		Lower:      strings.ToLower(name),
-		Repo:       fmt.Sprintf(nameRepo, name),
-		PKGoType:   pkType.expr,
 		ListParams: fmt.Sprintf(nameListParams, name),
 	}
-	imports := map[string]struct{}{importContext: {}}
+	imports := map[string]struct{}{}
 
 	for _, lf := range filters {
 		data.Filters = append(data.Filters, modelField{GoName: lf.GoName, GoType: fmt.Sprintf(exprPointer, lf.Type.expr)})
@@ -1147,20 +1144,11 @@ func groupImports(set map[string]struct{}, module string) []string {
 		sort.Strings(group)
 
 		for _, imp := range group {
-			out = append(out, importSpec(imp, module))
+			out = append(out, strconv.Quote(imp))
 		}
 	}
 
 	return out
-}
-
-func importSpec(imp, module string) string {
-	quoted := strconv.Quote(imp)
-	if imp == module {
-		return domainAlias + importAliasSep + quoted
-	}
-
-	return quoted
 }
 
 func hasFieldType(e *spec.Entity, typ string) bool {

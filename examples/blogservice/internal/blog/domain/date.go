@@ -1,4 +1,4 @@
-package blog
+package domain
 
 import (
 	"database/sql"

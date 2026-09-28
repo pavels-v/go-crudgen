@@ -1,10 +1,12 @@
 package {{ .Package }}
+{{- if .Imports }}
 
 import (
 {{- range .Imports }}
 	{{ . }}
 {{- end }}
 )
+{{- end }}
 
 // {{ .Struct }} is the API model of the {{ .Lower }} entity.
 type {{ .Struct }} struct {
@@ -34,13 +36,4 @@ type {{ .ListParams }} struct {
 {{- if not .CursorType }}
 	Offset int
 {{- end }}
-}
-
-// {{ .Repo }} is the storage interface for {{ .Struct }}.
-type {{ .Repo }} interface {
-	Create(ctx context.Context, m *{{ .Struct }}) error
-	Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Struct }}, error)
-	List(ctx context.Context, p {{ .ListParams }}) ([]{{ .Struct }}, error)
-	Update(ctx context.Context, m *{{ .Struct }}) error
-	Delete(ctx context.Context, id {{ .PKGoType }}) error
 }

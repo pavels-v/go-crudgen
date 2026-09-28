@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strconv"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 const (
@@ -42,8 +42,7 @@ type listQuery struct {
 	details []errorDetail
 }
 
-// newListQuery accepts limit and dir plus keys; any other parameter, and any
-// parameter given more than once, is an error detail.
+// newListQuery reports unknown and repeated query parameters as error details.
 func newListQuery(r *http.Request, keys ...string) *listQuery {
 	q := &listQuery{values: r.URL.Query()}
 	for _, key := range slices.Sorted(maps.Keys(q.values)) {
@@ -62,8 +61,7 @@ func (q *listQuery) invalid(key string) {
 	q.details = append(q.details, errorDetail{Field: key, Reason: reasonInvalidValue})
 }
 
-// limit reads the optional ?limit= query parameter. A limit above maxLimit is
-// clamped.
+// limit reads the optional ?limit= query parameter, clamped to maxLimit.
 func (q *listQuery) limit() int {
 	v := q.values.Get(queryLimit)
 	if v == "" {
@@ -116,8 +114,7 @@ func queryValue[T any](q *listQuery, key string, parse func(string) (T, error)) 
 	return &v
 }
 
-// queryCursorValue returns nil when ?cursor= is absent, so the first page is
-// served.
+// queryCursorValue returns nil when ?cursor= is absent.
 func queryCursorValue[C any](q *listQuery) *C {
 	if !q.values.Has(queryCursor) {
 		return nil
@@ -147,8 +144,7 @@ func encodeCursor(c any) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// trimPage drops the extra row fetched past limit, which only tells whether
-// more rows follow.
+// trimPage drops the extra row fetched past limit and reports whether it existed.
 func trimPage[T any](items []T, limit int) ([]T, bool) {
 	if len(items) > limit {
 		return items[:limit], true
