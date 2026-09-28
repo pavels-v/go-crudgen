@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -122,4 +123,50 @@ func TestGenerateBlogExample(t *testing.T) {
 	// Prove the freshly generated module compiles and its handler tests pass.
 	run(t, blogDir, "go", "build", "./...")
 	run(t, blogDir, "go", "test", "./...")
+}
+
+const (
+	shopSpec   = "testdata/shop.yaml"
+	shopModule = "example.com/shop"
+	shopOut    = "internal/shop"
+	shopGoMod  = "module " + shopModule + "\n\ngo 1.27.0\n"
+)
+
+func TestGenerateFlagMatrix(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+
+	bin := filepath.Join(t.TempDir(), "go-crudgen")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+
+	run(t, root, "go", "build", "-o", bin, "./cmd/go-crudgen")
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "defaults"},
+		{name: "pq without router, main or tests", args: []string{"--driver", "pq", "--no-router", "--no-main", "--no-tests"}},
+		{name: "custom main without router", args: []string{"--no-router", "--main", filepath.Join("cmd", "api")}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(shopGoMod), 0o600), "write go.mod")
+
+			args := append([]string{"generate", "--spec", filepath.Join(root, "test", "e2e", filepath.FromSlash(shopSpec)), "--out", shopOut}, tc.args...)
+			run(t, dir, bin, args...)
+			run(t, dir, "go", "mod", "tidy")
+			run(t, dir, "go", "build", "./...")
+			run(t, dir, "go", "vet", "./...")
+			run(t, dir, "go", "test", "./...")
+			run(t, dir, "go", "tool", "-modfile="+filepath.Join(root, "tools", "go.mod"), "golangci-lint", "run", "--allow-parallel-runners", "-c", filepath.Join(root, ".golangci.yml"), "./...")
+		})
+	}
 }

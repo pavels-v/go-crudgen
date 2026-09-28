@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 // migrationData is the template input for one entity's goose migration file. The

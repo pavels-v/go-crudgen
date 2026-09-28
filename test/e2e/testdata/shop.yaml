@@ -1,0 +1,34 @@
+package: shop
+
+entities:
+  - name: Category
+    plural: categories
+    fields:
+      - { name: slug, type: string, primary: true, validate: "min=1,max=64" }
+      - { name: title, type: string, required: true, unique: true }
+
+  - name: Product
+    pagination: cursor
+    order: name
+    fields:
+      - { name: id, type: int64, primary: true }
+      - { name: name, type: string, required: true, validate: "min=1,max=100", filter: true, index: true }
+      - { name: description, type: text }
+      - { name: price, type: decimal, required: true }
+      - { name: weight, type: float, default: 0.5 }
+      - { name: stock, type: int32, default: 0, filter: true }
+      - { name: active, type: bool, default: true, filter: true }
+      - { name: released_on, type: date }
+      - { name: attributes, type: json }
+      - { name: category, type: references, target: Category, required: true, filter: true, on_delete: cascade }
+      - { name: created_at, type: datetime, generate: on_create }
+      - { name: updated_at, type: datetime, generate: on_write }
+
+  - name: Review
+    fields:
+      - { name: id, type: int32, primary: true }
+      - { name: product, type: references, target: Product, required: true, filter: true, index: true }
+      - { name: user, type: string, required: true, validate: "email" }
+      - { name: rating, type: int32, required: true, validate: "min=1,max=5" }
+      - { name: token, type: uuid, validate: "uuid4" }
+      - { name: posted_at, type: datetime, default: now }

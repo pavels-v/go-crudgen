@@ -3,7 +3,7 @@ package generator
 import (
 	"fmt"
 
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 const (
