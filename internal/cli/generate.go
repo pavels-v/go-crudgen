@@ -50,14 +50,16 @@ func runGenerate(args []string, stderr io.Writer) int {
 	}
 
 	if *specPath == "" {
-		fmt.Fprintln(stderr, "generate: -spec is required")
+		_, _ = fmt.Fprintln(stderr, "generate: -spec is required")
+
 		fs.Usage()
 
 		return exitUsage
 	}
 
 	if *noMain && *mainDir != "" {
-		fmt.Fprintln(stderr, "generate: -main and -no-main are mutually exclusive")
+		_, _ = fmt.Fprintln(stderr, "generate: -main and -no-main are mutually exclusive")
+
 		fs.Usage()
 
 		return exitUsage
@@ -65,19 +67,19 @@ func runGenerate(args []string, stderr io.Writer) int {
 
 	s, err := spec.Load(*specPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "failed to load spec: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "failed to load spec: %v\n", err)
 		return exitError
 	}
 
 	migrationTime, err := sourceDateEpoch()
 	if err != nil {
-		fmt.Fprintf(stderr, "failed to read %s: %v\n", envSourceDateEpoch, err)
+		_, _ = fmt.Fprintf(stderr, "failed to read %s: %v\n", envSourceDateEpoch, err)
 		return exitUsage
 	}
 
 	opts := generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: !*noRouter, Main: !*noMain, MainDir: *mainDir, Tests: !*noTests, MigrationTime: migrationTime}
 	if err := generator.Generate(s, opts); err != nil {
-		fmt.Fprintf(stderr, "failed to generate: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "failed to generate: %v\n", err)
 		return exitError
 	}
 

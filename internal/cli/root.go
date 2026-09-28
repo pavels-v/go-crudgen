@@ -46,7 +46,7 @@ const (
 // Run dispatches a subcommand and returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
+		_, _ = fmt.Fprint(stderr, usage)
 		return exitUsage
 	}
 
@@ -55,13 +55,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case cmdGenerate:
 		return runGenerate(rest, stderr)
 	case cmdVersion, cmdVersionLong, cmdVersionShort:
-		fmt.Fprintln(stdout, "go-crudgen", resolveVersion())
+		_, _ = fmt.Fprintln(stdout, "go-crudgen", resolveVersion())
 		return exitOK
 	case cmdHelp, cmdHelpShort, cmdHelpLong:
-		fmt.Fprint(stdout, usage)
+		_, _ = fmt.Fprint(stdout, usage)
 		return exitOK
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
+		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
 		return exitUsage
 	}
 }
