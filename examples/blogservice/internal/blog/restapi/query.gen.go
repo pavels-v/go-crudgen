@@ -1,0 +1,158 @@
+package restapi
+
+import (
+	"encoding/base64"
+	"encoding/json/v2"
+	"fmt"
+	"maps"
+	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
+
+	"example.com/blogservice/internal/blog"
+)
+
+const (
+	queryLimit  = "limit"
+	queryDir    = "dir"
+	queryOffset = "offset"
+	queryCursor = "cursor"
+)
+
+const (
+	defaultLimit = 50
+	maxLimit     = 200
+)
+
+type offsetPage[T any] struct {
+	Items   []T  `json:"items"`
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"has_more"`
+}
+
+type cursorPage[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"next_cursor,omitzero"`
+}
+
+type listQuery struct {
+	values  url.Values
+	details []errorDetail
+}
+
+// newListQuery accepts limit and dir plus keys; any other parameter, and any
+// parameter given more than once, is an error detail.
+func newListQuery(r *http.Request, keys ...string) *listQuery {
+	q := &listQuery{values: r.URL.Query()}
+	for _, key := range slices.Sorted(maps.Keys(q.values)) {
+		switch {
+		case key != queryLimit && key != queryDir && !slices.Contains(keys, key):
+			q.details = append(q.details, errorDetail{Field: key, Reason: reasonUnknownField})
+		case len(q.values[key]) > 1:
+			q.details = append(q.details, errorDetail{Field: key, Reason: reasonDuplicateField})
+		}
+	}
+
+	return q
+}
+
+func (q *listQuery) invalid(key string) {
+	q.details = append(q.details, errorDetail{Field: key, Reason: reasonInvalidValue})
+}
+
+// limit reads the optional ?limit= query parameter. A limit above maxLimit is
+// clamped.
+func (q *listQuery) limit() int {
+	v := q.values.Get(queryLimit)
+	if v == "" {
+		return defaultLimit
+	}
+
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		q.invalid(queryLimit)
+	}
+
+	return min(n, maxLimit)
+}
+
+func (q *listQuery) offset() int {
+	v := q.values.Get(queryOffset)
+	if v == "" {
+		return 0
+	}
+
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		q.invalid(queryOffset)
+	}
+
+	return n
+}
+
+func (q *listQuery) dir() blog.SortDir {
+	d, ok := blog.ParseSortDir(q.values.Get(queryDir))
+	if !ok {
+		q.invalid(queryDir)
+	}
+
+	return d
+}
+
+// queryValue returns nil when key is absent, so the filter is not applied.
+func queryValue[T any](q *listQuery, key string, parse func(string) (T, error)) *T {
+	if !q.values.Has(key) {
+		return nil
+	}
+
+	v, err := parse(q.values.Get(key))
+	if err != nil {
+		q.invalid(key)
+		return nil
+	}
+
+	return &v
+}
+
+// queryCursorValue returns nil when ?cursor= is absent, so the first page is
+// served.
+func queryCursorValue[C any](q *listQuery) *C {
+	if !q.values.Has(queryCursor) {
+		return nil
+	}
+
+	var c C
+
+	raw, err := base64.RawURLEncoding.DecodeString(q.values.Get(queryCursor))
+	if err == nil {
+		err = json.Unmarshal(raw, &c, json.RejectUnknownMembers(true))
+	}
+
+	if err != nil {
+		q.invalid(queryCursor)
+		return nil
+	}
+
+	return &c
+}
+
+func encodeCursor(c any) (string, error) {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("encode cursor: %w", err)
+	}
+
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// trimPage drops the extra row fetched past limit, which only tells whether
+// more rows follow.
+func trimPage[T any](items []T, limit int) ([]T, bool) {
+	if len(items) > limit {
+		return items[:limit], true
+	}
+
+	return items, false
+}

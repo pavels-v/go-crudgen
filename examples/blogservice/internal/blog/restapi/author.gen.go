@@ -36,8 +36,8 @@ func NewAuthorHandler(repo blog.AuthorRepository) *AuthorHandler {
 	return &AuthorHandler{repo: repo}
 }
 
-// RegisterAuthorRoutes registers the Author REST routes on mux.
-func RegisterAuthorRoutes(mux *http.ServeMux, h *AuthorHandler) {
+// RegisterRoutes registers the Author REST routes on mux.
+func (h *AuthorHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /authors", h.Create)
 	mux.HandleFunc("GET /authors", h.List)
 	mux.HandleFunc("GET /authors/{id}", h.Get)

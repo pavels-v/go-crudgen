@@ -363,6 +363,7 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 
 	got := renderHandlerSrc(t, s, "Post")
 	for _, want := range []string{
+		"func (h *PostHandler) RegisterRoutes(mux *http.ServeMux) {",
 		`mux.HandleFunc("POST /posts", h.Create)`,
 		`mux.HandleFunc("GET /posts", h.List)`,
 		`mux.HandleFunc("GET /posts/{id}", h.Get)`,
@@ -737,11 +738,7 @@ func TestRenderRouter_PaginationHelpers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			src, err := renderRouter(routerInfo(&spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared))
-			require.NoError(t, err)
-			requireParses(t, src)
-
-			got := string(src)
+			got := renderRESTSrc(t, &spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared)
 			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
@@ -776,11 +773,7 @@ func TestRenderRouter_ParseHelpers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			src, err := renderRouter(routerInfo(&spec.Spec{Package: "blog", Module: "example.com/blog"}, sharedFiles{Offset: true, Parsers: tc.parsers}))
-			require.NoError(t, err)
-			requireParses(t, src)
-
-			got := string(src)
+			got := renderRESTSrc(t, &spec.Spec{Package: "blog", Module: "example.com/blog"}, sharedFiles{Offset: true, Parsers: tc.parsers})
 			for helper, decl := range helpers {
 				if tc.parsers[helper] {
 					wantContains(t, got, decl)
@@ -1186,17 +1179,94 @@ func TestDriverInfo_RejectsUnknown(t *testing.T) {
 	require.False(t, ok, "unknown driver should be rejected")
 }
 
+func renderRESTSrc(t *testing.T, s *spec.Spec, shared sharedFiles) string {
+	t.Helper()
+
+	files, err := restFiles(s, shared)
+	require.NoError(t, err)
+
+	var b strings.Builder
+	for _, f := range files {
+		requireParses(t, f.Src)
+		b.Write(f.Src)
+	}
+
+	return b.String()
+}
+
+func TestRestFiles_RouterFlag(t *testing.T) {
+	t.Parallel()
+
+	always := []string{fileRequest, fileResponse, fileQuery, fileRoutes}
+	cases := []struct {
+		name   string
+		router bool
+		want   []string
+	}{
+		{name: "without router", want: always},
+		{name: "with router", router: true, want: append(slices.Clone(always), fileRouter)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			files, err := restFiles(&spec.Spec{Package: "blog", Module: "example.com/blog"}, sharedFiles{Offset: true, Router: tc.router})
+			require.NoError(t, err)
+
+			paths := make([]string, len(files))
+			for i, f := range files {
+				paths[i] = f.Path
+			}
+
+			require.Equal(t, tc.want, paths)
+		})
+	}
+}
+
+func TestRestFiles_OptionalHelpers(t *testing.T) {
+	t.Parallel()
+
+	const (
+		queryValueDecl = "func queryValue["
+		valueOrDecl    = "func valueOr["
+	)
+
+	cases := []struct {
+		name   string
+		shared sharedFiles
+		want   []string
+		absent []string
+	}{
+		{name: "none", shared: sharedFiles{Offset: true}, absent: []string{queryValueDecl, valueOrDecl}},
+		{name: "filters", shared: sharedFiles{Offset: true, Filters: true}, want: []string{queryValueDecl}, absent: []string{valueOrDecl}},
+		{name: "defaults", shared: sharedFiles{Offset: true, Defaults: true}, want: []string{valueOrDecl}, absent: []string{queryValueDecl}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := renderRESTSrc(t, &spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
+	}
+}
+
 func TestRenderRouter_WiresEntities(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{Package: "blog", Module: "example.com/blog"}
-	src, err := renderRouter(routerInfo(s, sharedFiles{Offset: true, Routes: []routerEntity{
+	got := renderRESTSrc(t, s, sharedFiles{Offset: true, Router: true, Defaults: true, Routes: []routerEntity{
 		{Struct: "Post", Repo: "blog.PostRepository", DepsField: "Posts"},
-	}}))
-	require.NoError(t, err)
-	requireParses(t, src)
+	}})
 
-	got := string(src)
 	for _, want := range []string{
 		"package restapi",
 		`"example.com/blog"`,
@@ -1217,9 +1287,10 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 		"func valueOr[T any](p *T, def T) T",
 		"json.UnmarshalRead(http.MaxBytesReader(w, r.Body, maxBodyBytes), v, json.RejectUnknownMembers(true))",
 		"func NewRouter(deps Deps) http.Handler {",
-		"return withRouteErrors(mux)",
+		"func WithRouteErrors(mux *http.ServeMux) http.Handler {",
+		"return WithRouteErrors(mux)",
 		"Posts blog.PostRepository",
-		"RegisterPostRoutes(mux, NewPostHandler(deps.Posts))",
+		"NewPostHandler(deps.Posts).RegisterRoutes(mux)",
 	} {
 		wantContains(t, got, want)
 	}
@@ -1701,24 +1772,24 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 	cases := []struct {
 		name     string
 		entities []spec.Entity
+		router   bool
 		wantErr  bool
 	}{
-		{"entity Date without date fields", []spec.Entity{
-			{Name: "Date", Fields: []spec.Field{id}},
-		}, false},
-		{"entity Date next to a date field", []spec.Entity{
-			{Name: "Date", Fields: []spec.Field{id, {Name: "on", Type: spec.TypeDate}}},
-		}, true},
-		{"entity Errors", []spec.Entity{
-			{Name: "Errors", Fields: []spec.Field{id}},
-		}, true},
-		{"entity Router", []spec.Entity{
-			{Name: "Router", Fields: []spec.Field{id}},
-		}, true},
-		{"entity NewPost next to Post", []spec.Entity{
-			{Name: "Post", Fields: []spec.Field{id}},
-			{Name: "NewPost", Fields: []spec.Field{id}},
-		}, true},
+		{name: "entity Date without date fields", entities: []spec.Entity{{Name: "Date", Fields: []spec.Field{id}}}},
+		{
+			name:     "entity Date next to a date field",
+			entities: []spec.Entity{{Name: "Date", Fields: []spec.Field{id, {Name: "on", Type: spec.TypeDate}}}},
+			wantErr:  true,
+		},
+		{name: "entity Errors", entities: []spec.Entity{{Name: "Errors", Fields: []spec.Field{id}}}, wantErr: true},
+		{name: "entity Request", entities: []spec.Entity{{Name: "Request", Fields: []spec.Field{id}}}, wantErr: true},
+		{name: "entity Router without router", entities: []spec.Entity{{Name: "Router", Fields: []spec.Field{id}}}},
+		{name: "entity Router with router", entities: []spec.Entity{{Name: "Router", Fields: []spec.Field{id}}}, router: true, wantErr: true},
+		{
+			name:     "entity NewPost next to Post",
+			entities: []spec.Entity{{Name: "Post", Fields: []spec.Field{id}}, {Name: "NewPost", Fields: []spec.Field{id}}},
+			wantErr:  true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -1726,7 +1797,7 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: tc.entities}
-			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx)
+			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, tc.router)
 			require.NoError(t, err)
 
 			err = checkCollisions(files)

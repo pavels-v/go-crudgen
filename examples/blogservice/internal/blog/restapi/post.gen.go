@@ -55,8 +55,8 @@ func NewPostHandler(repo blog.PostRepository) *PostHandler {
 	return &PostHandler{repo: repo}
 }
 
-// RegisterPostRoutes registers the Post REST routes on mux.
-func RegisterPostRoutes(mux *http.ServeMux, h *PostHandler) {
+// RegisterRoutes registers the Post REST routes on mux.
+func (h *PostHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /posts", h.Create)
 	mux.HandleFunc("GET /posts", h.List)
 	mux.HandleFunc("GET /posts/{id}", h.Get)

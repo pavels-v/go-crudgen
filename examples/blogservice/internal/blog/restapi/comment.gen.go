@@ -43,8 +43,8 @@ func NewCommentHandler(repo blog.CommentRepository) *CommentHandler {
 	return &CommentHandler{repo: repo}
 }
 
-// RegisterCommentRoutes registers the Comment REST routes on mux.
-func RegisterCommentRoutes(mux *http.ServeMux, h *CommentHandler) {
+// RegisterRoutes registers the Comment REST routes on mux.
+func (h *CommentHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /comments", h.Create)
 	mux.HandleFunc("GET /comments", h.List)
 	mux.HandleFunc("GET /comments/{id}", h.Get)

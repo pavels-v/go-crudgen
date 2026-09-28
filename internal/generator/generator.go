@@ -26,6 +26,10 @@ const (
 	tmplModel     = "model.go.tmpl"
 	tmplErrors    = "errors.go.tmpl"
 	tmplHandler   = "handler.go.tmpl"
+	tmplRequest   = "request.go.tmpl"
+	tmplResponse  = "response.go.tmpl"
+	tmplQuery     = "query.go.tmpl"
+	tmplRoutes    = "routes.go.tmpl"
 	tmplRouter    = "router.go.tmpl"
 	tmplRepo      = "repo.go.tmpl"
 	tmplNulls     = "nulls.go.tmpl"
@@ -46,6 +50,10 @@ const (
 	fileDate      = "date.gen.go"
 	fileSort      = "sort.gen.go"
 	fileHandler   = pkgREST + "/%s.gen.go"
+	fileRequest   = pkgREST + "/request.gen.go"
+	fileResponse  = pkgREST + "/response.gen.go"
+	fileQuery     = pkgREST + "/query.gen.go"
+	fileRoutes    = pkgREST + "/routes.gen.go"
 	fileRouter    = pkgREST + "/router.gen.go"
 	fileRepo      = pkgPostgres + "/%s.gen.go"
 	fileDB        = pkgPostgres + "/db.gen.go"
@@ -93,6 +101,7 @@ type Options struct {
 	OutDir string
 	DryRun bool
 	Driver string // database driver for the connection constructor: "pgx" (default) or "pq"
+	Router bool   // also emit restapi.NewRouter and Deps
 }
 
 type genFile struct {
@@ -143,7 +152,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		return nil
 	}
 
-	files, err := renderFiles(s, byName, driverName, driverImp)
+	files, err := renderFiles(s, byName, driverName, driverImp, opts.Router)
 	if err != nil {
 		return err
 	}
@@ -202,6 +211,9 @@ func entitiesByName(s *spec.Spec) map[string]*spec.Entity {
 }
 
 type sharedFiles struct {
+	Router   bool
+	Filters  bool
+	Defaults bool
 	Routes   []routerEntity
 	Parsers  map[string]bool
 	Nullable bool
@@ -210,7 +222,7 @@ type sharedFiles struct {
 	Cursor   bool
 }
 
-func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, driverImp string) ([]genFile, error) {
+func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, driverImp string, router bool) ([]genFile, error) {
 	// Migrations are numbered so that a referenced table is created before the
 	// table whose foreign key points at it, regardless of declaration order.
 	order, err := migrationOrder(s.Entities, byName)
@@ -224,7 +236,7 @@ func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, drive
 	}
 
 	files := make([]genFile, 0, len(s.Entities)*filesPerEntity)
-	shared := sharedFiles{Parsers: make(map[string]bool)}
+	shared := sharedFiles{Parsers: make(map[string]bool), Router: router}
 
 	for i := range s.Entities {
 		e := &s.Entities[i]
@@ -240,6 +252,8 @@ func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, drive
 		shared.Date = shared.Date || hasFieldType(e, spec.TypeDate)
 		shared.Cursor = shared.Cursor || e.CursorPagination()
 		shared.Offset = shared.Offset || !e.CursorPagination()
+		shared.Filters = shared.Filters || len(hd.Filters) > 0
+		shared.Defaults = shared.Defaults || hd.usesValueOr
 
 		for _, p := range hd.parsers {
 			helper, _, _ := strings.Cut(p, typeParamOpen)
@@ -275,12 +289,12 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 
 	add(fileSort, sortSrc)
 
-	ssrc, err := renderRouter(routerInfo(s, shared))
+	rest, err := restFiles(s, shared)
 	if err != nil {
-		return nil, fmt.Errorf("generate router: %w", err)
+		return nil, err
 	}
 
-	add(fileRouter, ssrc)
+	files = append(files, rest...)
 
 	dbsrc, err := renderDB(dbInfo(s, driverName, driverImp))
 	if err != nil {
@@ -407,6 +421,7 @@ type handlerData struct {
 	CursorFields []string // Go names copied from the last item into the next cursor
 	Defaults     []defaultConst
 	parsers      []string // router parse helpers the handlers call
+	usesValueOr  bool
 }
 
 type defaultConst struct {
@@ -430,13 +445,15 @@ type packageData struct {
 	Package string
 }
 
-type routerData struct {
+type restData struct {
 	Package  string
 	Imports  []string
 	Domain   string
 	Entities []routerEntity
 	Offset   bool // some entity pages by offset
 	Cursor   bool // some entity pages by cursor
+	Filters  bool // some entity has a List filter
+	Defaults bool // some request field has a default
 
 	ParseString bool
 	ParseInt32  bool
@@ -450,43 +467,69 @@ type routerEntity struct {
 	DepsField string // field name in Deps, e.g. "Posts"
 }
 
-func routerInfo(s *spec.Spec, shared sharedFiles) routerData {
-	imports := map[string]struct{}{
-		importJSONv2:    {},
-		importJSON:      {},
-		importErrors:    {},
-		importMaps:      {},
-		importSlices:    {},
-		importNetURL:    {},
-		importSlog:      {},
-		importNetHTTP:   {},
-		importReflect:   {},
-		importStrconv:   {},
-		importStrings:   {},
-		importValidator: {},
-		s.Module:        {},
-	}
-	if shared.Cursor {
-		imports[importBase64] = struct{}{}
-		imports[importFmt] = struct{}{}
-	}
+type restFile struct {
+	path    string
+	tmpl    string
+	imports []string
+}
 
-	if shared.Parsers[parseText] {
-		imports[importEncoding] = struct{}{}
-	}
-
-	return routerData{
+func restFiles(s *spec.Spec, shared sharedFiles) ([]genFile, error) {
+	data := restData{
 		Package:     pkgREST,
-		Imports:     groupImports(imports, s.Module, s.Package),
 		Domain:      s.Package,
 		Entities:    shared.Routes,
 		Offset:      shared.Offset,
 		Cursor:      shared.Cursor,
+		Filters:     shared.Filters,
+		Defaults:    shared.Defaults,
 		ParseString: shared.Parsers[parseString],
 		ParseInt32:  shared.Parsers[parseInt32],
 		ParseInt64:  shared.Parsers[parseInt64],
 		ParseText:   shared.Parsers[parseText],
 	}
+
+	request := []string{importJSONv2, importNetHTTP, importReflect, importStrings, importValidator}
+	if data.ParseInt32 || data.ParseInt64 {
+		request = append(request, importStrconv)
+	}
+
+	if data.ParseText {
+		request = append(request, importEncoding)
+	}
+
+	query := []string{importMaps, importNetHTTP, importNetURL, importSlices, importStrconv, s.Module}
+	if data.Cursor {
+		query = append(query, importBase64, importFmt, importJSONv2)
+	}
+
+	parts := []restFile{
+		{path: fileRequest, tmpl: tmplRequest, imports: request},
+		{path: fileResponse, tmpl: tmplResponse, imports: []string{importJSON, importJSONv2, importErrors, importSlog, importNetHTTP, importValidator, s.Module}},
+		{path: fileQuery, tmpl: tmplQuery, imports: query},
+		{path: fileRoutes, tmpl: tmplRoutes, imports: []string{importNetHTTP}},
+	}
+	if shared.Router {
+		parts = append(parts, restFile{path: fileRouter, tmpl: tmplRouter, imports: []string{importNetHTTP, s.Module}})
+	}
+
+	files := make([]genFile, 0, len(parts))
+	for _, p := range parts {
+		set := make(map[string]struct{}, len(p.imports))
+		for _, imp := range p.imports {
+			set[imp] = struct{}{}
+		}
+
+		data.Imports = groupImports(set, s.Module, s.Package)
+
+		src, err := renderTemplate(p.tmpl, data)
+		if err != nil {
+			return nil, fmt.Errorf("generate %s: %w", p.path, err)
+		}
+
+		files = append(files, genFile{Path: p.path, Src: src})
+	}
+
+	return files, nil
 }
 
 func qualified(s *spec.Spec, name string) string {
@@ -595,6 +638,7 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 
 		if hasRequestDefault(f) {
+			data.usesValueOr = true
 			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
 
 			lit, err := goDefault(f)
@@ -692,7 +736,6 @@ func renderHandler(data handlerData) ([]byte, error) { return renderTemplate(tmp
 func renderRepo(data repoData) ([]byte, error)       { return renderTemplate(tmplRepo, data) }
 func renderNulls(data packageData) ([]byte, error)   { return renderTemplate(tmplNulls, data) }
 func renderDB(data dbData) ([]byte, error)           { return renderTemplate(tmplDB, data) }
-func renderRouter(data routerData) ([]byte, error)   { return renderTemplate(tmplRouter, data) }
 func renderDate(data packageData) ([]byte, error)    { return renderTemplate(tmplDate, data) }
 func renderErrors(data packageData) ([]byte, error)  { return renderTemplate(tmplErrors, data) }
 func renderSort(data packageData) ([]byte, error)    { return renderTemplate(tmplSort, data) }

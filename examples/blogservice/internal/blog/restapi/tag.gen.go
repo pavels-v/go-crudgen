@@ -36,8 +36,8 @@ func NewTagHandler(repo blog.TagRepository) *TagHandler {
 	return &TagHandler{repo: repo}
 }
 
-// RegisterTagRoutes registers the Tag REST routes on mux.
-func RegisterTagRoutes(mux *http.ServeMux, h *TagHandler) {
+// RegisterRoutes registers the Tag REST routes on mux.
+func (h *TagHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tags", h.Create)
 	mux.HandleFunc("GET /tags", h.List)
 	mux.HandleFunc("GET /tags/{id}", h.Get)
