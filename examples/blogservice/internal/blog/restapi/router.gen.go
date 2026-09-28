@@ -3,15 +3,15 @@ package restapi
 import (
 	"net/http"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 // Deps holds the repository implementation for each entity.
 type Deps struct {
-	Posts    blog.PostRepository
-	Authors  blog.AuthorRepository
-	Comments blog.CommentRepository
-	Tags     blog.TagRepository
+	Posts    domain.PostRepository
+	Authors  domain.AuthorRepository
+	Comments domain.CommentRepository
+	Tags     domain.TagRepository
 }
 
 // NewRouter registers every entity's routes on a fresh ServeMux and answers

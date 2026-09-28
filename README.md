@@ -111,7 +111,7 @@ entities:
 
 - `order: <field>` sets the List order (default: primary key, ties broken by it); clients pick `?dir=asc|desc` (default `asc`); the field must be NOT NULL.
 - `pagination: cursor` pages List by an opaque keyset `?cursor=` instead of `?offset=`.
-- `package` names the root package; `module` is the import path of the `--out` directory.
+- `package` names the root package, which `restapi` and `postgres` import as `domain`; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
 - `required` fields must be present in the request body; `false` and `0` are accepted, an empty `string` or `text` is not.

@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strconv"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 const (
@@ -92,8 +92,8 @@ func (q *listQuery) offset() int {
 	return n
 }
 
-func (q *listQuery) dir() blog.SortDir {
-	d, ok := blog.ParseSortDir(q.values.Get(queryDir))
+func (q *listQuery) dir() domain.SortDir {
+	d, ok := domain.ParseSortDir(q.values.Get(queryDir))
 	if !ok {
 		q.invalid(queryDir)
 	}

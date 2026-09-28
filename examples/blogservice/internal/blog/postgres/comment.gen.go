@@ -11,12 +11,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
-// commentRow is the database representation of blog.Comment. Nullable
+// commentRow is the database representation of domain.Comment. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newCommentRow and toModel convert to and from the pointer fields on blog.Comment.
+// newCommentRow and toModel convert to and from the pointer fields on domain.Comment.
 type commentRow struct {
 	ID       int64     `db:"id"`
 	Post     uuid.UUID `db:"post"`
@@ -27,7 +27,7 @@ type commentRow struct {
 
 // newCommentRow builds the row written by Create and Update. Generated
 // columns are set by the SQL itself, so they are omitted here.
-func newCommentRow(m *blog.Comment) commentRow {
+func newCommentRow(m *domain.Comment) commentRow {
 	return commentRow{
 		ID:       m.ID,
 		Post:     m.Post,
@@ -38,8 +38,8 @@ func newCommentRow(m *blog.Comment) commentRow {
 }
 
 // toModel converts a scanned row back into the API model.
-func (row commentRow) toModel() blog.Comment {
-	return blog.Comment{
+func (row commentRow) toModel() domain.Comment {
+	return domain.Comment{
 		ID:       row.ID,
 		Post:     row.Post,
 		Body:     row.Body,
@@ -48,7 +48,7 @@ func (row commentRow) toModel() blog.Comment {
 	}
 }
 
-// CommentRepository is a PostgreSQL-backed blog.CommentRepository. It depends on sqlx rather
+// CommentRepository is a PostgreSQL-backed domain.CommentRepository. It depends on sqlx rather
 // than a concrete driver, so any database/sql-compatible Postgres driver
 // (lib/pq, pgx's stdlib adapter, ...) can back it.
 type CommentRepository struct {
@@ -60,9 +60,9 @@ func NewCommentRepository(db *sqlx.DB) *CommentRepository {
 	return &CommentRepository{db: db}
 }
 
-var _ blog.CommentRepository = (*CommentRepository)(nil)
+var _ domain.CommentRepository = (*CommentRepository)(nil)
 
-func (r *CommentRepository) Create(ctx context.Context, m *blog.Comment) error {
+func (r *CommentRepository) Create(ctx context.Context, m *domain.Comment) error {
 	row := newCommentRow(m)
 
 	if err := r.db.QueryRowContext(ctx, `INSERT INTO comments (post, body, likes, posted_at) VALUES ($1, $2, $3, $4) RETURNING id`, row.Post, row.Body, row.Likes, row.PostedAt).Scan(&m.ID); err != nil {
@@ -72,11 +72,11 @@ func (r *CommentRepository) Create(ctx context.Context, m *blog.Comment) error {
 	return nil
 }
 
-func (r *CommentRepository) Get(ctx context.Context, id int64) (*blog.Comment, error) {
+func (r *CommentRepository) Get(ctx context.Context, id int64) (*domain.Comment, error) {
 	var row commentRow
 	if err := r.db.GetContext(ctx, &row, `SELECT id, post, body, likes, posted_at FROM comments WHERE id = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, blog.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 
 		return nil, fmt.Errorf("get comment: %w", err)
@@ -87,9 +87,9 @@ func (r *CommentRepository) Get(ctx context.Context, id int64) (*blog.Comment, e
 	return &m, nil
 }
 
-func (r *CommentRepository) List(ctx context.Context, p blog.CommentListParams) ([]blog.Comment, error) {
+func (r *CommentRepository) List(ctx context.Context, p domain.CommentListParams) ([]domain.Comment, error) {
 	order := `posted_at, id`
-	if p.Dir == blog.SortDesc {
+	if p.Dir == domain.SortDesc {
 		order = `posted_at DESC, id DESC`
 	}
 
@@ -116,7 +116,7 @@ func (r *CommentRepository) List(ctx context.Context, p blog.CommentListParams) 
 		return nil, fmt.Errorf("list comment: %w", err)
 	}
 
-	out := make([]blog.Comment, len(rows))
+	out := make([]domain.Comment, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
@@ -124,7 +124,7 @@ func (r *CommentRepository) List(ctx context.Context, p blog.CommentListParams) 
 	return out, nil
 }
 
-func (r *CommentRepository) Update(ctx context.Context, m *blog.Comment) error {
+func (r *CommentRepository) Update(ctx context.Context, m *domain.Comment) error {
 	row := newCommentRow(m)
 
 	res, err := r.db.ExecContext(ctx, `UPDATE comments SET post = $1, body = $2, likes = $3, posted_at = $4 WHERE id = $5`, row.Post, row.Body, row.Likes, row.PostedAt, row.ID)
@@ -138,7 +138,7 @@ func (r *CommentRepository) Update(ctx context.Context, m *blog.Comment) error {
 	}
 
 	if n == 0 {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return nil
@@ -156,7 +156,7 @@ func (r *CommentRepository) Delete(ctx context.Context, id int64) error {
 	}
 
 	if n == 0 {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return nil

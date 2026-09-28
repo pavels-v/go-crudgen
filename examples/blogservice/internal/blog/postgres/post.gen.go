@@ -12,12 +12,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
-// postRow is the database representation of blog.Post. Nullable
+// postRow is the database representation of domain.Post. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newPostRow and toModel convert to and from the pointer fields on blog.Post.
+// newPostRow and toModel convert to and from the pointer fields on domain.Post.
 type postRow struct {
 	ID        uuid.UUID                `db:"id"`
 	Title     string                   `db:"title"`
@@ -32,7 +32,7 @@ type postRow struct {
 
 // newPostRow builds the row written by Create and Update. Generated
 // columns are set by the SQL itself, so they are omitted here.
-func newPostRow(m *blog.Post) postRow {
+func newPostRow(m *domain.Post) postRow {
 	return postRow{
 		ID:        m.ID,
 		Title:     m.Title,
@@ -45,8 +45,8 @@ func newPostRow(m *blog.Post) postRow {
 }
 
 // toModel converts a scanned row back into the API model.
-func (row postRow) toModel() blog.Post {
-	return blog.Post{
+func (row postRow) toModel() domain.Post {
+	return domain.Post{
 		ID:        row.ID,
 		Title:     row.Title,
 		Body:      fromNull(row.Body),
@@ -59,7 +59,7 @@ func (row postRow) toModel() blog.Post {
 	}
 }
 
-// PostRepository is a PostgreSQL-backed blog.PostRepository. It depends on sqlx rather
+// PostRepository is a PostgreSQL-backed domain.PostRepository. It depends on sqlx rather
 // than a concrete driver, so any database/sql-compatible Postgres driver
 // (lib/pq, pgx's stdlib adapter, ...) can back it.
 type PostRepository struct {
@@ -71,9 +71,9 @@ func NewPostRepository(db *sqlx.DB) *PostRepository {
 	return &PostRepository{db: db}
 }
 
-var _ blog.PostRepository = (*PostRepository)(nil)
+var _ domain.PostRepository = (*PostRepository)(nil)
 
-func (r *PostRepository) Create(ctx context.Context, m *blog.Post) error {
+func (r *PostRepository) Create(ctx context.Context, m *domain.Post) error {
 	m.ID = uuid.New()
 	row := newPostRow(m)
 
@@ -84,11 +84,11 @@ func (r *PostRepository) Create(ctx context.Context, m *blog.Post) error {
 	return nil
 }
 
-func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, error) {
+func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*domain.Post, error) {
 	var row postRow
 	if err := r.db.GetContext(ctx, &row, `SELECT id, title, body, published, views, metadata, author, created_at, updated_at FROM posts WHERE id = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, blog.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 
 		return nil, fmt.Errorf("get post: %w", err)
@@ -99,9 +99,9 @@ func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, err
 	return &m, nil
 }
 
-func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blog.Post, error) {
+func (r *PostRepository) List(ctx context.Context, p domain.PostListParams) ([]domain.Post, error) {
 	order, after := `created_at, id`, `(created_at, id) > (?, ?)`
-	if p.Dir == blog.SortDesc {
+	if p.Dir == domain.SortDesc {
 		order, after = `created_at DESC, id DESC`, `(created_at, id) < (?, ?)`
 	}
 
@@ -138,7 +138,7 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 		return nil, fmt.Errorf("list post: %w", err)
 	}
 
-	out := make([]blog.Post, len(rows))
+	out := make([]domain.Post, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
@@ -146,12 +146,12 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 	return out, nil
 }
 
-func (r *PostRepository) Update(ctx context.Context, m *blog.Post) error {
+func (r *PostRepository) Update(ctx context.Context, m *domain.Post) error {
 	row := newPostRow(m)
 
 	if err := r.db.QueryRowContext(ctx, `UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author, row.ID).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return blog.ErrNotFound
+			return domain.ErrNotFound
 		}
 
 		return fmt.Errorf("update post: %w", mapWriteError(err))
@@ -172,7 +172,7 @@ func (r *PostRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if n == 0 {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return nil

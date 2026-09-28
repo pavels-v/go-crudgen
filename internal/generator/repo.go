@@ -91,8 +91,8 @@ func dbInfo(s *spec.Spec, driverName, driverImp string) dbData {
 			importSQLx:   {},
 			driverImp:    {},
 			s.Module:     {},
-		}, s.Module, s.Package),
-		Domain:       s.Package,
+		}, s.Module),
+		Domain:       domainAlias,
 		DriverName:   driverName,
 		DriverImport: driverImp,
 	}
@@ -132,9 +132,9 @@ type repoData struct {
 	Imports         []string
 	Domain          string
 	Struct          string
-	Model           string // qualified domain model, e.g. "blog.Post"
+	Model           string // qualified domain model, e.g. "domain.Post"
 	LowerStruct     string // struct name lower-cased, for error messages
-	Repo            string // qualified interface name, e.g. "blog.PostRepository"
+	Repo            string // qualified interface name, e.g. "domain.PostRepository"
 	Receiver        string // concrete type, e.g. "PostRepository"
 	Constructor     string // e.g. "NewPostRepository"
 	PKGoType        string
@@ -155,7 +155,7 @@ type repoData struct {
 	UpdateSQL string
 	DeleteSQL string
 
-	ListParams  string // qualified domain params, e.g. "blog.PostListParams"
+	ListParams  string // qualified domain params, e.g. "domain.PostListParams"
 	ListDynamic bool   // WHERE is assembled from ListFilters and the cursor
 	ListFilters []repoFilter
 	ListOrder   ordering
@@ -369,15 +369,15 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed
 	// context/database/sql/errors/fmt/sqlx packages.
-	imports := groupImports(impSet, s.Module, s.Package)
+	imports := groupImports(impSet, s.Module)
 
 	return repoData{
 		Package:         pkgPostgres,
-		Domain:          s.Package,
+		Domain:          domainAlias,
 		Struct:          name,
-		Model:           qualified(s, name),
+		Model:           qualified(name),
 		LowerStruct:     strings.ToLower(name),
-		Repo:            qualified(s, fmt.Sprintf(nameRepo, name)),
+		Repo:            qualified(fmt.Sprintf(nameRepo, name)),
 		Receiver:        fmt.Sprintf(nameRepo, name),
 		Constructor:     fmt.Sprintf(nameRepoCtor, name),
 		PKGoType:        gt.expr,
@@ -393,7 +393,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		CreateSQL:       createSQL,
 		GetSQL:          getSQL,
 		ListSQL:         listSQL,
-		ListParams:      qualified(s, fmt.Sprintf(nameListParams, name)),
+		ListParams:      qualified(fmt.Sprintf(nameListParams, name)),
 		ListDynamic:     listDynamic,
 		ListFilters:     listFilterData,
 		ListOrder:       listOrd,

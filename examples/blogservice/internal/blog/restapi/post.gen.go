@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 const (
@@ -21,8 +21,8 @@ const (
 )
 
 type postCursor struct {
-	Dir   blog.SortDir    `json:"dir"`
-	After blog.PostCursor `json:"after"`
+	Dir   domain.SortDir    `json:"dir"`
+	After domain.PostCursor `json:"after"`
 }
 
 // CreatePostRequest is the request body for creating the post entity.
@@ -47,11 +47,11 @@ type UpdatePostRequest struct {
 
 // PostHandler serves the CRUD endpoints for Post.
 type PostHandler struct {
-	repo blog.PostRepository
+	repo domain.PostRepository
 }
 
 // NewPostHandler returns a handler backed by repo.
-func NewPostHandler(repo blog.PostRepository) *PostHandler {
+func NewPostHandler(repo domain.PostRepository) *PostHandler {
 	return &PostHandler{repo: repo}
 }
 
@@ -76,7 +76,7 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Post{
+	m := domain.Post{
 		Title:     req.Title,
 		Body:      req.Body,
 		Published: valueOr(req.Published, defaultPostPublished),
@@ -110,7 +110,7 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := newListQuery(r, queryCursor, queryPostPublished, queryPostAuthor)
 	limit := q.limit()
-	p := blog.PostListParams{
+	p := domain.PostListParams{
 		Published: queryValue(q, queryPostPublished, strconv.ParseBool),
 		Author:    queryValue(q, queryPostAuthor, parseText[uuid.UUID]),
 		Dir:       q.dir(),
@@ -137,13 +137,13 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, more := trimPage(items, limit)
-	page := cursorPage[blog.Post]{Items: items}
+	page := cursorPage[domain.Post]{Items: items}
 
 	if more {
 		last := items[len(items)-1]
 		c := postCursor{
 			Dir: p.Dir,
-			After: blog.PostCursor{
+			After: domain.PostCursor{
 				CreatedAt: last.CreatedAt,
 				ID:        last.ID,
 			},
@@ -175,7 +175,7 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Post{
+	m := domain.Post{
 		ID:        id,
 		Title:     req.Title,
 		Body:      req.Body,

@@ -10,22 +10,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
-// authorRow is the database representation of blog.Author. Nullable
+// authorRow is the database representation of domain.Author. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newAuthorRow and toModel convert to and from the pointer fields on blog.Author.
+// newAuthorRow and toModel convert to and from the pointer fields on domain.Author.
 type authorRow struct {
-	ID     uuid.UUID           `db:"id"`
-	Email  string              `db:"email"`
-	Name   sql.Null[string]    `db:"name"`
-	BornOn sql.Null[blog.Date] `db:"born_on"`
+	ID     uuid.UUID             `db:"id"`
+	Email  string                `db:"email"`
+	Name   sql.Null[string]      `db:"name"`
+	BornOn sql.Null[domain.Date] `db:"born_on"`
 }
 
 // newAuthorRow builds the row written by Create and Update. Generated
 // columns are set by the SQL itself, so they are omitted here.
-func newAuthorRow(m *blog.Author) authorRow {
+func newAuthorRow(m *domain.Author) authorRow {
 	return authorRow{
 		ID:     m.ID,
 		Email:  m.Email,
@@ -35,8 +35,8 @@ func newAuthorRow(m *blog.Author) authorRow {
 }
 
 // toModel converts a scanned row back into the API model.
-func (row authorRow) toModel() blog.Author {
-	return blog.Author{
+func (row authorRow) toModel() domain.Author {
+	return domain.Author{
 		ID:     row.ID,
 		Email:  row.Email,
 		Name:   fromNull(row.Name),
@@ -44,7 +44,7 @@ func (row authorRow) toModel() blog.Author {
 	}
 }
 
-// AuthorRepository is a PostgreSQL-backed blog.AuthorRepository. It depends on sqlx rather
+// AuthorRepository is a PostgreSQL-backed domain.AuthorRepository. It depends on sqlx rather
 // than a concrete driver, so any database/sql-compatible Postgres driver
 // (lib/pq, pgx's stdlib adapter, ...) can back it.
 type AuthorRepository struct {
@@ -56,9 +56,9 @@ func NewAuthorRepository(db *sqlx.DB) *AuthorRepository {
 	return &AuthorRepository{db: db}
 }
 
-var _ blog.AuthorRepository = (*AuthorRepository)(nil)
+var _ domain.AuthorRepository = (*AuthorRepository)(nil)
 
-func (r *AuthorRepository) Create(ctx context.Context, m *blog.Author) error {
+func (r *AuthorRepository) Create(ctx context.Context, m *domain.Author) error {
 	m.ID = uuid.New()
 	row := newAuthorRow(m)
 
@@ -69,11 +69,11 @@ func (r *AuthorRepository) Create(ctx context.Context, m *blog.Author) error {
 	return nil
 }
 
-func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Author, error) {
+func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*domain.Author, error) {
 	var row authorRow
 	if err := r.db.GetContext(ctx, &row, `SELECT id, email, name, born_on FROM authors WHERE id = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, blog.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 
 		return nil, fmt.Errorf("get author: %w", err)
@@ -84,9 +84,9 @@ func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Author,
 	return &m, nil
 }
 
-func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([]blog.Author, error) {
+func (r *AuthorRepository) List(ctx context.Context, p domain.AuthorListParams) ([]domain.Author, error) {
 	order := `id`
-	if p.Dir == blog.SortDesc {
+	if p.Dir == domain.SortDesc {
 		order = `id DESC`
 	}
 
@@ -113,7 +113,7 @@ func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([
 		return nil, fmt.Errorf("list author: %w", err)
 	}
 
-	out := make([]blog.Author, len(rows))
+	out := make([]domain.Author, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
@@ -121,7 +121,7 @@ func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([
 	return out, nil
 }
 
-func (r *AuthorRepository) Update(ctx context.Context, m *blog.Author) error {
+func (r *AuthorRepository) Update(ctx context.Context, m *domain.Author) error {
 	row := newAuthorRow(m)
 
 	res, err := r.db.ExecContext(ctx, `UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`, row.Email, row.Name, row.BornOn, row.ID)
@@ -135,7 +135,7 @@ func (r *AuthorRepository) Update(ctx context.Context, m *blog.Author) error {
 	}
 
 	if n == 0 {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return nil
@@ -153,7 +153,7 @@ func (r *AuthorRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if n == 0 {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return nil

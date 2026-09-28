@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 const (
@@ -35,11 +35,11 @@ type UpdateCommentRequest struct {
 
 // CommentHandler serves the CRUD endpoints for Comment.
 type CommentHandler struct {
-	repo blog.CommentRepository
+	repo domain.CommentRepository
 }
 
 // NewCommentHandler returns a handler backed by repo.
-func NewCommentHandler(repo blog.CommentRepository) *CommentHandler {
+func NewCommentHandler(repo domain.CommentRepository) *CommentHandler {
 	return &CommentHandler{repo: repo}
 }
 
@@ -64,7 +64,7 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Comment{
+	m := domain.Comment{
 		Post:     *req.Post,
 		Body:     req.Body,
 		Likes:    valueOr(req.Likes, defaultCommentLikes),
@@ -96,7 +96,7 @@ func (h *CommentHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := newListQuery(r, queryOffset, queryCommentPost)
 	limit := q.limit()
-	p := blog.CommentListParams{
+	p := domain.CommentListParams{
 		Post:   queryValue(q, queryCommentPost, parseText[uuid.UUID]),
 		Dir:    q.dir(),
 		Limit:  limit + 1,
@@ -115,7 +115,7 @@ func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, more := trimPage(items, limit)
-	writeBody(w, r, http.StatusOK, offsetPage[blog.Comment]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+	writeBody(w, r, http.StatusOK, offsetPage[domain.Comment]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *CommentHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +135,7 @@ func (h *CommentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Comment{
+	m := domain.Comment{
 		ID:       id,
 		Post:     *req.Post,
 		Body:     req.Body,

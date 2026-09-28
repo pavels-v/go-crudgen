@@ -100,6 +100,10 @@ func TestValidate_Errors(t *testing.T) {
 		mutate func(*Spec)
 	}{
 		{"missing package", func(s *Spec) { s.Package = "" }},
+		{"keyword package", func(s *Spec) { s.Package = "type" }},
+		{"package with a dash", func(s *Spec) { s.Package = "my-blog" }},
+		{"main package", func(s *Spec) { s.Package = pkgMain }},
+		{"blank package", func(s *Spec) { s.Package = blankIdent }},
 		{"missing module", func(s *Spec) { s.Module = "" }},
 		{"no entities", func(s *Spec) { s.Entities = nil }},
 		{"entity without name", func(s *Spec) { s.Entities[0].Name = "" }},

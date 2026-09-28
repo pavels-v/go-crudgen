@@ -3,6 +3,7 @@ package spec
 import (
 	"errors"
 	"fmt"
+	"go/token"
 	"strings"
 )
 
@@ -48,6 +49,11 @@ var unsortableTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-onl
 }
 
 const (
+	pkgMain    = "main"
+	blankIdent = "_"
+)
+
+const (
 	queryLimit  = "limit"
 	queryOffset = "offset"
 	queryDir    = "dir"
@@ -65,6 +71,10 @@ var reservedQueryNames = map[string]struct{}{ //nolint:gochecknoglobals // read-
 func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Package) == "" {
 		return errors.New("missing package name")
+	}
+
+	if !token.IsIdentifier(s.Package) || s.Package == pkgMain || s.Package == blankIdent {
+		return fmt.Errorf("package %q is not an importable Go package name", s.Package)
 	}
 
 	if strings.TrimSpace(s.Module) == "" {

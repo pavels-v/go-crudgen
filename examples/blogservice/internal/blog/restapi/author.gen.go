@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 const (
@@ -14,25 +14,25 @@ const (
 
 // CreateAuthorRequest is the request body for creating the author entity.
 type CreateAuthorRequest struct {
-	Email  string     `json:"email" validate:"required,email"`
-	Name   *string    `json:"name,omitzero" validate:"omitnil,max=100"`
-	BornOn *blog.Date `json:"born_on,omitzero"`
+	Email  string       `json:"email" validate:"required,email"`
+	Name   *string      `json:"name,omitzero" validate:"omitnil,max=100"`
+	BornOn *domain.Date `json:"born_on,omitzero"`
 }
 
 // UpdateAuthorRequest is the request body for replacing the author entity.
 type UpdateAuthorRequest struct {
-	Email  string     `json:"email" validate:"required,email"`
-	Name   *string    `json:"name,omitzero" validate:"omitnil,max=100"`
-	BornOn *blog.Date `json:"born_on,omitzero"`
+	Email  string       `json:"email" validate:"required,email"`
+	Name   *string      `json:"name,omitzero" validate:"omitnil,max=100"`
+	BornOn *domain.Date `json:"born_on,omitzero"`
 }
 
 // AuthorHandler serves the CRUD endpoints for Author.
 type AuthorHandler struct {
-	repo blog.AuthorRepository
+	repo domain.AuthorRepository
 }
 
 // NewAuthorHandler returns a handler backed by repo.
-func NewAuthorHandler(repo blog.AuthorRepository) *AuthorHandler {
+func NewAuthorHandler(repo domain.AuthorRepository) *AuthorHandler {
 	return &AuthorHandler{repo: repo}
 }
 
@@ -57,7 +57,7 @@ func (h *AuthorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Author{
+	m := domain.Author{
 		Email:  req.Email,
 		Name:   req.Name,
 		BornOn: req.BornOn,
@@ -88,7 +88,7 @@ func (h *AuthorHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := newListQuery(r, queryOffset, queryAuthorEmail)
 	limit := q.limit()
-	p := blog.AuthorListParams{
+	p := domain.AuthorListParams{
 		Email:  queryValue(q, queryAuthorEmail, parseString),
 		Dir:    q.dir(),
 		Limit:  limit + 1,
@@ -107,7 +107,7 @@ func (h *AuthorHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, more := trimPage(items, limit)
-	writeBody(w, r, http.StatusOK, offsetPage[blog.Author]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+	writeBody(w, r, http.StatusOK, offsetPage[domain.Author]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +127,7 @@ func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Author{
+	m := domain.Author{
 		ID:     id,
 		Email:  req.Email,
 		Name:   req.Name,

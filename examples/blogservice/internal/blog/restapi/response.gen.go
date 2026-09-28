@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 const (
@@ -40,10 +40,10 @@ const (
 )
 
 var repoErrors = map[error]repoError{ //nolint:gochecknoglobals // read-only lookup table
-	blog.ErrNotFound:          {status: http.StatusNotFound, code: codeNotFound},
-	blog.ErrAlreadyExists:     {status: http.StatusConflict, code: codeAlreadyExists},
-	blog.ErrReferenceNotFound: {status: http.StatusUnprocessableEntity, code: codeReferenceNotFound},
-	blog.ErrStillReferenced:   {status: http.StatusConflict, code: codeStillReferenced},
+	domain.ErrNotFound:          {status: http.StatusNotFound, code: codeNotFound},
+	domain.ErrAlreadyExists:     {status: http.StatusConflict, code: codeAlreadyExists},
+	domain.ErrReferenceNotFound: {status: http.StatusUnprocessableEntity, code: codeReferenceNotFound},
+	domain.ErrStillReferenced:   {status: http.StatusConflict, code: codeStillReferenced},
 }
 
 type repoError struct {

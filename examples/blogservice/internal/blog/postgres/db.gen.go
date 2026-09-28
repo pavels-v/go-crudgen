@@ -8,7 +8,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 // Connection-pool defaults. Tune these for your workload, or replace NewDB with
@@ -60,9 +60,9 @@ func sqlState(err error) string {
 func mapWriteError(err error) error {
 	switch sqlState(err) {
 	case sqlStateUniqueViolation:
-		return fmt.Errorf("%w: %v", blog.ErrAlreadyExists, err)
+		return fmt.Errorf("%w: %v", domain.ErrAlreadyExists, err)
 	case sqlStateForeignKeyViolation:
-		return fmt.Errorf("%w: %v", blog.ErrReferenceNotFound, err)
+		return fmt.Errorf("%w: %v", domain.ErrReferenceNotFound, err)
 	}
 
 	return err
@@ -70,7 +70,7 @@ func mapWriteError(err error) error {
 
 func mapDeleteError(err error) error {
 	if sqlState(err) == sqlStateForeignKeyViolation {
-		return fmt.Errorf("%w: %v", blog.ErrStillReferenced, err)
+		return fmt.Errorf("%w: %v", domain.ErrStillReferenced, err)
 	}
 
 	return err

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"go/format"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -73,6 +72,7 @@ const (
 	importPathSep  = "/"
 	importHostDot  = "."
 	importAliasSep = " "
+	domainAlias    = "domain"
 	typeParamOpen  = "["
 )
 
@@ -403,8 +403,8 @@ type handlerData struct {
 	Imports      []string
 	Struct       string
 	Lower        string
-	Model        string // qualified domain model, e.g. "blog.Post"
-	Repo         string // qualified repository interface, e.g. "blog.PostRepository"
+	Model        string // qualified domain model, e.g. "domain.Post"
+	Repo         string // qualified repository interface, e.g. "domain.PostRepository"
 	Plural       string // route segment, e.g. "posts"
 	CreateName   string
 	UpdateName   string
@@ -413,11 +413,11 @@ type handlerData struct {
 	PK           pkData
 	CreateAssign []assign // fields assigned from the create request
 	UpdateAssign []assign // fields assigned from the update request (PK excluded)
-	ListParams   string   // qualified domain params, e.g. "blog.PostListParams"
+	ListParams   string   // qualified domain params, e.g. "domain.PostListParams"
 	Filters      []handlerFilter
-	SortDir      string   // qualified, e.g. "blog.SortDir"
+	SortDir      string   // qualified, e.g. "domain.SortDir"
 	Cursor       string   // wire cursor type, e.g. "postCursor", empty under offset pagination
-	CursorType   string   // qualified domain cursor, e.g. "blog.PostCursor"
+	CursorType   string   // qualified domain cursor, e.g. "domain.PostCursor"
 	CursorFields []string // Go names copied from the last item into the next cursor
 	Defaults     []defaultConst
 	parsers      []string // router parse helpers the handlers call
@@ -476,7 +476,7 @@ type restFile struct {
 func restFiles(s *spec.Spec, shared sharedFiles) ([]genFile, error) {
 	data := restData{
 		Package:     pkgREST,
-		Domain:      s.Package,
+		Domain:      domainAlias,
 		Entities:    shared.Routes,
 		Offset:      shared.Offset,
 		Cursor:      shared.Cursor,
@@ -519,7 +519,7 @@ func restFiles(s *spec.Spec, shared sharedFiles) ([]genFile, error) {
 			set[imp] = struct{}{}
 		}
 
-		data.Imports = groupImports(set, s.Module, s.Package)
+		data.Imports = groupImports(set, s.Module)
 
 		src, err := renderTemplate(p.tmpl, data)
 		if err != nil {
@@ -532,8 +532,8 @@ func restFiles(s *spec.Spec, shared sharedFiles) ([]genFile, error) {
 	return files, nil
 }
 
-func qualified(s *spec.Spec, name string) string {
-	return fmt.Sprintf(exprQualified, s.Package, name)
+func qualified(name string) string {
+	return fmt.Sprintf(exprQualified, domainAlias, name)
 }
 
 func checkColumns(e *spec.Entity) error {
@@ -593,13 +593,13 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		Package:    pkgREST,
 		Struct:     name,
 		Lower:      strings.ToLower(name),
-		Model:      qualified(s, name),
-		Repo:       qualified(s, fmt.Sprintf(nameRepo, name)),
+		Model:      qualified(name),
+		Repo:       qualified(fmt.Sprintf(nameRepo, name)),
 		Plural:     plural(e.Name, e.Plural),
 		CreateName: fmt.Sprintf(nameCreateRequest, name),
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
-		ListParams: qualified(s, fmt.Sprintf(nameListParams, name)),
-		SortDir:    qualified(s, nameSortDir),
+		ListParams: qualified(fmt.Sprintf(nameListParams, name)),
+		SortDir:    qualified(nameSortDir),
 	}
 
 	pkParse, pkImp := queryParser(pkType, s)
@@ -694,14 +694,14 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 
 	if e.CursorPagination() {
 		data.Cursor = unexport(fmt.Sprintf(nameCursor, name))
-		data.CursorType = qualified(s, fmt.Sprintf(nameCursor, name))
+		data.CursorType = qualified(fmt.Sprintf(nameCursor, name))
 
 		for _, f := range cursorFields(e) {
 			data.CursorFields = append(data.CursorFields, pascalCase(f.Name))
 		}
 	}
 
-	data.Imports = groupImports(imports, s.Module, s.Package)
+	data.Imports = groupImports(imports, s.Module)
 
 	return data, nil
 }
@@ -798,7 +798,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 	}
 
-	data.Imports = groupImports(imports, s.Module, s.Package)
+	data.Imports = groupImports(imports, s.Module)
 
 	return renderTemplate(tmplModel, data)
 }
@@ -855,7 +855,7 @@ func requiresPresence(f spec.Field, gt goType) bool {
 	return f.Required && !isString
 }
 
-func groupImports(set map[string]struct{}, module, pkg string) []string {
+func groupImports(set map[string]struct{}, module string) []string {
 	var std, ext, local []string
 	for imp := range set {
 		host, _, _ := strings.Cut(imp, importPathSep)
@@ -882,17 +882,17 @@ func groupImports(set map[string]struct{}, module, pkg string) []string {
 		sort.Strings(group)
 
 		for _, imp := range group {
-			out = append(out, importSpec(imp, module, pkg))
+			out = append(out, importSpec(imp, module))
 		}
 	}
 
 	return out
 }
 
-func importSpec(imp, module, pkg string) string {
+func importSpec(imp, module string) string {
 	quoted := strconv.Quote(imp)
-	if imp == module && path.Base(module) != pkg {
-		return pkg + importAliasSep + quoted
+	if imp == module {
+		return domainAlias + importAliasSep + quoted
 	}
 
 	return quoted
