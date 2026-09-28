@@ -26,23 +26,26 @@ const (
 )
 
 const (
-	exprNew        = "new(%s)"
-	exprSeeded     = "seeded.%s"
-	exprUUIDString = "%s.String()"
-	exprFormatInt  = "strconv.FormatInt(%s, 10)"
-	exprNextInt    = "strconv.FormatInt(%s+1, 10)"
-	exprToInt64    = "int64(%s)"
-	exprMissingKey = `"missing"`
-	exprMissingID  = "uuid.NewString()"
-	exprInt32      = "int32(%d)"
-	exprInt64      = "int64(%d)"
-	exprNewUUID    = "uuid.New()"
-	exprDecimal    = "decimal.NewFromInt(1)"
-	exprDate       = "domain.Date(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))"
-	exprDatetime   = "time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)"
-	exprJSON       = "jsontext.Value(`{}`)"
-	sampleFiller   = "a"
-	maxSampleLen   = 1024
+	exprNew         = "new(%s)"
+	exprSeeded      = "seeded.%s"
+	exprUUIDString  = "%s.String()"
+	exprFormatInt   = "strconv.FormatInt(%s, 10)"
+	exprNextInt     = "strconv.FormatInt(%s+1, 10)"
+	exprToInt64     = "int64(%s)"
+	exprMissingKey  = `"missing"`
+	exprMissingID   = "uuid.NewString()"
+	exprInt32       = "int32(%d)"
+	exprInt64       = "int64(%d)"
+	exprNewUUID     = "uuid.New()"
+	exprDecimal     = "decimal.NewFromInt(1)"
+	exprDate        = "domain.Date(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))"
+	exprDatetime    = "time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)"
+	exprJSON        = "jsontext.Value(`{}`)"
+	sampleFiller    = "a"
+	ruleOneOf       = "oneof"
+	floatStep       = 0.5
+	samplesPerParam = 3
+	maxSampleLen    = 1024
 )
 
 type handlerTestData struct {
@@ -161,7 +164,11 @@ func renderHandlerTest(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Ent
 			return nil, err
 		}
 
-		picked := pickSample(v, samples(stored, f.Validate), f.Validate)
+		picked, ok := pickSample(v, samples(stored, f.Validate), f.Validate)
+		if !ok {
+			return nil, fmt.Errorf("entity %q field %q: no test sample passes validate %q: adjust the rule or pass --no-tests", e.Name, f.Name, f.Validate)
+		}
+
 		if picked.imp != "" {
 			imports[picked.imp] = struct{}{}
 		}
@@ -189,27 +196,21 @@ func renderHandlerTest(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Ent
 }
 
 func samples(fieldType, validate string) []sample {
+	nums, words := ruleParams(validate)
+
 	switch fieldType {
 	case spec.TypeString, spec.TypeText:
-		return stringSamples(validate)
+		return stringSamples(nums, words)
 	case spec.TypeInt32:
-		return []sample{
-			{expr: fmt.Sprintf(exprInt32, 1), value: int32(1)},
-			{expr: fmt.Sprintf(exprInt32, 0), value: int32(0)},
-			{expr: fmt.Sprintf(exprInt32, 100), value: int32(100)},
-		}
+		return intSamples(nums, func(n int64) sample {
+			return sample{expr: fmt.Sprintf(exprInt32, n), value: int32(n)}
+		})
 	case spec.TypeInt64:
-		return []sample{
-			{expr: fmt.Sprintf(exprInt64, 1), value: int64(1)},
-			{expr: fmt.Sprintf(exprInt64, 0), value: int64(0)},
-			{expr: fmt.Sprintf(exprInt64, 100), value: int64(100)},
-		}
+		return intSamples(nums, func(n int64) sample {
+			return sample{expr: fmt.Sprintf(exprInt64, n), value: n}
+		})
 	case spec.TypeFloat:
-		return []sample{
-			{expr: formatFloat(1.5), value: 1.5},
-			{expr: formatFloat(0.5), value: 0.5},
-			{expr: formatFloat(100.5), value: 100.5},
-		}
+		return floatSamples(nums)
 	case spec.TypeBool:
 		return []sample{{expr: strconv.FormatBool(true), value: true}, {expr: strconv.FormatBool(false), value: false}}
 	case spec.TypeDecimal:
@@ -227,20 +228,38 @@ func samples(fieldType, validate string) []sample {
 	return nil
 }
 
-func stringSamples(validate string) []sample {
-	values := []string{"sample", "user@example.com", "https://example.com", sampleFiller}
-
+func ruleParams(validate string) (nums []float64, words []string) {
 	for rule := range strings.SplitSeq(validate, ruleSep) {
 		for alt := range strings.SplitSeq(rule, ruleOr) {
-			_, param, ok := strings.Cut(alt, ruleParamSep)
+			name, param, ok := strings.Cut(alt, ruleParamSep)
 			if !ok {
 				continue
 			}
 
-			n, err := strconv.Atoi(param)
-			if err == nil && n > 0 && n <= maxSampleLen {
-				values = append(values, strings.Repeat(sampleFiller, n))
+			values := []string{param}
+			if name == ruleOneOf {
+				values = strings.Fields(param)
+				words = append(words, values...)
 			}
+
+			for _, v := range values {
+				if n, err := strconv.ParseFloat(v, 64); err == nil {
+					nums = append(nums, n)
+				}
+			}
+		}
+	}
+
+	return nums, words
+}
+
+func stringSamples(nums []float64, words []string) []sample {
+	values := []string{"sample", "user@example.com", "https://example.com", "+14155552671", sampleFiller}
+	values = append(values, words...)
+
+	for _, n := range nums {
+		if n > 0 && n <= maxSampleLen && n == float64(int(n)) {
+			values = append(values, strings.Repeat(sampleFiller, int(n)))
 		}
 	}
 
@@ -252,14 +271,46 @@ func stringSamples(validate string) []sample {
 	return out
 }
 
-func pickSample(v *validator.Validate, candidates []sample, validate string) sample {
+func intSamples(nums []float64, mk func(int64) sample) []sample {
+	values := make([]int64, 0, samplesPerParam*(len(nums)+1))
+	values = append(values, 1, 0, 100)
+
+	for _, n := range nums {
+		values = append(values, int64(n), int64(n)+1, int64(n)-1)
+	}
+
+	out := make([]sample, len(values))
+	for i, n := range values {
+		out[i] = mk(n)
+	}
+
+	return out
+}
+
+func floatSamples(nums []float64) []sample {
+	values := make([]float64, 0, samplesPerParam*(len(nums)+1))
+	values = append(values, 1.5, 0.5, 100.5)
+
+	for _, n := range nums {
+		values = append(values, n, n+floatStep, n-floatStep)
+	}
+
+	out := make([]sample, len(values))
+	for i, n := range values {
+		out[i] = sample{expr: formatFloat(n), value: n}
+	}
+
+	return out
+}
+
+func pickSample(v *validator.Validate, candidates []sample, validate string) (sample, bool) {
 	for _, c := range candidates {
 		if validate == "" || c.value == nil || passes(v, c.value, validate) {
-			return c
+			return c, true
 		}
 	}
 
-	return candidates[0]
+	return sample{}, false
 }
 
 func passes(v *validator.Validate, value any, tag string) (ok bool) {

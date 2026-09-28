@@ -356,7 +356,7 @@ func TestErrorResponses(t *testing.T) {
 			},
 		},
 		{
-			name: "filter on entity without filters", method: http.MethodGet, path: "/tags?label=go",
+			name: "filter on a field without filter", method: http.MethodGet, path: "/tags?label=go",
 			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
 			wantDetails: []errorDetail{{Field: "label", Reason: reasonUnknownField}},
 		},
@@ -598,14 +598,14 @@ func TestTagClientKey(t *testing.T) {
 
 	var created blog.Tag
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Go"}, &created, http.StatusCreated)
-	require.Equal(t, blog.Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1}, created)
+	require.Equal(t, blog.Tag{Slug: slug, Label: "Go", Color: "gray", Weight: 1, Group: "general"}, created)
 
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Slug: slug, Label: "Again"}, nil, http.StatusConflict)
 	do(t, srv, http.MethodPost, "/tags", CreateTagRequest{Label: "No slug"}, nil, http.StatusUnprocessableEntity)
 
 	var updated blog.Tag
 	do(t, srv, http.MethodPut, "/tags/"+slug, UpdateTagRequest{Label: "Golang", Color: new("blue")}, &updated, http.StatusOK)
-	require.Equal(t, blog.Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1}, updated)
+	require.Equal(t, blog.Tag{Slug: slug, Label: "Golang", Color: "blue", Weight: 1, Group: "general"}, updated)
 }
 
 func TestAuthorDateWireFormat(t *testing.T) {

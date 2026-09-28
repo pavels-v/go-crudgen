@@ -7,8 +7,13 @@ import (
 )
 
 const (
+	queryTagGroup = "group"
+)
+
+const (
 	defaultTagColor  = "gray"
 	defaultTagWeight = 1
+	defaultTagGroup  = "general"
 )
 
 // CreateTagRequest is the request body for creating the tag entity.
@@ -17,6 +22,7 @@ type CreateTagRequest struct {
 	Label  string   `json:"label" validate:"required"`
 	Color  *string  `json:"color"`
 	Weight *float64 `json:"weight"`
+	Group  *string  `json:"group"`
 }
 
 // UpdateTagRequest is the request body for replacing the tag entity.
@@ -24,6 +30,7 @@ type UpdateTagRequest struct {
 	Label  string   `json:"label" validate:"required"`
 	Color  *string  `json:"color"`
 	Weight *float64 `json:"weight"`
+	Group  *string  `json:"group"`
 }
 
 // TagHandler serves the CRUD endpoints for Tag.
@@ -62,6 +69,7 @@ func (h *TagHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Label:  req.Label,
 		Color:  valueOr(req.Color, defaultTagColor),
 		Weight: valueOr(req.Weight, defaultTagWeight),
+		Group:  valueOr(req.Group, defaultTagGroup),
 	}
 	if err := h.repo.Create(r.Context(), &m); err != nil {
 		writeRepoError(w, r, err)
@@ -87,9 +95,10 @@ func (h *TagHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TagHandler) List(w http.ResponseWriter, r *http.Request) {
-	q := newListQuery(r, queryOffset)
+	q := newListQuery(r, queryOffset, queryTagGroup)
 	limit := q.limit()
 	p := domain.TagListParams{
+		Group:  queryValue(q, queryTagGroup, parseString),
 		Dir:    q.dir(),
 		Limit:  limit + 1,
 		Offset: q.offset(),
@@ -132,6 +141,7 @@ func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Label:  req.Label,
 		Color:  valueOr(req.Color, defaultTagColor),
 		Weight: valueOr(req.Weight, defaultTagWeight),
+		Group:  valueOr(req.Group, defaultTagGroup),
 	}
 	if err := h.repo.Update(r.Context(), &m); err != nil {
 		writeRepoError(w, r, err)

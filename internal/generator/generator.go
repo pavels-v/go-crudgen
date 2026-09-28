@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"go/token"
 	"io/fs"
 	"os"
 	"path"
@@ -88,6 +89,15 @@ const (
 	typeParamOpen  = "["
 )
 
+var listParamFields = []string{listParamDir, listParamAfter, listParamLimit, listParamOffset} //nolint:gochecknoglobals // read-only lookup table
+
+const (
+	listParamDir    = "Dir"
+	listParamAfter  = "After"
+	listParamLimit  = "Limit"
+	listParamOffset = "Offset"
+)
+
 const (
 	destStdout     = "stdout"
 	filesPerEntity = 4
@@ -152,6 +162,10 @@ func Generate(s *spec.Spec, opts Options) error {
 		return fmt.Errorf("unknown driver %q (supported: pgx, pq)", opts.Driver)
 	}
 
+	if err := checkTables(s); err != nil {
+		return err
+	}
+
 	byName := entitiesByName(s)
 	for i := range s.Entities {
 		if err := checkColumns(&s.Entities[i]); err != nil {
@@ -175,11 +189,6 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	for _, e := range s.Entities {
 		fmt.Fprintf(os.Stderr, "  - %s (%d fields)\n", e.Name, len(e.Fields))
-	}
-
-	if opts.DryRun {
-		fmt.Fprintln(os.Stderr, "(dry run: no files written)")
-		return nil
 	}
 
 	if opts.MigrationTime.IsZero() {
@@ -208,6 +217,16 @@ func Generate(s *spec.Spec, opts Options) error {
 		if err := checkOutDir(opts.OutDir, files); err != nil {
 			return err
 		}
+	}
+
+	if opts.DryRun {
+		for _, f := range files {
+			fmt.Fprintf(os.Stderr, "  would write %s\n", f.Path)
+		}
+
+		fmt.Fprintln(os.Stderr, "(dry run: no files written)")
+
+		return nil
 	}
 
 	for _, f := range files {
@@ -288,6 +307,22 @@ func checkOutDir(dir string, files []genFile) error {
 
 func outDirTaken(dir, file string) error {
 	return fmt.Errorf("output directory %s already has generated code or migrations (%s): generate into a clean directory", dir, file)
+}
+
+func checkTables(s *spec.Spec) error {
+	tables := make(map[string]string, len(s.Entities))
+	for i := range s.Entities {
+		e := &s.Entities[i]
+
+		t := tableName(e)
+		if prev, ok := tables[t]; ok {
+			return fmt.Errorf("entities %q and %q map to the same table %q: set distinct plurals", prev, e.Name, t)
+		}
+
+		tables[t] = e.Name
+	}
+
+	return nil
 }
 
 func entitiesByName(s *spec.Spec) map[string]*spec.Entity {
@@ -585,7 +620,7 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 
 	files := []genFile{
 		{Path: fmt.Sprintf(fileModel, base), Src: src},
-		{Path: fmt.Sprintf(fileMigration, migVersion, plural(e.Name, e.Plural)), Src: msrc},
+		{Path: fmt.Sprintf(fileMigration, migVersion, tableName(e)), Src: msrc},
 		{Path: fmt.Sprintf(fileHandler, base), Src: hsrc},
 		{Path: fmt.Sprintf(fileRepo, base), Src: rsrc},
 	}
@@ -757,11 +792,23 @@ func qualified(name string) string {
 }
 
 func checkColumns(e *spec.Entity) error {
+	if name := pascalCase(e.Name); !token.IsIdentifier(name) {
+		return fmt.Errorf("entity %q does not map to a Go identifier (%q)", e.Name, name)
+	}
+
 	columns := make(map[string]string, len(e.Fields))
 	goNames := make(map[string]string, len(e.Fields))
 
 	for _, f := range e.Fields {
 		col, goName := snakeCase(f.Name), pascalCase(f.Name)
+		if !token.IsIdentifier(goName) {
+			return fmt.Errorf("entity %q field %q does not map to a Go identifier (%q)", e.Name, f.Name, goName)
+		}
+
+		if f.Filter && slices.Contains(listParamFields, goName) {
+			return fmt.Errorf("entity %q field %q cannot be a filter: %s is a List parameter", e.Name, f.Name, goName)
+		}
+
 		if prev, ok := columns[col]; ok {
 			return fmt.Errorf("entity %q: %q and %q map to the same column %q", e.Name, prev, f.Name, col)
 		}

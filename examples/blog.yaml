@@ -78,6 +78,7 @@ entities:
         default: now
 
   - name: Tag
+    order: group           # a reserved SQL word; the generator quotes it
     fields:
       - name: slug
         type: string
@@ -91,3 +92,8 @@ entities:
       - name: weight
         type: float
         default: 1
+      - name: group
+        type: string
+        default: general
+        filter: true
+        index: true

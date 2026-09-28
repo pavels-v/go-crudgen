@@ -27,12 +27,13 @@ Among the tools we found, none generates every layer (validation, handlers, rout
 
 - One YAML file drives model, DTOs, validation, handlers, routes, repository SQL and migrations; no second source of truth.
 - Input validation rules (go-playground/validator) sit next to the field they check.
-- `references` becomes a foreign key typed from the target's key; migrations are numbered in dependency order.
-- Routes use the standard `net/http.ServeMux` (Go 1.22+ patterns), no framework.
+- `references` becomes a foreign key typed from the target's key; migrations are timestamped in dependency order.
+- Routes use the standard `net/http.ServeMux`, no framework; generated code needs Go 1.27+ (`encoding/json/v2`).
 - Generated code depends on neither the generator nor an ORM: plain Go plus `sqlx`.
 - Repository SQL is written inline at each call, readable and reviewable.
 - Storage is driver-agnostic via `database/sql`; `pgx` or `pq` is a flag.
 - Nullability flows from the spec: `*T` in the model, `sql.Null[T]` in the repository, no `NOT NULL` in the migration.
+- Column and table names that are reserved SQL words are quoted, so fields like `user`, `order` or `group` work.
 - Migrations are goose SQL files, applied with standard tooling.
 - Server-set timestamps via `generate: on_create | on_write`.
 - Spec-first: works for greenfield projects; the spec is versioned and diff-friendly.
@@ -49,6 +50,7 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
 go-crudgen generate --spec ./api.yaml --out ./internal/api --main ./cmd/api      # main.go elsewhere than cmd/<package>
 go-crudgen generate --spec ./api.yaml --out ./internal/api --no-router --no-main # wire the service yourself
 go-crudgen generate --spec ./api.yaml --out ./internal/api --no-tests            # skip the handler tests
+go-crudgen generate --spec ./api.yaml --out ./internal/api --dry-run             # run every check, list the files, write nothing
 cd ./internal/api && go mod tidy
 ```
 
@@ -72,7 +74,7 @@ Developer tasks: `make help`.
 
 ## Output
 
-- `<entity>.go` - model and repository interface, in the root package named by `package`.
+- `<entity>.go` - model, repository interface and List params (plus the cursor type under cursor pagination), in the root package named by `package`.
 - `errors.go` - sentinel errors shared by all layers.
 - `sort.go` - `SortDir` for List ordering.
 - `date.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
@@ -85,7 +87,7 @@ Developer tasks: `make help`.
 - `postgres/db.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
 - `postgres/nulls.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
 - `migrations/<timestamp>_create_<table>.sql` - goose migrations, a second apart in foreign-key order; `SOURCE_DATE_EPOCH` pins the first timestamp.
-- `migrations/embed.go` and `cmd/<package>/main.go` next to the nearest `go.mod` (or `--main <dir>`), unless `--no-main`: a service that reads `DATABASE_URL` and `HTTP_ADDR` (default `:8080`), applies the embedded migrations, serves the API and shuts down gracefully.
+- `migrations/embed.go` and `cmd/<package>/main.go` next to the nearest `go.mod` (or `--main <dir>`; with no `go.mod` above `--out`, pass `--main` or `--no-main`), unless `--no-main`: a service that reads `DATABASE_URL` and `HTTP_ADDR` (default `:8080`), applies the embedded migrations, serves the API and shuts down gracefully.
 - Generation fails when an entity name collides with a generated declaration or file.
 
 | Method   | Path             | Action                                                   |
@@ -95,6 +97,8 @@ Developer tasks: `make help`.
 | `GET`    | `/{plural}/{id}` | Read                                                     |
 | `PUT`    | `/{plural}/{id}` | Update                                                   |
 | `DELETE` | `/{plural}/{id}` | Delete                                                   |
+
+`?limit` defaults to 50 and is capped at 200; a cursor only continues the `?dir` it was issued for.
 
 Responses: `{"body": ...}` on success (List: `{"items", "limit", "offset", "has_more"}`, or `{"items", "next_cursor"}` under cursor pagination), `{"error": {"code", "message", "details"}}` on failure; `DELETE` returns `204` with no body.
 
@@ -116,23 +120,29 @@ entities:
       - { name: author, type: references, target: Author }
       - { name: created_at, type: datetime, generate: on_create }
       - { name: updated_at, type: datetime, generate: on_write }
+  - name: Author
+    fields:
+      - { name: id, type: uuid, primary: true }
+      - { name: email, type: string, required: true, unique: true, validate: "email" }
 ```
 
-- `order: <field>` sets the List order (default: primary key, ties broken by it); clients pick `?dir=asc|desc` (default `asc`); the field must be NOT NULL.
+- `order: <field>` sets the List order (default: primary key, ties broken by it); clients pick `?dir=asc|desc` (default `asc`); the field must be NOT NULL and not `bool` or `json`.
 - `pagination: cursor` pages List by an opaque keyset `?cursor=` instead of `?offset=`.
+- `plural` sets the route segment (letters, digits, `-`, `_`) and, in snake_case, the table name; the default is a naive English plural of the snake_case name; two entities cannot share a table.
 - `package` names the root package, which `restapi` and `postgres` import as `domain`; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
 - `required` fields must be present in the request body; `false` and `0` are accepted, an empty `string` or `text` is not.
 - `validate` rules are checked against the field's Go type at generation; on optional fields they apply only when the value is present.
 - `date`, `datetime` and `decimal` take only presence rules (`required*`, `excluded*`, `omitempty`, `omitnil`, `omitzero`); `uuid` also takes the `uuid*` rules.
-- `generate: on_create` sets a `datetime` to `now()` on insert, `generate: on_write` on insert and every update; both are read-only in the API.
-- `filter: true` makes List accept `?<name>=<value>` (equality); unknown or repeated query parameters are rejected; pair filters and `order` with `index: true`.
-- Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
+- `generate: on_create` sets a `datetime` to `now()` on insert, `generate: on_write` on insert and every update; both are read-only in the API and exclude `primary`, `required`, `default` and `validate`.
+- `filter: true` makes List accept `?<name>=<value>` (equality); not on the primary key, `float` or `json`, nor on names that clash with `limit`, `offset`, `dir`, `cursor` or the List params; unknown or repeated query parameters are rejected; pair filters and `order` with `index: true`.
+- Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references` (to an entity whose key is not itself a reference); no `default`.
 - `uuid` keys are generated in Go (v4) with `gen_random_uuid()` as the column default; `int32` and `int64` keys use `IDENTITY`; other keys are required in Create.
-- `default` takes a literal of the field's type (`string`, `text`, `int32`, `int64`, `float`, `bool`) or `now` for `datetime`; the column is `NOT NULL DEFAULT` and the handler fills an omitted value.
-- Fields with none of `primary`, `required`, `default` are nullable: `*T` in the model, `sql.Null[T]` in the repository.
-- `references` becomes a column typed from the target's key with a `REFERENCES` constraint.
+- `default` takes a literal of the field's type (`string`, `text`, `int32` in range, `int64`, finite `float`, `bool`) or `now` for `datetime`; the column is `NOT NULL DEFAULT` and the handler fills an omitted value.
+- Fields with none of `primary`, `required`, `default`, `generate` are nullable: `*T` in the model, `sql.Null[T]` in the repository.
+- Entity and field names must map to Go identifiers (`2fa` does not).
+- `references` becomes a column typed from the target's key with a `REFERENCES` constraint; self-references work, reference cycles between entities are rejected.
 
 ## Roadmap
 
@@ -149,7 +159,7 @@ entities:
   - [x] `belongs_to` via `references` fields
   - [x] `has_many` via `filter: true` on the reference field
 - [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, `NewRouter` unless `--no-router`
-- [x] Reject `validate` rules the validator ignores or misapplies (`min`/`max` on `date` and `datetime`, rules on `decimal`, length rules on `uuid`)
+- [x] Reject `validate` rules the validator ignores or misapplies (anything but presence rules on `date`, `datetime`, `decimal`; anything but presence and `uuid*` rules on `uuid`)
 - [x] Service entry point: `main.go` with config, `NewDB`, migrations, routes and graceful shutdown, unless `--no-main`
 - [x] Handler test scaffold: `restapi/<entity>_test.go` with a fake repository and table-driven tests
 

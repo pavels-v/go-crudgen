@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"go/token"
+	"math"
 	"strings"
 )
 
@@ -53,6 +54,8 @@ const (
 	blankIdent = "_"
 )
 
+const pluralChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+
 const (
 	queryLimit  = "limit"
 	queryOffset = "offset"
@@ -100,6 +103,10 @@ func (s *Spec) Validate() error {
 
 		if len(e.Fields) == 0 {
 			return fmt.Errorf("entity %q has no fields", e.Name)
+		}
+
+		if e.Plural != "" && strings.Trim(e.Plural, pluralChars) != "" {
+			return fmt.Errorf("entity %q has plural %q: use letters, digits, - and _", e.Name, e.Plural)
 		}
 
 		if e.Pagination != "" && e.Pagination != PaginationOffset && e.Pagination != PaginationCursor {
@@ -175,8 +182,13 @@ func (s *Spec) Validate() error {
 				continue
 			}
 
-			if _, ok := byName[f.Target]; !ok {
+			target, ok := byName[f.Target]
+			if !ok {
 				return fmt.Errorf("entity %q field %q references unknown entity %q", e.Name, f.Name, f.Target)
+			}
+
+			if f.Target != e.Name && target.PrimaryKey()[0].Type == TypeReferences {
+				return fmt.Errorf("entity %q field %q references %q, whose primary key is itself a reference", e.Name, f.Name, f.Target)
 			}
 		}
 	}
@@ -237,13 +249,17 @@ func validateGenerate(e *Entity, f Field) error {
 }
 
 func defaultFits(fieldType string, v any) bool {
-	switch v.(type) {
+	switch d := v.(type) {
 	case string:
 		return fieldType == TypeString || fieldType == TypeText || (fieldType == TypeDatetime && v == DefaultNow)
 	case int:
-		return fieldType == TypeInt32 || fieldType == TypeInt64 || fieldType == TypeFloat
+		if fieldType == TypeInt32 {
+			return d >= math.MinInt32 && d <= math.MaxInt32
+		}
+
+		return fieldType == TypeInt64 || fieldType == TypeFloat
 	case float64:
-		return fieldType == TypeFloat
+		return fieldType == TypeFloat && !math.IsInf(d, 0) && !math.IsNaN(d)
 	case bool:
 		return fieldType == TypeBool
 	}
