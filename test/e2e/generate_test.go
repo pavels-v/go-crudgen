@@ -43,7 +43,7 @@ const exampleEpoch = "1767225600"
 func clean(t *testing.T, dir string) {
 	t.Helper()
 
-	for _, pattern := range []string{"*.go", "restapi/*.go", "postgres/*.go"} {
+	for _, pattern := range []string{"domain/*.go", "restapi/*.go", "postgres/*.go"} {
 		matches, err := filepath.Glob(filepath.Join(dir, filepath.FromSlash(pattern)))
 		require.NoError(t, err, "glob %s", pattern)
 
@@ -81,8 +81,13 @@ func TestGenerateBlogExample(t *testing.T) {
 		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog")
 
 	for _, f := range []string{
-		"post.go", "author.go", "comment.go", "tag.go",
-		"errors.go", "date.go", "sort.go",
+		filepath.Join("domain", "post.go"),
+		filepath.Join("domain", "author.go"),
+		filepath.Join("domain", "comment.go"),
+		filepath.Join("domain", "tag.go"),
+		filepath.Join("domain", "errors.go"),
+		filepath.Join("domain", "date.go"),
+		filepath.Join("domain", "sort.go"),
 		filepath.Join("restapi", "post.go"),
 		filepath.Join("restapi", "author.go"),
 		filepath.Join("restapi", "comment.go"),

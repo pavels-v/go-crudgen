@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 // commentRow is the database representation of domain.Comment.
@@ -45,7 +45,7 @@ func (row commentRow) toModel() domain.Comment {
 	}
 }
 
-// CommentRepository is a PostgreSQL-backed domain.CommentRepository.
+// CommentRepository stores domain.Comment in PostgreSQL.
 type CommentRepository struct {
 	db *sqlx.DB
 }
@@ -54,8 +54,6 @@ type CommentRepository struct {
 func NewCommentRepository(db *sqlx.DB) *CommentRepository {
 	return &CommentRepository{db: db}
 }
-
-var _ domain.CommentRepository = (*CommentRepository)(nil)
 
 func (r *CommentRepository) Create(ctx context.Context, m *domain.Comment) error {
 	row := newCommentRow(m)

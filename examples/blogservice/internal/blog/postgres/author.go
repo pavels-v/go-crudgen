@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 // authorRow is the database representation of domain.Author.
@@ -41,7 +41,7 @@ func (row authorRow) toModel() domain.Author {
 	}
 }
 
-// AuthorRepository is a PostgreSQL-backed domain.AuthorRepository.
+// AuthorRepository stores domain.Author in PostgreSQL.
 type AuthorRepository struct {
 	db *sqlx.DB
 }
@@ -50,8 +50,6 @@ type AuthorRepository struct {
 func NewAuthorRepository(db *sqlx.DB) *AuthorRepository {
 	return &AuthorRepository{db: db}
 }
-
-var _ domain.AuthorRepository = (*AuthorRepository)(nil)
 
 func (r *AuthorRepository) Create(ctx context.Context, m *domain.Author) error {
 	m.ID = uuid.New()

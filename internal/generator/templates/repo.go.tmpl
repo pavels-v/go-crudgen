@@ -31,7 +31,7 @@ func (row {{ .RowStruct }}) toModel() {{ .Model }} {
 	}
 }
 
-// {{ .Receiver }} is a PostgreSQL-backed {{ .Repo }}.
+// {{ .Receiver }} stores {{ .Model }} in PostgreSQL.
 type {{ .Receiver }} struct {
 	db *sqlx.DB
 }
@@ -40,8 +40,6 @@ type {{ .Receiver }} struct {
 func {{ .Constructor }}(db *sqlx.DB) *{{ .Receiver }} {
 	return &{{ .Receiver }}{db: db}
 }
-
-var _ {{ .Repo }} = (*{{ .Receiver }})(nil)
 
 func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Model }}) error {
 {{- if .GenerateUUID }}

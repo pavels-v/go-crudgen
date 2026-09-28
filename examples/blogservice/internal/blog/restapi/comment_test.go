@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 func newCommentTestHandler() (http.Handler, *fakeRepository[int64, domain.Comment, domain.CommentListParams]) {

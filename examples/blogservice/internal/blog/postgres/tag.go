@@ -9,7 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 // tagRow is the database representation of domain.Tag.
@@ -43,7 +43,7 @@ func (row tagRow) toModel() domain.Tag {
 	}
 }
 
-// TagRepository is a PostgreSQL-backed domain.TagRepository.
+// TagRepository stores domain.Tag in PostgreSQL.
 type TagRepository struct {
 	db *sqlx.DB
 }
@@ -52,8 +52,6 @@ type TagRepository struct {
 func NewTagRepository(db *sqlx.DB) *TagRepository {
 	return &TagRepository{db: db}
 }
-
-var _ domain.TagRepository = (*TagRepository)(nil)
 
 func (r *TagRepository) Create(ctx context.Context, m *domain.Tag) error {
 	row := newTagRow(m)

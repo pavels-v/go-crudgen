@@ -1,12 +1,13 @@
 package restapi
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 const (
@@ -33,13 +34,22 @@ type UpdateCommentRequest struct {
 	PostedAt *time.Time `json:"posted_at"`
 }
 
+// CommentRepository is the storage the Comment handlers depend on.
+type CommentRepository interface {
+	Create(ctx context.Context, m *domain.Comment) error
+	Get(ctx context.Context, id int64) (*domain.Comment, error)
+	List(ctx context.Context, p domain.CommentListParams) ([]domain.Comment, error)
+	Update(ctx context.Context, m *domain.Comment) error
+	Delete(ctx context.Context, id int64) error
+}
+
 // CommentHandler serves the CRUD endpoints for Comment.
 type CommentHandler struct {
-	repo domain.CommentRepository
+	repo CommentRepository
 }
 
 // NewCommentHandler returns a handler backed by repo.
-func NewCommentHandler(repo domain.CommentRepository) *CommentHandler {
+func NewCommentHandler(repo CommentRepository) *CommentHandler {
 	return &CommentHandler{repo: repo}
 }
 

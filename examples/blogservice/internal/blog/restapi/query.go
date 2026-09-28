@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strconv"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 const (

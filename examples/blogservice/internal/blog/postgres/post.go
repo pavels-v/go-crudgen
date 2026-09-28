@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 // postRow is the database representation of domain.Post.
@@ -56,7 +56,7 @@ func (row postRow) toModel() domain.Post {
 	}
 }
 
-// PostRepository is a PostgreSQL-backed domain.PostRepository.
+// PostRepository stores domain.Post in PostgreSQL.
 type PostRepository struct {
 	db *sqlx.DB
 }
@@ -65,8 +65,6 @@ type PostRepository struct {
 func NewPostRepository(db *sqlx.DB) *PostRepository {
 	return &PostRepository{db: db}
 }
-
-var _ domain.PostRepository = (*PostRepository)(nil)
 
 func (r *PostRepository) Create(ctx context.Context, m *domain.Post) error {
 	m.ID = uuid.New()

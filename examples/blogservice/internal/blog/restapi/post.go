@@ -1,13 +1,14 @@
 package restapi
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"net/http"
 	"strconv"
 
 	"github.com/google/uuid"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 const (
@@ -45,13 +46,22 @@ type UpdatePostRequest struct {
 	Author    *uuid.UUID      `json:"author,omitzero"`
 }
 
+// PostRepository is the storage the Post handlers depend on.
+type PostRepository interface {
+	Create(ctx context.Context, m *domain.Post) error
+	Get(ctx context.Context, id uuid.UUID) (*domain.Post, error)
+	List(ctx context.Context, p domain.PostListParams) ([]domain.Post, error)
+	Update(ctx context.Context, m *domain.Post) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 // PostHandler serves the CRUD endpoints for Post.
 type PostHandler struct {
-	repo domain.PostRepository
+	repo PostRepository
 }
 
 // NewPostHandler returns a handler backed by repo.
-func NewPostHandler(repo domain.PostRepository) *PostHandler {
+func NewPostHandler(repo PostRepository) *PostHandler {
 	return &PostHandler{repo: repo}
 }
 

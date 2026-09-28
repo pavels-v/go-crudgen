@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	domain "example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/domain"
 )
 
 type fakeRepository[K comparable, M, P any] struct {

@@ -79,7 +79,7 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api --dry-run            
 cd ./internal/api && go mod tidy
 ```
 
-`--out` must hold none of the files to be written, no code but tests in `restapi/` and `postgres/`, and nothing in `migrations/`; to start over, delete them and generate again.
+`--out` must hold none of the files to be written, no code but tests in `domain/`, `restapi/` and `postgres/`, and nothing in `migrations/`; to start over, delete them and generate again.
 
 With `--no-router --no-main` the wiring is yours:
 
@@ -99,11 +99,11 @@ Developer tasks: `make help`.
 
 ## Output
 
-- `<entity>.go` - model, repository interface and List params (plus the cursor type under cursor pagination), in the root package named by `package`.
-- `errors.go` - sentinel errors shared by all layers.
-- `sort.go` - `SortDir` for List ordering.
-- `date.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
-- `restapi/<entity>.go` - `Create`/`Update` request DTOs, CRUD handlers and `RegisterRoutes`.
+- `domain/<entity>.go` - model and List params (plus the cursor type under cursor pagination).
+- `domain/errors.go` - sentinel errors shared by all layers.
+- `domain/sort.go` - `SortDir` for List ordering.
+- `domain/date.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
+- `restapi/<entity>.go` - repository interface, `Create`/`Update` request DTOs, CRUD handlers and `RegisterRoutes`.
 - `restapi/request.go`, `response.go`, `query.go` - request decoding, response envelope, List query parsing.
 - `restapi/routes.go` - `WithRouteErrors`: the JSON envelope for unmatched routes.
 - `restapi/router.go` - `NewRouter` and `Deps` wiring every entity, unless `--no-router`.
@@ -153,7 +153,7 @@ entities:
 - `order: <field>` sets the List order (default: primary key, ties broken by it); clients pick `?dir=asc|desc` (default `asc`); the field must be NOT NULL and not `bool` or `json`.
 - `pagination: cursor` pages List by an opaque keyset `?cursor=` instead of `?offset=`.
 - `plural` sets the route segment (letters, digits, `-`, `_`) and, in snake_case, the table name; the default is a naive English plural of the snake_case name; two entities cannot share a table.
-- `package` names the root package, which `restapi` and `postgres` import as `domain`.
+- `package` names the service: `main.go` goes to `cmd/<package>`.
 - `module` is the import path of the `--out` directory, derived from the nearest `go.mod` when omitted and checked against it when set; required without `--out` or a `go.mod`.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
