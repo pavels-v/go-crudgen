@@ -141,8 +141,10 @@ entities:
 - [x] Relations (`belongs_to` / `has_many`)
   - [x] `belongs_to` via `references` fields
   - [x] `has_many` via `filter: true` on the reference field
-- [ ] Pluggable storage backends (SQLite, in-memory)
 - [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, optional `--router`
+- [ ] Reject `validate` rules the validator ignores or misapplies (`min`/`max` on `date` and `datetime`, rules on `decimal`, length rules on `uuid`)
+- [ ] Service entry point: optional `main.go` with config, `NewDB`, migrations, routes and graceful shutdown (`--main`)
+- [ ] Handler test scaffold: `restapi/<entity>_test.go` with a fake repository and table-driven tests
 
 ## License
 
