@@ -1334,6 +1334,132 @@ func TestRestFiles_OptionalHelpers(t *testing.T) {
 	}
 }
 
+func TestMainFilePath(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		outDir  string
+		mainDir string
+		want    string
+	}{
+		{name: "stdout", mainDir: "cmd/blog", want: "cmd/blog/main.go"},
+		{name: "sibling of the package", outDir: "internal/blog", mainDir: "cmd/blog", want: "../../cmd/blog/main.go"},
+		{name: "inside the package", outDir: "internal/blog", mainDir: "internal/blog/cmd", want: "cmd/main.go"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := mainFilePath(tc.outDir, tc.mainDir)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDefaultMainDir(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		goMod   string
+		outDir  string
+		want    string
+		wantErr bool
+	}{
+		{name: "module above the package", goMod: "svc/go.mod", outDir: "svc/internal/blog", want: "svc/cmd/blog"},
+		{name: "module at the package", goMod: "svc/go.mod", outDir: "svc", want: "svc/cmd/blog"},
+		{name: "no module", outDir: "svc/internal/blog", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			if tc.goMod != "" {
+				p := filepath.Join(root, filepath.FromSlash(tc.goMod))
+				require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+				require.NoError(t, os.WriteFile(p, nil, 0o600))
+			}
+
+			got, err := defaultMainDir(filepath.Join(root, filepath.FromSlash(tc.outDir)), "blog")
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, filepath.Join(root, filepath.FromSlash(tc.want)), got)
+		})
+	}
+
+	t.Run("stdout", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := defaultMainDir("", "blog")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join("cmd", "blog"), got)
+	})
+}
+
+func TestMainFiles(t *testing.T) {
+	t.Parallel()
+
+	routes := []routerEntity{{Struct: "Post", RepoCtor: "NewPostRepository", DepsField: "Posts"}}
+	cases := []struct {
+		name   string
+		router bool
+		want   []string
+	}{
+		{
+			name: "without router",
+			want: []string{
+				"restapi.NewPostHandler(postgres.NewPostRepository(db)).RegisterRoutes(mux)",
+				"return restapi.WithRouteErrors(mux)",
+			},
+		},
+		{
+			name:   "with router",
+			router: true,
+			want:   []string{"return restapi.NewRouter(restapi.Deps{ Posts: postgres.NewPostRepository(db), })"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{Package: "blog", Module: "example.com/blog"}
+			files, err := mainFiles(s, sharedFiles{Router: tc.router, Routes: routes}, Options{OutDir: "internal/blog", MainDir: "cmd/blog"})
+			require.NoError(t, err)
+			require.Len(t, files, 2)
+			require.Equal(t, fileEmbed, files[0].Path)
+			require.Equal(t, "../../cmd/blog/main.go", files[1].Path)
+
+			for _, f := range files {
+				requireParses(t, f.Src)
+			}
+
+			wantContains(t, string(files[0].Src), "//go:embed *.sql var FS embed.FS")
+
+			got := string(files[1].Src)
+			for _, want := range append([]string{
+				`"example.com/blog/migrations"`,
+				`"example.com/blog/postgres"`,
+				`"example.com/blog/restapi"`,
+				"goose.SetBaseFS(migrations.FS)",
+				"signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)",
+				"srv.Shutdown(shutdownCtx)",
+			}, tc.want...) {
+				wantContains(t, got, want)
+			}
+		})
+	}
+}
+
 func TestRenderRouter_WiresEntities(t *testing.T) {
 	t.Parallel()
 

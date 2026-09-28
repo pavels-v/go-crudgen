@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	flagSpec   = "spec"
-	flagOut    = "out"
-	flagDryRun = "dry-run"
-	flagDriver = "driver"
-	flagRouter = "router"
+	flagSpec     = "spec"
+	flagOut      = "out"
+	flagDryRun   = "dry-run"
+	flagDriver   = "driver"
+	flagNoRouter = "no-router"
+	flagMain     = "main"
+	flagNoMain   = "no-main"
 )
 
 const envSourceDateEpoch = "SOURCE_DATE_EPOCH"
@@ -28,7 +30,9 @@ func runGenerate(args []string) int {
 	outDir := fs.String(flagOut, "", "output directory for generated code (default: write to stdout)")
 	dryRun := fs.Bool(flagDryRun, false, "report what would be generated without writing files")
 	driver := fs.String(flagDriver, generator.DriverPgx, "database driver for the generated NewDB constructor: pgx or pq")
-	router := fs.Bool(flagRouter, false, "also generate restapi.NewRouter and Deps wiring every entity's routes")
+	noRouter := fs.Bool(flagNoRouter, false, "skip restapi.NewRouter and Deps; wire the routes yourself")
+	mainDir := fs.String(flagMain, "", "directory for main.go (default: cmd/<package> next to the nearest go.mod)")
+	noMain := fs.Bool(flagNoMain, false, "skip main.go and migrations/embed.go")
 
 	if err := fs.Parse(args); err != nil {
 		// An explicit -h/--help is a success, not a usage error; flag has
@@ -47,6 +51,13 @@ func runGenerate(args []string) int {
 		return exitUsage
 	}
 
+	if *noMain && *mainDir != "" {
+		fmt.Fprintln(os.Stderr, "generate: -main and -no-main are mutually exclusive")
+		fs.Usage()
+
+		return exitUsage
+	}
+
 	s, err := spec.Load(*specPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load spec: %v\n", err)
@@ -59,7 +70,7 @@ func runGenerate(args []string) int {
 		return exitUsage
 	}
 
-	opts := generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: *router, MigrationTime: migrationTime}
+	opts := generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: !*noRouter, Main: !*noMain, MainDir: *mainDir, MigrationTime: migrationTime}
 	if err := generator.Generate(s, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to generate: %v\n", err)
 		return exitError

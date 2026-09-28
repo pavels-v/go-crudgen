@@ -39,6 +39,10 @@ const (
 	importSlices      = "slices"
 	importNetURL      = "net/url"
 	importBase64      = "encoding/base64"
+	importOS          = "os"
+	importOSSignal    = "os/signal"
+	importSyscall     = "syscall"
+	importGoose       = "github.com/pressly/goose/v3"
 )
 
 const (

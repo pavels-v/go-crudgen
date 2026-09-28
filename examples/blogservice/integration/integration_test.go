@@ -20,6 +20,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/migrations"
 	"example.com/blogservice/internal/blog/postgres"
 	"example.com/blogservice/internal/blog/restapi"
 )
@@ -37,8 +38,9 @@ func TestIntegration(t *testing.T) {
 
 	// Apply the generated migrations through goose itself, proving the generated
 	// goose files parse and the DDL is valid Postgres.
+	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db.DB, "../internal/blog/migrations"), "goose up")
+	require.NoError(t, goose.Up(db.DB, "."), "goose up")
 
 	srv := httptest.NewServer(restapi.NewRouter(restapi.Deps{
 		Posts:    postgres.NewPostRepository(db),
@@ -273,7 +275,7 @@ func TestIntegration(t *testing.T) {
 	})
 
 	t.Run("down migrations drop the tables", func(t *testing.T) {
-		require.NoError(t, goose.Reset(db.DB, "../internal/blog/migrations"), "goose reset (down)")
+		require.NoError(t, goose.Reset(db.DB, "."), "goose reset (down)")
 		_, err := db.Exec("SELECT 1 FROM posts")
 		require.Error(t, err, "posts table should not exist after the down migrations")
 	})
