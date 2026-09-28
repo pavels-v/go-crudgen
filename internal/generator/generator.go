@@ -8,6 +8,7 @@ import (
 	"go/format"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -72,6 +73,7 @@ const (
 const (
 	exprReqField = "req.%s"
 	exprValueOr  = "valueOr(%s, %s)"
+	exprDeref    = "*%s"
 )
 
 var tmpl = template.Must(template.ParseFS(templates, templatesGlob)) //nolint:gochecknoglobals // parsed once from embedded templates
@@ -513,8 +515,14 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 
 		// The create body accepts every writable field; the update body omits the
 		// primary key because it is addressed by the request path.
-		mf := modelField{GoName: gn, GoType: modelType(f, gt.expr), Tag: fieldTag(f)}
+		req := f
+		req.Required = f.Required || f.Primary
+		mf := modelField{GoName: gn, GoType: modelType(f, gt.expr), Tag: fieldTag(req)}
 		expr := fmt.Sprintf(exprReqField, gn)
+		if requiresPresence(req, gt) {
+			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
+			expr = fmt.Sprintf(exprDeref, expr)
+		}
 		if hasRequestDefault(f) {
 			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
 			lit, err := goDefault(f)
@@ -542,9 +550,6 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			if gt.imp != "" {
 				imports[gt.imp] = struct{}{}
 			}
-			key := f
-			key.Required = true
-			mf.Tag = fieldTag(key)
 			data.CreateBody = append(data.CreateBody, mf)
 			data.CreateAssign = append(data.CreateAssign, a)
 		}
@@ -693,7 +698,7 @@ func fieldTag(f spec.Field) string {
 	tag := jsonTag(f)
 
 	var rules []string
-	if f.Required && !strings.Contains(f.Validate, ruleRequired) {
+	if f.Required && !slices.Contains(strings.Split(f.Validate, ruleSep), ruleRequired) {
 		rules = append(rules, ruleRequired)
 	}
 	if f.Validate != "" && (isNullable(f) || hasRequestDefault(f)) {
@@ -706,6 +711,11 @@ func fieldTag(f spec.Field) string {
 		tag += fmt.Sprintf(tagValidate, strings.Join(rules, ruleSep))
 	}
 	return tag
+}
+
+func requiresPresence(f spec.Field, gt goType) bool {
+	_, isString := gt.sample.(string)
+	return f.Required && !isString
 }
 
 func groupImports(set map[string]struct{}, module string) []string {

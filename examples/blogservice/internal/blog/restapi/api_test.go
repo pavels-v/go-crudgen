@@ -540,7 +540,7 @@ func TestCommentDefaults(t *testing.T) {
 	before := time.Now()
 	var created blog.Comment
 	do(t, srv, http.MethodPost, "/comments",
-		CreateCommentRequest{Post: uuid.New(), Body: "Nice"},
+		CreateCommentRequest{Post: new(uuid.New()), Body: "Nice"},
 		&created, http.StatusCreated)
 	require.NotZero(t, created.ID)
 	require.Zero(t, created.Likes)
