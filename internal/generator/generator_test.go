@@ -15,7 +15,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/require"
 
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 func findEntity(t *testing.T, s *spec.Spec, name string) *spec.Entity {
@@ -1365,14 +1365,44 @@ func TestDefaultMainDir(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		goMod   string
 		outDir  string
+		modRoot string
 		want    string
 		wantErr bool
 	}{
-		{name: "module above the package", goMod: "svc/go.mod", outDir: "svc/internal/blog", want: "svc/cmd/blog"},
-		{name: "module at the package", goMod: "svc/go.mod", outDir: "svc", want: "svc/cmd/blog"},
-		{name: "no module", outDir: "svc/internal/blog", wantErr: true},
+		{name: "module root", outDir: filepath.Join("svc", "internal", "blog"), modRoot: "svc", want: filepath.Join("svc", "cmd", "blog")},
+		{name: "no module", outDir: filepath.Join("svc", "internal", "blog"), wantErr: true},
+		{name: "stdout", want: filepath.Join("cmd", "blog")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := defaultMainDir(tc.outDir, tc.modRoot, "blog")
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestFindModuleRoot(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		goMod  string
+		outDir string
+		want   string
+	}{
+		{name: "module above the package", goMod: "svc/go.mod", outDir: "svc/internal/blog", want: "svc"},
+		{name: "module at the package", goMod: "svc/go.mod", outDir: "svc", want: "svc"},
+		{name: "no module", outDir: "svc/internal/blog"},
 	}
 
 	for _, tc := range cases {
@@ -1381,29 +1411,81 @@ func TestDefaultMainDir(t *testing.T) {
 
 			root := t.TempDir()
 			if tc.goMod != "" {
-				p := filepath.Join(root, filepath.FromSlash(tc.goMod))
-				require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
-				require.NoError(t, os.WriteFile(p, nil, 0o600))
+				writeFile(t, filepath.Join(root, filepath.FromSlash(tc.goMod)), "")
 			}
 
-			got, err := defaultMainDir(filepath.Join(root, filepath.FromSlash(tc.outDir)), "blog")
-			if tc.wantErr {
-				require.Error(t, err)
+			got, err := findModuleRoot(filepath.Join(root, filepath.FromSlash(tc.outDir)))
+			require.NoError(t, err)
+
+			if tc.want == "" {
+				require.Empty(t, got)
+				return
+			}
+
+			require.Equal(t, filepath.Join(root, filepath.FromSlash(tc.want)), got)
+		})
+	}
+}
+
+func TestResolveModule(t *testing.T) {
+	t.Parallel()
+
+	const goMod = "module example.com/svc\n\ngo 1.27\n"
+
+	cases := []struct {
+		name    string
+		goMod   string
+		outDir  string
+		module  string
+		want    string
+		wantErr string
+	}{
+		{name: "derived below the module root", goMod: goMod, outDir: "internal/blog", want: "example.com/svc/internal/blog"},
+		{name: "derived at the module root", goMod: goMod, outDir: ".", want: "example.com/svc"},
+		{name: "matching module", goMod: goMod, outDir: "internal/blog", module: "example.com/svc/internal/blog", want: "example.com/svc/internal/blog"},
+		{name: "mismatched module", goMod: goMod, outDir: "internal/blog", module: "example.com/other", wantErr: "does not match"},
+		{name: "no module directive", goMod: "go 1.27\n", outDir: "internal/blog", wantErr: "no module directive"},
+		{name: "no go.mod keeps the spec module", outDir: "internal/blog", module: "example.com/blog", want: "example.com/blog"},
+		{name: "no go.mod and no module", outDir: "internal/blog", wantErr: "set module in the spec"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var modRoot string
+
+			root := t.TempDir()
+			if tc.goMod != "" {
+				writeFile(t, filepath.Join(root, fileGoMod), tc.goMod)
+				modRoot = root
+			}
+
+			s := &spec.Spec{Module: tc.module}
+
+			err := resolveModule(s, filepath.Join(root, filepath.FromSlash(tc.outDir)), modRoot)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
 				return
 			}
 
 			require.NoError(t, err)
-			require.Equal(t, filepath.Join(root, filepath.FromSlash(tc.want)), got)
+			require.Equal(t, tc.want, s.Module)
 		})
 	}
 
-	t.Run("stdout", func(t *testing.T) {
+	t.Run("stdout needs a module", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := defaultMainDir("", "blog")
-		require.NoError(t, err)
-		require.Equal(t, filepath.Join("cmd", "blog"), got)
+		require.ErrorContains(t, resolveModule(&spec.Spec{}, "", ""), "module is not set")
 	})
+}
+
+func writeFile(t *testing.T, name, content string) {
+	t.Helper()
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(name), 0o755))
+	require.NoError(t, os.WriteFile(name, []byte(content), 0o600))
 }
 
 func TestMainFiles(t *testing.T) {

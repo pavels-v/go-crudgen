@@ -80,10 +80,6 @@ func (s *Spec) Validate() error {
 		return fmt.Errorf("package %q is not an importable Go package name", s.Package)
 	}
 
-	if strings.TrimSpace(s.Module) == "" {
-		return errors.New("missing module import path")
-	}
-
 	if len(s.Entities) == 0 {
 		return errors.New("no entities defined")
 	}

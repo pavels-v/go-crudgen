@@ -21,7 +21,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 //go:embed templates/*.tmpl
@@ -179,6 +179,21 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	toStdout := opts.OutDir == ""
 
+	var modRoot string
+
+	if !toStdout {
+		root, err := findModuleRoot(opts.OutDir)
+		if err != nil {
+			return err
+		}
+
+		modRoot = root
+	}
+
+	if err := resolveModule(s, opts.OutDir, modRoot); err != nil {
+		return err
+	}
+
 	dest := opts.OutDir
 	if toStdout {
 		dest = destStdout
@@ -196,7 +211,7 @@ func Generate(s *spec.Spec, opts Options) error {
 	}
 
 	if opts.Main && opts.MainDir == "" {
-		dir, err := defaultMainDir(opts.OutDir, s.Package)
+		dir, err := defaultMainDir(opts.OutDir, modRoot, s.Package)
 		if err != nil {
 			return err
 		}
@@ -472,33 +487,16 @@ func mainFiles(s *spec.Spec, shared sharedFiles, opts Options) ([]genFile, error
 	return []genFile{{Path: fileEmbed, Src: esrc}, {Path: mainPath, Src: msrc}}, nil
 }
 
-func defaultMainDir(outDir, pkg string) (string, error) {
+func defaultMainDir(outDir, modRoot, pkg string) (string, error) {
 	if outDir == "" {
 		return filepath.Join(dirCmd, pkg), nil
 	}
 
-	dir, err := filepath.Abs(outDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve output directory: %w", err)
+	if modRoot == "" {
+		return "", fmt.Errorf("no go.mod above %s to place main.go next to: pass --main <dir> or --no-main", outDir)
 	}
 
-	for {
-		_, err := os.Stat(filepath.Join(dir, fileGoMod))
-		if err == nil {
-			return filepath.Join(dir, dirCmd, pkg), nil
-		}
-
-		if !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("find go.mod: %w", err)
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("no go.mod above %s to place main.go next to: pass --main <dir> or --no-main", outDir)
-		}
-
-		dir = parent
-	}
+	return filepath.Join(modRoot, dirCmd, pkg), nil
 }
 
 func mainFilePath(outDir, mainDir string) (string, error) {

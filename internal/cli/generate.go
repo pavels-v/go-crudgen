@@ -4,12 +4,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"time"
 
-	"go-crudgen/internal/generator"
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/generator"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 const (
@@ -25,8 +26,10 @@ const (
 
 const envSourceDateEpoch = "SOURCE_DATE_EPOCH"
 
-func runGenerate(args []string) int {
+func runGenerate(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet(cmdGenerate, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
 	specPath := fs.String(flagSpec, "", "path to the YAML entity specification (required)")
 	outDir := fs.String(flagOut, "", "output directory for generated code (default: write to stdout)")
 	dryRun := fs.Bool(flagDryRun, false, "report what would be generated without writing files")
@@ -47,14 +50,14 @@ func runGenerate(args []string) int {
 	}
 
 	if *specPath == "" {
-		fmt.Fprintln(os.Stderr, "generate: -spec is required")
+		fmt.Fprintln(stderr, "generate: -spec is required")
 		fs.Usage()
 
 		return exitUsage
 	}
 
 	if *noMain && *mainDir != "" {
-		fmt.Fprintln(os.Stderr, "generate: -main and -no-main are mutually exclusive")
+		fmt.Fprintln(stderr, "generate: -main and -no-main are mutually exclusive")
 		fs.Usage()
 
 		return exitUsage
@@ -62,19 +65,19 @@ func runGenerate(args []string) int {
 
 	s, err := spec.Load(*specPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load spec: %v\n", err)
+		fmt.Fprintf(stderr, "failed to load spec: %v\n", err)
 		return exitError
 	}
 
 	migrationTime, err := sourceDateEpoch()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read %s: %v\n", envSourceDateEpoch, err)
+		fmt.Fprintf(stderr, "failed to read %s: %v\n", envSourceDateEpoch, err)
 		return exitUsage
 	}
 
 	opts := generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: !*noRouter, Main: !*noMain, MainDir: *mainDir, Tests: !*noTests, MigrationTime: migrationTime}
 	if err := generator.Generate(s, opts); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to generate: %v\n", err)
+		fmt.Fprintf(stderr, "failed to generate: %v\n", err)
 		return exitError
 	}
 

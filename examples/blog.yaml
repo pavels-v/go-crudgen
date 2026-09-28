@@ -1,5 +1,5 @@
 package: blog                                 # root package name of the generated code
-module: example.com/blogservice/internal/blog # import path of the --out directory
+module: example.com/blogservice/internal/blog # optional; derived from go.mod when omitted, checked when set
 
 entities:
   - name: Post

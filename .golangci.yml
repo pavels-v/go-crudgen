@@ -51,6 +51,10 @@ linters:
   settings:
     errcheck:
       check-type-assertions: true
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     errorlint:
       errorf: false
       asserts: true
@@ -130,6 +134,6 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - go-crudgen
+        - github.com/pavels-v/go-crudgen
   exclusions:
     generated: lax

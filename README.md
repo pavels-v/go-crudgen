@@ -40,10 +40,35 @@ Among the tools we found, none generates every layer (validation, handlers, rout
 - Plain YAML syntax familiar from OpenAPI and Kubernetes; the generator validates its own rules on top (required fields, known types, exactly one primary key, existing reference targets).
 - Handlers depend on a repository interface, so storage can be swapped or faked in tests.
 
+## Install
+
+```bash
+go install github.com/pavels-v/go-crudgen/cmd/go-crudgen@latest
+```
+
+Requires Go 1.27+ for the generator and the generated code; the service needs PostgreSQL; `make integration` needs Docker.
+
+## Quick start
+
+```bash
+mkdir blog && cd blog && go mod init example.com/blog
+go-crudgen generate --spec api.yaml --out ./internal/blog   # api.yaml: the spec below
+go mod tidy
+DATABASE_URL='postgres://user:pass@localhost:5432/blog?sslmode=disable' go run ./cmd/blog
+```
+
+```bash
+$ curl -s -X POST localhost:8080/authors -d '{"email":"ada@example.com"}'
+{"body":{"id":"358fbc76-73d5-4053-8eb4-bfe4c8681d07","email":"ada@example.com"}}
+$ curl -s localhost:8080/authors
+{"body":{"items":[{"id":"358fbc76-73d5-4053-8eb4-bfe4c8681d07","email":"ada@example.com"}],"limit":50,"offset":0,"has_more":false}}
+$ curl -s -X POST localhost:8080/authors -d '{"email":"nope"}'
+{"error":{"code":"validation_failed","message":"request body failed validation","details":[{"field":"/email","reason":"email"}]}}
+```
+
 ## Usage
 
 ```bash
-go install ./cmd/go-crudgen                                                      # from a clone of this repo
 go-crudgen generate --spec ./api.yaml                                            # preview on stdout
 go-crudgen generate --spec ./api.yaml --out ./internal/api                       # write files
 go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
@@ -110,7 +135,6 @@ Full example: [examples/blog.yaml](examples/blog.yaml), generated output: [examp
 
 ```yaml
 package: blog
-module: example.com/blog
 entities:
   - name: Post
     plural: posts
@@ -129,7 +153,8 @@ entities:
 - `order: <field>` sets the List order (default: primary key, ties broken by it); clients pick `?dir=asc|desc` (default `asc`); the field must be NOT NULL and not `bool` or `json`.
 - `pagination: cursor` pages List by an opaque keyset `?cursor=` instead of `?offset=`.
 - `plural` sets the route segment (letters, digits, `-`, `_`) and, in snake_case, the table name; the default is a naive English plural of the snake_case name; two entities cannot share a table.
-- `package` names the root package, which `restapi` and `postgres` import as `domain`; `module` is the import path of the `--out` directory.
+- `package` names the root package, which `restapi` and `postgres` import as `domain`.
+- `module` is the import path of the `--out` directory, derived from the nearest `go.mod` when omitted and checked against it when set; required without `--out` or a `go.mod`.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
 - `required` fields must be present in the request body; `false` and `0` are accepted, an empty `string` or `text` is not.

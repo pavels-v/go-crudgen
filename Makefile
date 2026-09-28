@@ -4,15 +4,16 @@ BINARY := go-crudgen
 CMD    := ./cmd/go-crudgen
 TOOL   := go tool -modfile="$(CURDIR)/tools/go.mod"
 LINT   := $(TOOL) golangci-lint
+VULN   := $(TOOL) govulncheck
 LINTC  := -c "$(CURDIR)/.golangci.yml"
 MODS   := . examples/blogservice examples/blogservice/integration
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test e2e integration verify-examples lint lint-fix fmt tidy vet clean
+.PHONY: help build test e2e integration verify-examples lint lint-fix fmt vuln tidy vet clean
 
 help: ## List available targets
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the CLI binary (named go-crudgen)
@@ -21,7 +22,7 @@ build: ## Build the CLI binary (named go-crudgen)
 test: ## Run tests
 	go test ./...
 
-e2e: ## Run end-to-end tests (regenerates examples/blogservice from its spec, then builds & tests it)
+e2e: ## Run end-to-end tests (regenerates examples/blogservice; builds, vets, tests and lints a flag matrix)
 	go test -tags e2e -count=1 -v ./test/e2e
 
 integration: ## Run examples/blogservice integration tests against real Postgres via testcontainers (requires Docker)
@@ -39,6 +40,9 @@ lint-fix: ## Run golangci-lint with autofixes applied
 
 fmt: ## Format code (gofmt + goimports via golangci-lint formatters)
 	@for m in $(MODS); do (cd $$m && $(LINT) fmt $(LINTC) ./...) || exit 1; done
+
+vuln: ## Scan every module for known vulnerabilities (govulncheck pinned in tools/go.mod)
+	@for m in $(MODS); do (cd $$m && $(VULN) ./...) || exit 1; done
 
 vet: ## Run go vet
 	go vet ./...
