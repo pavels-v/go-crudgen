@@ -3,7 +3,7 @@ package restapi
 import (
 	"net/http"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
 const (
@@ -28,16 +28,16 @@ type UpdateTagRequest struct {
 
 // TagHandler serves the CRUD endpoints for Tag.
 type TagHandler struct {
-	repo blog.TagRepository
+	repo domain.TagRepository
 }
 
 // NewTagHandler returns a handler backed by repo.
-func NewTagHandler(repo blog.TagRepository) *TagHandler {
+func NewTagHandler(repo domain.TagRepository) *TagHandler {
 	return &TagHandler{repo: repo}
 }
 
-// RegisterTagRoutes registers the Tag REST routes on mux.
-func RegisterTagRoutes(mux *http.ServeMux, h *TagHandler) {
+// RegisterRoutes registers the Tag REST routes on mux.
+func (h *TagHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tags", h.Create)
 	mux.HandleFunc("GET /tags", h.List)
 	mux.HandleFunc("GET /tags/{id}", h.Get)
@@ -57,7 +57,7 @@ func (h *TagHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Tag{
+	m := domain.Tag{
 		Slug:   req.Slug,
 		Label:  req.Label,
 		Color:  valueOr(req.Color, defaultTagColor),
@@ -89,7 +89,7 @@ func (h *TagHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *TagHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := newListQuery(r, queryOffset)
 	limit := q.limit()
-	p := blog.TagListParams{
+	p := domain.TagListParams{
 		Dir:    q.dir(),
 		Limit:  limit + 1,
 		Offset: q.offset(),
@@ -107,7 +107,7 @@ func (h *TagHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, more := trimPage(items, limit)
-	writeBody(w, r, http.StatusOK, offsetPage[blog.Tag]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+	writeBody(w, r, http.StatusOK, offsetPage[domain.Tag]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +127,7 @@ func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := blog.Tag{
+	m := domain.Tag{
 		Slug:   id,
 		Label:  req.Label,
 		Color:  valueOr(req.Color, defaultTagColor),

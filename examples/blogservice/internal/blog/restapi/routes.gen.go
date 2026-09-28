@@ -1,0 +1,38 @@
+package restapi
+
+import (
+	"net/http"
+)
+
+// WithRouteErrors answers requests that match no route on mux with the JSON
+// error envelope instead of ServeMux's plain text.
+func WithRouteErrors(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h, pattern := mux.Handler(r)
+		if pattern != "" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+
+		rec := &statusRecorder{header: make(http.Header)}
+		h.ServeHTTP(rec, r)
+
+		if rec.status == http.StatusMethodNotAllowed {
+			w.Header().Set("Allow", rec.header.Get("Allow"))
+			writeError(w, r, http.StatusMethodNotAllowed, codeMethodNotAllowed, "method not allowed")
+
+			return
+		}
+
+		writeError(w, r, http.StatusNotFound, codeNotFound, "route not found")
+	})
+}
+
+type statusRecorder struct {
+	header http.Header
+	status int
+}
+
+func (s *statusRecorder) Header() http.Header         { return s.header }
+func (s *statusRecorder) Write(b []byte) (int, error) { return len(b), nil }
+func (s *statusRecorder) WriteHeader(status int)      { s.status = status }

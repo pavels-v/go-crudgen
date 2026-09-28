@@ -8,12 +8,12 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"example.com/blogservice/internal/blog"
+	domain "example.com/blogservice/internal/blog"
 )
 
-// tagRow is the database representation of blog.Tag. Nullable
+// tagRow is the database representation of domain.Tag. Nullable
 // columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newTagRow and toModel convert to and from the pointer fields on blog.Tag.
+// newTagRow and toModel convert to and from the pointer fields on domain.Tag.
 type tagRow struct {
 	Slug   string  `db:"slug"`
 	Label  string  `db:"label"`
@@ -23,7 +23,7 @@ type tagRow struct {
 
 // newTagRow builds the row written by Create and Update. Generated
 // columns are set by the SQL itself, so they are omitted here.
-func newTagRow(m *blog.Tag) tagRow {
+func newTagRow(m *domain.Tag) tagRow {
 	return tagRow{
 		Slug:   m.Slug,
 		Label:  m.Label,
@@ -33,8 +33,8 @@ func newTagRow(m *blog.Tag) tagRow {
 }
 
 // toModel converts a scanned row back into the API model.
-func (row tagRow) toModel() blog.Tag {
-	return blog.Tag{
+func (row tagRow) toModel() domain.Tag {
+	return domain.Tag{
 		Slug:   row.Slug,
 		Label:  row.Label,
 		Color:  row.Color,
@@ -42,7 +42,7 @@ func (row tagRow) toModel() blog.Tag {
 	}
 }
 
-// TagRepository is a PostgreSQL-backed blog.TagRepository. It depends on sqlx rather
+// TagRepository is a PostgreSQL-backed domain.TagRepository. It depends on sqlx rather
 // than a concrete driver, so any database/sql-compatible Postgres driver
 // (lib/pq, pgx's stdlib adapter, ...) can back it.
 type TagRepository struct {
@@ -54,9 +54,9 @@ func NewTagRepository(db *sqlx.DB) *TagRepository {
 	return &TagRepository{db: db}
 }
 
-var _ blog.TagRepository = (*TagRepository)(nil)
+var _ domain.TagRepository = (*TagRepository)(nil)
 
-func (r *TagRepository) Create(ctx context.Context, m *blog.Tag) error {
+func (r *TagRepository) Create(ctx context.Context, m *domain.Tag) error {
 	row := newTagRow(m)
 
 	if _, err := r.db.ExecContext(ctx, `INSERT INTO tags (slug, label, color, weight) VALUES ($1, $2, $3, $4)`, row.Slug, row.Label, row.Color, row.Weight); err != nil {
@@ -66,11 +66,11 @@ func (r *TagRepository) Create(ctx context.Context, m *blog.Tag) error {
 	return nil
 }
 
-func (r *TagRepository) Get(ctx context.Context, id string) (*blog.Tag, error) {
+func (r *TagRepository) Get(ctx context.Context, id string) (*domain.Tag, error) {
 	var row tagRow
 	if err := r.db.GetContext(ctx, &row, `SELECT slug, label, color, weight FROM tags WHERE slug = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, blog.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 
 		return nil, fmt.Errorf("get tag: %w", err)
@@ -81,9 +81,9 @@ func (r *TagRepository) Get(ctx context.Context, id string) (*blog.Tag, error) {
 	return &m, nil
 }
 
-func (r *TagRepository) List(ctx context.Context, p blog.TagListParams) ([]blog.Tag, error) {
+func (r *TagRepository) List(ctx context.Context, p domain.TagListParams) ([]domain.Tag, error) {
 	order := `slug`
-	if p.Dir == blog.SortDesc {
+	if p.Dir == domain.SortDesc {
 		order = `slug DESC`
 	}
 
@@ -94,7 +94,7 @@ func (r *TagRepository) List(ctx context.Context, p blog.TagListParams) ([]blog.
 		return nil, fmt.Errorf("list tag: %w", err)
 	}
 
-	out := make([]blog.Tag, len(rows))
+	out := make([]domain.Tag, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
@@ -102,7 +102,7 @@ func (r *TagRepository) List(ctx context.Context, p blog.TagListParams) ([]blog.
 	return out, nil
 }
 
-func (r *TagRepository) Update(ctx context.Context, m *blog.Tag) error {
+func (r *TagRepository) Update(ctx context.Context, m *domain.Tag) error {
 	row := newTagRow(m)
 
 	res, err := r.db.ExecContext(ctx, `UPDATE tags SET label = $1, color = $2, weight = $3 WHERE slug = $4`, row.Label, row.Color, row.Weight, row.Slug)
@@ -116,7 +116,7 @@ func (r *TagRepository) Update(ctx context.Context, m *blog.Tag) error {
 	}
 
 	if n == 0 {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return nil
@@ -134,7 +134,7 @@ func (r *TagRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if n == 0 {
-		return blog.ErrNotFound
+		return domain.ErrNotFound
 	}
 
 	return nil

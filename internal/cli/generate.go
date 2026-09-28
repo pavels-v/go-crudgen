@@ -15,6 +15,7 @@ const (
 	flagOut    = "out"
 	flagDryRun = "dry-run"
 	flagDriver = "driver"
+	flagRouter = "router"
 )
 
 func runGenerate(args []string) int {
@@ -23,6 +24,7 @@ func runGenerate(args []string) int {
 	outDir := fs.String(flagOut, "", "output directory for generated code (default: write to stdout)")
 	dryRun := fs.Bool(flagDryRun, false, "report what would be generated without writing files")
 	driver := fs.String(flagDriver, generator.DriverPgx, "database driver for the generated NewDB constructor: pgx or pq")
+	router := fs.Bool(flagRouter, false, "also generate restapi.NewRouter and Deps wiring every entity's routes")
 
 	if err := fs.Parse(args); err != nil {
 		// An explicit -h/--help is a success, not a usage error; flag has
@@ -47,7 +49,7 @@ func runGenerate(args []string) int {
 		return exitError
 	}
 
-	if err := generator.Generate(s, generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver}); err != nil {
+	if err := generator.Generate(s, generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: *router}); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to generate: %v\n", err)
 		return exitError
 	}

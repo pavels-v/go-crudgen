@@ -50,9 +50,9 @@ func TestGenerateBlogExample(t *testing.T) {
 	blogDir := filepath.Join(root, "examples", "blogservice")
 	outDir := filepath.Join(blogDir, "internal", "blog")
 
-	// Regenerate the example with the default (pgx) driver.
+	// Regenerate the example with the default (pgx) driver and NewRouter.
 	run(t, root, "go", "run", "./cmd/go-crudgen", "generate",
-		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog")
+		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog", "--router")
 
 	for _, f := range []string{
 		"post.gen.go", "author.gen.go", "comment.gen.go", "tag.gen.go",
@@ -61,6 +61,10 @@ func TestGenerateBlogExample(t *testing.T) {
 		filepath.Join("restapi", "author.gen.go"),
 		filepath.Join("restapi", "comment.gen.go"),
 		filepath.Join("restapi", "tag.gen.go"),
+		filepath.Join("restapi", "request.gen.go"),
+		filepath.Join("restapi", "response.gen.go"),
+		filepath.Join("restapi", "query.gen.go"),
+		filepath.Join("restapi", "routes.gen.go"),
 		filepath.Join("restapi", "router.gen.go"),
 		filepath.Join("postgres", "post.gen.go"),
 		filepath.Join("postgres", "author.gen.go"),

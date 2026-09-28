@@ -363,22 +363,23 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 
 	got := renderHandlerSrc(t, s, "Post")
 	for _, want := range []string{
+		"func (h *PostHandler) RegisterRoutes(mux *http.ServeMux) {",
 		`mux.HandleFunc("POST /posts", h.Create)`,
 		`mux.HandleFunc("GET /posts", h.List)`,
 		`mux.HandleFunc("GET /posts/{id}", h.Get)`,
 		`mux.HandleFunc("PUT /posts/{id}", h.Update)`,
 		`mux.HandleFunc("DELETE /posts/{id}", h.Delete)`,
-		`"example.com/blog"`,
-		"repo blog.PostRepository",
-		"m := blog.Post{",
+		`domain "example.com/blog"`,
+		"repo domain.PostRepository",
+		"m := domain.Post{",
 		"id, ok := pathID(w, r, parseText[uuid.UUID]) if !ok { return }",
 		"writeDecodeError(w, r, err)",
 		"writeValidationError(w, r, err)",
 		"writeBody(w, r, http.StatusCreated, m)",
-		"q := newListQuery(r, queryOffset) limit := q.limit() p := blog.PostListParams{ Dir: q.dir(), Limit: limit + 1, Offset: q.offset(), }",
+		"q := newListQuery(r, queryOffset) limit := q.limit() p := domain.PostListParams{ Dir: q.dir(), Limit: limit + 1, Offset: q.offset(), }",
 		"items, err := h.repo.List(r.Context(), p)",
 		"items, more := trimPage(items, limit)",
-		"writeBody(w, r, http.StatusOK, offsetPage[blog.Post]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})",
+		"writeBody(w, r, http.StatusOK, offsetPage[domain.Post]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})",
 		"writeError(w, r, http.StatusBadRequest, codeInvalidQuery, \"invalid query parameters\", q.details...)",
 		"w.WriteHeader(http.StatusNoContent)",
 	} {
@@ -460,18 +461,18 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 	for _, want := range []string{
 		// compile-time check that the concrete type implements the interface
 		"package postgres",
-		`"example.com/blog"`,
-		"var _ blog.PostRepository = (*PostRepository)(nil)",
+		`domain "example.com/blog"`,
+		"var _ domain.PostRepository = (*PostRepository)(nil)",
 		"func NewPostRepository(db *sqlx.DB) *PostRepository",
-		"func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, error)",
-		"return nil, blog.ErrNotFound",
+		"func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*domain.Post, error)",
+		"return nil, domain.ErrNotFound",
 		// the primary-key type's package is imported for the Get/Delete signatures
 		`"github.com/google/uuid"`,
 		`"github.com/jmoiron/sqlx"`,
 		// the row struct carries db tags; nullable body becomes sql.Null[T]
 		"type postRow struct {",
 		"Body sql.Null[string]",
-		"func newPostRow(m *blog.Post) postRow",
+		"func newPostRow(m *domain.Post) postRow",
 		"Body: toNull(m.Body)",
 		"Body: fromNull(row.Body)",
 		// sqlx scans into the row, which is then converted to the API model
@@ -510,7 +511,7 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	got := renderRepoSrc(t, s, "Account")
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
-		"order := `id` if p.Dir == app.SortDesc { order = `id DESC` }",
+		"order := `id` if p.Dir == domain.SortDesc { order = `id DESC` }",
 		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` var rows []accountRow if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
@@ -570,7 +571,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 				"q := newListQuery(r, queryOffset, queryPostTitle, queryPostAuthor, queryPostPublishedOn, queryPostViews, queryPostPublished)",
 				"Title: queryValue(q, queryPostTitle, parseString),",
 				"Author: queryValue(q, queryPostAuthor, parseText[uuid.UUID]),",
-				"PublishedOn: queryValue(q, queryPostPublishedOn, parseText[blog.Date]),",
+				"PublishedOn: queryValue(q, queryPostPublishedOn, parseText[domain.Date]),",
 				"Views: queryValue(q, queryPostViews, parseInt32),",
 				"Published: queryValue(q, queryPostPublished, strconv.ParseBool),",
 				"Dir: q.dir(),",
@@ -586,7 +587,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 				"if p.PublishedOn != nil { where = append(where, `published_on = ?`)",
 				"q := `SELECT id, title, author, published_on, views, published FROM posts`",
 				"q += ` WHERE ` + strings.Join(where, ` AND `)",
-				"order := `title, id` if p.Dir == blog.SortDesc { order = `title DESC, id DESC` }",
+				"order := `title, id` if p.Dir == domain.SortDesc { order = `title DESC, id DESC` }",
 				"args = append(args, p.Limit, p.Offset) q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`",
 				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
 				`"strings"`,
@@ -597,7 +598,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 			render: renderRepoSrc,
 			entity: "Tag",
 			want: []string{
-				"order := `label, slug` if p.Dir == blog.SortDesc { order = `label DESC, slug DESC` }",
+				"order := `label, slug` if p.Dir == domain.SortDesc { order = `label DESC, slug DESC` }",
 				"q := `SELECT slug, label FROM tags ORDER BY ` + order + ` LIMIT $1 OFFSET $2`",
 			},
 			absent: []string{"where = append", "Rebind", `"strings"`},
@@ -608,7 +609,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 			entity: "Tag",
 			want: []string{
 				"q := newListQuery(r, queryOffset)",
-				"p := blog.TagListParams{ Dir: q.dir(),",
+				"p := domain.TagListParams{ Dir: q.dir(),",
 			},
 			absent: []string{"queryValue("},
 		},
@@ -670,7 +671,7 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			render: renderRepoSrc,
 			entity: "Post",
 			want: []string{
-				"order, after := `created_at, id`, `(created_at, id) > (?, ?)` if p.Dir == blog.SortDesc { order, after = `created_at DESC, id DESC`, `(created_at, id) < (?, ?)` }",
+				"order, after := `created_at, id`, `(created_at, id) > (?, ?)` if p.Dir == domain.SortDesc { order, after = `created_at DESC, id DESC`, `(created_at, id) < (?, ?)` }",
 				"if p.After != nil { where = append(where, after) args = append(args, p.After.CreatedAt, p.After.ID) }",
 				"args = append(args, p.Limit) q += ` ORDER BY ` + order + ` LIMIT ?`",
 			},
@@ -681,7 +682,7 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			render: renderRepoSrc,
 			entity: "Tag",
 			want: []string{
-				"order, after := `slug`, `slug > ?` if p.Dir == blog.SortDesc { order, after = `slug DESC`, `slug < ?` }",
+				"order, after := `slug`, `slug > ?` if p.Dir == domain.SortDesc { order, after = `slug DESC`, `slug < ?` }",
 				"args = append(args, p.After.Slug)",
 			},
 		},
@@ -690,11 +691,11 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			render: renderHandlerSrc,
 			entity: "Post",
 			want: []string{
-				"type postCursor struct { Dir blog.SortDir `json:\"dir\"` After blog.PostCursor `json:\"after\"` }",
+				"type postCursor struct { Dir domain.SortDir `json:\"dir\"` After domain.PostCursor `json:\"after\"` }",
 				"q := newListQuery(r, queryCursor, queryPostTitle)",
 				"if c := queryCursorValue[postCursor](q); c != nil { if c.Dir != p.Dir { q.invalid(queryCursor) } p.After = &c.After }",
-				"page := cursorPage[blog.Post]{Items: items}",
-				"c := postCursor{ Dir: p.Dir, After: blog.PostCursor{ CreatedAt: last.CreatedAt, ID: last.ID, }, }",
+				"page := cursorPage[domain.Post]{Items: items}",
+				"c := postCursor{ Dir: p.Dir, After: domain.PostCursor{ CreatedAt: last.CreatedAt, ID: last.ID, }, }",
 				"if page.NextCursor, err = encodeCursor(c); err != nil {",
 			},
 			absent: []string{"q.offset()", "offsetPage"},
@@ -737,11 +738,7 @@ func TestRenderRouter_PaginationHelpers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			src, err := renderRouter(routerInfo(&spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared))
-			require.NoError(t, err)
-			requireParses(t, src)
-
-			got := string(src)
+			got := renderRESTSrc(t, &spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared)
 			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
@@ -776,11 +773,7 @@ func TestRenderRouter_ParseHelpers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			src, err := renderRouter(routerInfo(&spec.Spec{Package: "blog", Module: "example.com/blog"}, sharedFiles{Offset: true, Parsers: tc.parsers}))
-			require.NoError(t, err)
-			requireParses(t, src)
-
-			got := string(src)
+			got := renderRESTSrc(t, &spec.Spec{Package: "blog", Module: "example.com/blog"}, sharedFiles{Offset: true, Parsers: tc.parsers})
 			for helper, decl := range helpers {
 				if tc.parsers[helper] {
 					wantContains(t, got, decl)
@@ -816,7 +809,7 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 	got := renderRepoSrc(t, s, "Tag")
 	for _, want := range []string{
 		"r.db.GetContext(ctx, &exists, `SELECT 1 FROM tags WHERE id = $1`, row.ID)",
-		"return cat.ErrNotFound",
+		"return domain.ErrNotFound",
 	} {
 		wantContains(t, got, want)
 	}
@@ -1173,8 +1166,8 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			wantContains(t, got, `sqlStateUniqueViolation = "23505"`)
 			wantContains(t, got, "package postgres")
 			wantContains(t, got, `"example.com/blog" )`)
-			wantContains(t, got, `return fmt.Errorf("%w: %v", blog.ErrAlreadyExists, err)`)
-			wantContains(t, got, `return fmt.Errorf("%w: %v", blog.ErrStillReferenced, err)`)
+			wantContains(t, got, `return fmt.Errorf("%w: %v", domain.ErrAlreadyExists, err)`)
+			wantContains(t, got, `return fmt.Errorf("%w: %v", domain.ErrStillReferenced, err)`)
 		})
 	}
 }
@@ -1186,30 +1179,107 @@ func TestDriverInfo_RejectsUnknown(t *testing.T) {
 	require.False(t, ok, "unknown driver should be rejected")
 }
 
+func renderRESTSrc(t *testing.T, s *spec.Spec, shared sharedFiles) string {
+	t.Helper()
+
+	files, err := restFiles(s, shared)
+	require.NoError(t, err)
+
+	var b strings.Builder
+	for _, f := range files {
+		requireParses(t, f.Src)
+		b.Write(f.Src)
+	}
+
+	return b.String()
+}
+
+func TestRestFiles_RouterFlag(t *testing.T) {
+	t.Parallel()
+
+	always := []string{fileRequest, fileResponse, fileQuery, fileRoutes}
+	cases := []struct {
+		name   string
+		router bool
+		want   []string
+	}{
+		{name: "without router", want: always},
+		{name: "with router", router: true, want: append(slices.Clone(always), fileRouter)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			files, err := restFiles(&spec.Spec{Package: "blog", Module: "example.com/blog"}, sharedFiles{Offset: true, Router: tc.router})
+			require.NoError(t, err)
+
+			paths := make([]string, len(files))
+			for i, f := range files {
+				paths[i] = f.Path
+			}
+
+			require.Equal(t, tc.want, paths)
+		})
+	}
+}
+
+func TestRestFiles_OptionalHelpers(t *testing.T) {
+	t.Parallel()
+
+	const (
+		queryValueDecl = "func queryValue["
+		valueOrDecl    = "func valueOr["
+	)
+
+	cases := []struct {
+		name   string
+		shared sharedFiles
+		want   []string
+		absent []string
+	}{
+		{name: "none", shared: sharedFiles{Offset: true}, absent: []string{queryValueDecl, valueOrDecl}},
+		{name: "filters", shared: sharedFiles{Offset: true, Filters: true}, want: []string{queryValueDecl}, absent: []string{valueOrDecl}},
+		{name: "defaults", shared: sharedFiles{Offset: true, Defaults: true}, want: []string{valueOrDecl}, absent: []string{queryValueDecl}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := renderRESTSrc(t, &spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
+	}
+}
+
 func TestRenderRouter_WiresEntities(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{Package: "blog", Module: "example.com/blog"}
-	src, err := renderRouter(routerInfo(s, sharedFiles{Offset: true, Routes: []routerEntity{
-		{Struct: "Post", Repo: "blog.PostRepository", DepsField: "Posts"},
-	}}))
-	require.NoError(t, err)
-	requireParses(t, src)
+	got := renderRESTSrc(t, s, sharedFiles{Offset: true, Router: true, Defaults: true, Routes: []routerEntity{
+		{Struct: "Post", Repo: "domain.PostRepository", DepsField: "Posts"},
+	}})
 
-	got := string(src)
 	for _, want := range []string{
 		"package restapi",
-		`"example.com/blog"`,
-		"blog.ErrNotFound: {status: http.StatusNotFound, code: codeNotFound},",
-		"blog.ErrAlreadyExists: {status: http.StatusConflict, code: codeAlreadyExists},",
-		"blog.ErrReferenceNotFound: {status: http.StatusUnprocessableEntity, code: codeReferenceNotFound},",
-		"blog.ErrStillReferenced: {status: http.StatusConflict, code: codeStillReferenced},",
+		`domain "example.com/blog"`,
+		"domain.ErrNotFound: {status: http.StatusNotFound, code: codeNotFound},",
+		"domain.ErrAlreadyExists: {status: http.StatusConflict, code: codeAlreadyExists},",
+		"domain.ErrReferenceNotFound: {status: http.StatusUnprocessableEntity, code: codeReferenceNotFound},",
+		"domain.ErrStillReferenced: {status: http.StatusConflict, code: codeStillReferenced},",
 		`codeValidationFailed = "validation_failed"`,
 		"type bodyResponse[T any] struct { Body T `json:\"body\"` }",
 		"type errorResponse struct { Error apiError `json:\"error\"` }",
 		"type apiError struct { Code string `json:\"code\"` Message string `json:\"message\"` Details []errorDetail `json:\"details\"` }",
 		"type offsetPage[T any] struct { Items []T `json:\"items\"` Limit int `json:\"limit\"` Offset int `json:\"offset\"` HasMore bool `json:\"has_more\"` }",
-		"func (q *listQuery) dir() blog.SortDir { d, ok := blog.ParseSortDir(q.values.Get(queryDir)) if !ok { q.invalid(queryDir) } return d }",
+		"func (q *listQuery) dir() domain.SortDir { d, ok := domain.ParseSortDir(q.values.Get(queryDir)) if !ok { q.invalid(queryDir) } return d }",
 		"func trimPage[T any](items []T, limit int) ([]T, bool) {",
 		"writeError(w, r, http.StatusUnprocessableEntity, codeValidationFailed, \"request body failed validation\", details...)",
 		"writeError(w, r, http.StatusInternalServerError, codeInternal, http.StatusText(http.StatusInternalServerError))",
@@ -1217,9 +1287,10 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 		"func valueOr[T any](p *T, def T) T",
 		"json.UnmarshalRead(http.MaxBytesReader(w, r.Body, maxBodyBytes), v, json.RejectUnknownMembers(true))",
 		"func NewRouter(deps Deps) http.Handler {",
-		"return withRouteErrors(mux)",
-		"Posts blog.PostRepository",
-		"RegisterPostRoutes(mux, NewPostHandler(deps.Posts))",
+		"func WithRouteErrors(mux *http.ServeMux) http.Handler {",
+		"return WithRouteErrors(mux)",
+		"Posts domain.PostRepository",
+		"NewPostHandler(deps.Posts).RegisterRoutes(mux)",
 	} {
 		wantContains(t, got, want)
 	}
@@ -1300,15 +1371,11 @@ func TestSnakeCase(t *testing.T) {
 func TestGroupImports(t *testing.T) {
 	t.Parallel()
 
-	const (
-		testModule  = "example.com/blog"
-		testPackage = "blog"
-	)
+	const testModule = "example.com/blog"
 
 	cases := []struct {
 		name   string
 		module string
-		pkg    string
 		in     []string
 		want   []string
 	}{
@@ -1321,9 +1388,9 @@ func TestGroupImports(t *testing.T) {
 			want: []string{importContext, importTime, "", importUUID, importSQLx},
 		},
 		{
-			name: "own module in its own group",
+			name: "own module aliased in its own group",
 			in:   []string{importNetHTTP, testModule, importUUID},
-			want: []string{importNetHTTP, "", importUUID, "", testModule},
+			want: []string{importNetHTTP, "", importUUID, "", `domain "example.com/blog"`},
 		},
 		{
 			name: "own subpackage in its own group",
@@ -1334,13 +1401,7 @@ func TestGroupImports(t *testing.T) {
 			name:   "dotless module is not grouped with stdlib",
 			module: "blogservice/internal/blog",
 			in:     []string{importNetHTTP, "blogservice/internal/blog", importUUID},
-			want:   []string{importNetHTTP, "", importUUID, "", "blogservice/internal/blog"},
-		},
-		{
-			name: "own module aliased when its name differs from the path",
-			pkg:  "shop",
-			in:   []string{importNetHTTP, testModule},
-			want: []string{importNetHTTP, "", `shop "example.com/blog"`},
+			want:   []string{importNetHTTP, "", importUUID, "", `domain "blogservice/internal/blog"`},
 		},
 	}
 
@@ -1358,11 +1419,6 @@ func TestGroupImports(t *testing.T) {
 				module = testModule
 			}
 
-			pkg := tc.pkg
-			if pkg == "" {
-				pkg = testPackage
-			}
-
 			want := make([]string, len(tc.want))
 			for i, w := range tc.want {
 				if w != "" && !strings.Contains(w, `"`) {
@@ -1376,7 +1432,7 @@ func TestGroupImports(t *testing.T) {
 				want = nil
 			}
 
-			require.Equal(t, want, groupImports(set, module, pkg))
+			require.Equal(t, want, groupImports(set, module))
 		})
 	}
 }
@@ -1601,8 +1657,8 @@ func TestDomainTypesQualifiedOutsideRoot(t *testing.T) {
 	}
 
 	wantContains(t, render(t, s, "Author"), "BornOn *Date")
-	wantContains(t, renderHandlerSrc(t, s, "Author"), "BornOn *blog.Date")
-	wantContains(t, renderRepoSrc(t, s, "Author"), "BornOn sql.Null[blog.Date]")
+	wantContains(t, renderHandlerSrc(t, s, "Author"), "BornOn *domain.Date")
+	wantContains(t, renderRepoSrc(t, s, "Author"), "BornOn sql.Null[domain.Date]")
 }
 
 func TestRenderErrors_Sentinels(t *testing.T) {
@@ -1701,24 +1757,24 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 	cases := []struct {
 		name     string
 		entities []spec.Entity
+		router   bool
 		wantErr  bool
 	}{
-		{"entity Date without date fields", []spec.Entity{
-			{Name: "Date", Fields: []spec.Field{id}},
-		}, false},
-		{"entity Date next to a date field", []spec.Entity{
-			{Name: "Date", Fields: []spec.Field{id, {Name: "on", Type: spec.TypeDate}}},
-		}, true},
-		{"entity Errors", []spec.Entity{
-			{Name: "Errors", Fields: []spec.Field{id}},
-		}, true},
-		{"entity Router", []spec.Entity{
-			{Name: "Router", Fields: []spec.Field{id}},
-		}, true},
-		{"entity NewPost next to Post", []spec.Entity{
-			{Name: "Post", Fields: []spec.Field{id}},
-			{Name: "NewPost", Fields: []spec.Field{id}},
-		}, true},
+		{name: "entity Date without date fields", entities: []spec.Entity{{Name: "Date", Fields: []spec.Field{id}}}},
+		{
+			name:     "entity Date next to a date field",
+			entities: []spec.Entity{{Name: "Date", Fields: []spec.Field{id, {Name: "on", Type: spec.TypeDate}}}},
+			wantErr:  true,
+		},
+		{name: "entity Errors", entities: []spec.Entity{{Name: "Errors", Fields: []spec.Field{id}}}, wantErr: true},
+		{name: "entity Request", entities: []spec.Entity{{Name: "Request", Fields: []spec.Field{id}}}, wantErr: true},
+		{name: "entity Router without router", entities: []spec.Entity{{Name: "Router", Fields: []spec.Field{id}}}},
+		{name: "entity Router with router", entities: []spec.Entity{{Name: "Router", Fields: []spec.Field{id}}}, router: true, wantErr: true},
+		{
+			name:     "entity NewPost next to Post",
+			entities: []spec.Entity{{Name: "Post", Fields: []spec.Field{id}}, {Name: "NewPost", Fields: []spec.Field{id}}},
+			wantErr:  true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -1726,7 +1782,7 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: tc.entities}
-			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx)
+			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, tc.router)
 			require.NoError(t, err)
 
 			err = checkCollisions(files)

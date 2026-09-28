@@ -46,6 +46,7 @@ go install ./cmd/go-crudgen                                         # from a clo
 go-crudgen generate --spec ./api.yaml                               # preview on stdout
 go-crudgen generate --spec ./api.yaml --out ./internal/api          # write files
 go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
+go-crudgen generate --spec ./api.yaml --out ./internal/api --router # also emit restapi.NewRouter
 cd ./internal/api && go mod tidy
 ```
 
@@ -54,11 +55,10 @@ db, err := postgres.NewDB(dsn)
 if err != nil {
 	log.Fatal(err)
 }
-router := restapi.NewRouter(restapi.Deps{
-	Posts:   postgres.NewPostRepository(db),
-	Authors: postgres.NewAuthorRepository(db),
-})
-http.ListenAndServe(":8080", router)
+mux := http.NewServeMux()
+restapi.NewPostHandler(postgres.NewPostRepository(db)).RegisterRoutes(mux)
+restapi.NewAuthorHandler(postgres.NewAuthorRepository(db)).RegisterRoutes(mux)
+http.ListenAndServe(":8080", restapi.WithRouteErrors(mux))
 ```
 
 Developer tasks: `make help`.
@@ -69,8 +69,10 @@ Developer tasks: `make help`.
 - `errors.gen.go` - sentinel errors shared by all layers.
 - `sort.gen.go` - `SortDir` for List ordering.
 - `date.gen.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
-- `restapi/<entity>.gen.go` - `Create`/`Update` request DTOs and CRUD handlers.
-- `restapi/router.gen.go` - `NewRouter`, `Deps`, JSON and pagination helpers.
+- `restapi/<entity>.gen.go` - `Create`/`Update` request DTOs, CRUD handlers and `RegisterRoutes`.
+- `restapi/request.gen.go`, `response.gen.go`, `query.gen.go` - request decoding, response envelope, List query parsing.
+- `restapi/routes.gen.go` - `WithRouteErrors`: the JSON envelope for unmatched routes.
+- `restapi/router.gen.go` - `NewRouter` and `Deps` wiring every entity, with `--router`.
 - `postgres/<entity>.gen.go` - `sqlx` PostgreSQL repository.
 - `postgres/db.gen.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
 - `postgres/nulls.gen.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
@@ -109,7 +111,7 @@ entities:
 
 - `order: <field>` sets the List order (default: primary key, ties broken by it); clients pick `?dir=asc|desc` (default `asc`); the field must be NOT NULL.
 - `pagination: cursor` pages List by an opaque keyset `?cursor=` instead of `?offset=`.
-- `package` names the root package; `module` is the import path of the `--out` directory.
+- `package` names the root package, which `restapi` and `postgres` import as `domain`; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
 - `required` fields must be present in the request body; `false` and `0` are accepted, an empty `string` or `text` is not.
@@ -137,7 +139,7 @@ entities:
   - [x] `belongs_to` via `references` fields
   - [x] `has_many` via `filter: true` on the reference field
 - [ ] Pluggable storage backends (SQLite, in-memory)
-- [ ] Auth/middleware hooks
+- [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, optional `--router`
 
 ## License
 

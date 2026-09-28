@@ -56,8 +56,8 @@ func New{{ .Struct }}Handler(repo {{ .Repo }}) *{{ .Struct }}Handler {
 	return &{{ .Struct }}Handler{repo: repo}
 }
 
-// Register{{ .Struct }}Routes registers the {{ .Struct }} REST routes on mux.
-func Register{{ .Struct }}Routes(mux *http.ServeMux, h *{{ .Struct }}Handler) {
+// RegisterRoutes registers the {{ .Struct }} REST routes on mux.
+func (h *{{ .Struct }}Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /{{ .Plural }}", h.Create)
 	mux.HandleFunc("GET /{{ .Plural }}", h.List)
 	mux.HandleFunc("GET /{{ .Plural }}/{id}", h.Get)
