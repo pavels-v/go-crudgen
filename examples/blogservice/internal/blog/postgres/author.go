@@ -57,7 +57,11 @@ func (r *AuthorRepository) Create(ctx context.Context, m *domain.Author) error {
 	m.ID = uuid.New()
 	row := newAuthorRow(m)
 
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`, row.ID, row.Email, row.Name, row.BornOn); err != nil {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`,
+		row.ID, row.Email, row.Name, row.BornOn,
+	)
+	if err != nil {
 		return fmt.Errorf("create author: %w", mapWriteError(err))
 	}
 
@@ -66,7 +70,12 @@ func (r *AuthorRepository) Create(ctx context.Context, m *domain.Author) error {
 
 func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*domain.Author, error) {
 	var row authorRow
-	if err := r.db.GetContext(ctx, &row, `SELECT id, email, name, born_on FROM authors WHERE id = $1`, id); err != nil {
+
+	err := r.db.GetContext(ctx, &row,
+		`SELECT id, email, name, born_on FROM authors WHERE id = $1`,
+		id,
+	)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
@@ -104,7 +113,12 @@ func (r *AuthorRepository) List(ctx context.Context, p domain.AuthorListParams) 
 	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 
 	var rows []authorRow
-	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
+
+	err := r.db.SelectContext(ctx, &rows,
+		r.db.Rebind(q),
+		args...,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("list author: %w", err)
 	}
 
@@ -119,7 +133,10 @@ func (r *AuthorRepository) List(ctx context.Context, p domain.AuthorListParams) 
 func (r *AuthorRepository) Update(ctx context.Context, m *domain.Author) error {
 	row := newAuthorRow(m)
 
-	res, err := r.db.ExecContext(ctx, `UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`, row.Email, row.Name, row.BornOn, row.ID)
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`,
+		row.Email, row.Name, row.BornOn, row.ID,
+	)
 	if err != nil {
 		return fmt.Errorf("update author: %w", mapWriteError(err))
 	}
@@ -137,7 +154,10 @@ func (r *AuthorRepository) Update(ctx context.Context, m *domain.Author) error {
 }
 
 func (r *AuthorRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM authors WHERE id = $1`, id)
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM authors WHERE id = $1`,
+		id,
+	)
 	if err != nil {
 		return fmt.Errorf("delete author: %w", mapDeleteError(err))
 	}

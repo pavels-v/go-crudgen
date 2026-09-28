@@ -326,7 +326,7 @@ func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
 	}
 
 	repo := renderRepoSrc(t, s, "Tag")
-	wantContains(t, repo, "r.db.ExecContext(ctx, `INSERT INTO tags (slug, published) VALUES ($1, $2)`, row.Slug, row.Published)")
+	wantContains(t, repo, "r.db.ExecContext(ctx, `INSERT INTO tags (slug, published) VALUES ($1, $2)`, row.Slug, row.Published, )")
 }
 
 func TestRenderHandler_GeneratedKeyNotAssigned(t *testing.T) {
@@ -480,13 +480,13 @@ func TestRenderRepo_SQLAndInterfaceSatisfaction(t *testing.T) {
 		"Body: toNull(m.Body)",
 		"Body: fromNull(row.Body)",
 		// sqlx scans into the row, which is then converted to the API model
-		"r.db.GetContext(ctx, &row, `SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1`, id)",
+		"r.db.GetContext(ctx, &row, `SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1`, id, )",
 		"m := row.toModel()",
 		"errors.Is(err, sql.ErrNoRows)",
 		// generated columns take now() on insert and are returned into the struct
 		"INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at",
 		"m.ID = uuid.New() row := newPostRow(m)",
-		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body).Scan(&m.CreatedAt, &m.UpdatedAt)",
+		"r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, created_at, updated_at) VALUES ($1, $2, $3, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body, ).Scan(&m.CreatedAt, &m.UpdatedAt)",
 		"SELECT id, title, body, created_at, updated_at FROM posts WHERE id = $1",
 		"q := `SELECT id, title, body, created_at, updated_at FROM posts ORDER BY ` + order + ` LIMIT $1 OFFSET $2`",
 		// the primary key is the trailing placeholder in the update
@@ -516,7 +516,7 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
 		"order := `id` if p.Dir == domain.SortDesc { order = `id DESC` }",
-		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` var rows []accountRow if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
+		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` var rows []accountRow err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset, ) if err != nil {",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
@@ -593,7 +593,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 				"q += ` WHERE ` + strings.Join(where, ` AND `)",
 				"order := `title, id` if p.Dir == domain.SortDesc { order = `title DESC, id DESC` }",
 				"args = append(args, p.Limit, p.Offset) q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`",
-				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
+				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args..., )",
 				`"strings"`,
 			},
 		},
@@ -812,7 +812,7 @@ func TestRenderRepo_PrimaryKeyOnlyEntityUsesExistenceCheck(t *testing.T) {
 
 	got := renderRepoSrc(t, s, "Tag")
 	for _, want := range []string{
-		"r.db.GetContext(ctx, &exists, `SELECT 1 FROM tags WHERE id = $1`, row.ID)",
+		"r.db.GetContext(ctx, &exists, `SELECT 1 FROM tags WHERE id = $1`, row.ID, )",
 		"return domain.ErrNotFound",
 	} {
 		wantContains(t, got, want)
@@ -837,7 +837,7 @@ func TestRenderRepo_GeneratedColumns(t *testing.T) {
 			fields: []spec.Field{id, name, {Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate}},
 			want: []string{
 				"INSERT INTO events (name, created_at) VALUES ($1, now()) RETURNING id, created_at",
-				"UPDATE events SET name = $1 WHERE id = $2 RETURNING created_at`, row.Name, row.ID).Scan(&m.CreatedAt)",
+				"UPDATE events SET name = $1 WHERE id = $2 RETURNING created_at`, row.Name, row.ID, ).Scan(&m.CreatedAt)",
 			},
 		},
 		{
@@ -851,7 +851,7 @@ func TestRenderRepo_GeneratedColumns(t *testing.T) {
 			name:   "nothing writable still reads back on_create",
 			fields: []spec.Field{id, {Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate}},
 			want: []string{
-				"r.db.QueryRowContext(ctx, `SELECT created_at FROM events WHERE id = $1`, row.ID).Scan(&m.CreatedAt)",
+				"r.db.QueryRowContext(ctx, `SELECT created_at FROM events WHERE id = $1`, row.ID, ).Scan(&m.CreatedAt)",
 			},
 		},
 	}
@@ -1932,7 +1932,7 @@ func TestRenderRepo_KeyOnlyEntityInsertsDefaults(t *testing.T) {
 	}}}
 
 	got := renderRepoSrc(t, s, "Counter")
-	wantContains(t, got, "`INSERT INTO counters DEFAULT VALUES RETURNING my_id`).Scan(&m.MyId)")
+	wantContains(t, got, "`INSERT INTO counters DEFAULT VALUES RETURNING my_id`, ).Scan(&m.MyId)")
 
 	_, create, ok := strings.Cut(got, "func (r *CounterRepository) Create(")
 	require.True(t, ok)

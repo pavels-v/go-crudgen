@@ -60,7 +60,11 @@ var _ domain.CommentRepository = (*CommentRepository)(nil)
 func (r *CommentRepository) Create(ctx context.Context, m *domain.Comment) error {
 	row := newCommentRow(m)
 
-	if err := r.db.QueryRowContext(ctx, `INSERT INTO comments (post, body, likes, posted_at) VALUES ($1, $2, $3, $4) RETURNING id`, row.Post, row.Body, row.Likes, row.PostedAt).Scan(&m.ID); err != nil {
+	err := r.db.QueryRowContext(ctx,
+		`INSERT INTO comments (post, body, likes, posted_at) VALUES ($1, $2, $3, $4) RETURNING id`,
+		row.Post, row.Body, row.Likes, row.PostedAt,
+	).Scan(&m.ID)
+	if err != nil {
 		return fmt.Errorf("create comment: %w", mapWriteError(err))
 	}
 
@@ -69,7 +73,12 @@ func (r *CommentRepository) Create(ctx context.Context, m *domain.Comment) error
 
 func (r *CommentRepository) Get(ctx context.Context, id int64) (*domain.Comment, error) {
 	var row commentRow
-	if err := r.db.GetContext(ctx, &row, `SELECT id, post, body, likes, posted_at FROM comments WHERE id = $1`, id); err != nil {
+
+	err := r.db.GetContext(ctx, &row,
+		`SELECT id, post, body, likes, posted_at FROM comments WHERE id = $1`,
+		id,
+	)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
@@ -107,7 +116,12 @@ func (r *CommentRepository) List(ctx context.Context, p domain.CommentListParams
 	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 
 	var rows []commentRow
-	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
+
+	err := r.db.SelectContext(ctx, &rows,
+		r.db.Rebind(q),
+		args...,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("list comment: %w", err)
 	}
 
@@ -122,7 +136,10 @@ func (r *CommentRepository) List(ctx context.Context, p domain.CommentListParams
 func (r *CommentRepository) Update(ctx context.Context, m *domain.Comment) error {
 	row := newCommentRow(m)
 
-	res, err := r.db.ExecContext(ctx, `UPDATE comments SET post = $1, body = $2, likes = $3, posted_at = $4 WHERE id = $5`, row.Post, row.Body, row.Likes, row.PostedAt, row.ID)
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE comments SET post = $1, body = $2, likes = $3, posted_at = $4 WHERE id = $5`,
+		row.Post, row.Body, row.Likes, row.PostedAt, row.ID,
+	)
 	if err != nil {
 		return fmt.Errorf("update comment: %w", mapWriteError(err))
 	}
@@ -140,7 +157,10 @@ func (r *CommentRepository) Update(ctx context.Context, m *domain.Comment) error
 }
 
 func (r *CommentRepository) Delete(ctx context.Context, id int64) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM comments WHERE id = $1`, id)
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM comments WHERE id = $1`,
+		id,
+	)
 	if err != nil {
 		return fmt.Errorf("delete comment: %w", mapDeleteError(err))
 	}
