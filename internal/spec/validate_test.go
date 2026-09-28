@@ -50,12 +50,14 @@ func TestValidate_OrderByNotNullFields(t *testing.T) {
 			t.Parallel()
 
 			s := validSpec()
+
 			s.Entities[0].Order = tc.field.Name
 			if tc.field.Primary {
 				s.Entities[0].Fields = []Field{tc.field}
 			} else {
 				s.Entities[0].Fields = append(s.Entities[0].Fields, tc.field)
 			}
+
 			require.NoError(t, s.Validate())
 		})
 	}

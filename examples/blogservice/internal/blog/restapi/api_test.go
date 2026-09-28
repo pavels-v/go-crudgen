@@ -40,13 +40,16 @@ func newMemStore[K comparable, M, P any](key func(*M) *K, nextID func() K) *memS
 func (s *memStore[K, M, P]) Create(_ context.Context, m *M) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.nextID != nil {
 		*s.key(m) = s.nextID()
 	}
+
 	k := *s.key(m)
 	if _, ok := s.data[k]; ok {
 		return blog.ErrAlreadyExists
 	}
+
 	s.data[k] = *m
 	return nil
 }
@@ -54,6 +57,7 @@ func (s *memStore[K, M, P]) Create(_ context.Context, m *M) error {
 func (s *memStore[K, M, P]) Get(_ context.Context, id K) (*M, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	m, ok := s.data[id]
 	if !ok {
 		return nil, blog.ErrNotFound
@@ -64,11 +68,14 @@ func (s *memStore[K, M, P]) Get(_ context.Context, id K) (*M, error) {
 func (s *memStore[K, M, P]) List(_ context.Context, p P) ([]M, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.listed = append(s.listed, p)
+
 	out := make([]M, 0, len(s.data))
 	for _, m := range s.data {
 		out = append(out, m)
 	}
+
 	if s.limit != nil {
 		out = out[:min(len(out), s.limit(p))]
 	}
@@ -78,10 +85,12 @@ func (s *memStore[K, M, P]) List(_ context.Context, p P) ([]M, error) {
 func (s *memStore[K, M, P]) Update(_ context.Context, m *M) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	k := *s.key(m)
 	if _, ok := s.data[k]; !ok {
 		return blog.ErrNotFound
 	}
+
 	s.data[k] = *m
 	return nil
 }
@@ -89,9 +98,11 @@ func (s *memStore[K, M, P]) Update(_ context.Context, m *M) error {
 func (s *memStore[K, M, P]) Delete(_ context.Context, id K) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if _, ok := s.data[id]; !ok {
 		return blog.ErrNotFound
 	}
+
 	delete(s.data, id)
 	return nil
 }
@@ -126,16 +137,20 @@ func newServerWithPosts(posts blog.PostRepository) *httptest.Server {
 // into out when out is non-nil.
 func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, wantStatus int) {
 	t.Helper()
+
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		require.NoError(t, err, "marshal body")
+
 		r = bytes.NewReader(b)
 	}
+
 	req, err := http.NewRequest(method, srv.URL+path, r)
 	require.NoError(t, err, "new request")
 
 	resp, err := http.DefaultClient.Do(req)
+
 	require.NoErrorf(t, err, "%s %s", method, path)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
@@ -144,6 +159,7 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 		require.Failf(t, "unexpected status",
 			"%s %s: status = %d, want %d (body: %s)", method, path, resp.StatusCode, wantStatus, b)
 	}
+
 	if out != nil {
 		var env bodyResponse[jsontext.Value]
 		require.NoError(t, json.UnmarshalRead(resp.Body, &env), "decode response")
@@ -155,12 +171,15 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 // error envelope after checking it carries exactly the error object.
 func doError(t *testing.T, srv *httptest.Server, method, path, body string, wantStatus int) apiError {
 	t.Helper()
+
 	req, err := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
 	require.NoError(t, err, "new request")
 
 	resp, err := http.DefaultClient.Do(req)
+
 	require.NoErrorf(t, err, "%s %s", method, path)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
+
 	require.Equal(t, wantStatus, resp.StatusCode)
 	require.Equal(t, contentTypeJSON, resp.Header.Get("Content-Type")) //nolint:testifylint // compares a header, not JSON
 
@@ -355,10 +374,12 @@ func TestErrorResponses(t *testing.T) {
 			got := doError(t, srv, tc.method, tc.path, tc.body, tc.wantStatus)
 			require.Equal(t, tc.wantCode, got.Code)
 			require.NotEmpty(t, got.Message)
+
 			if tc.wantDetails == nil {
 				require.Empty(t, got.Details)
 				return
 			}
+
 			require.Equal(t, tc.wantDetails, got.Details)
 		})
 	}
@@ -418,6 +439,7 @@ func TestOffsetListReportsHasMore(t *testing.T) {
 
 			srv := newServer()
 			t.Cleanup(srv.Close)
+
 			for i := range authors {
 				req := CreateAuthorRequest{Email: "author" + strconv.Itoa(i) + "@example.com"}
 				do(t, srv, http.MethodPost, "/authors", req, nil, http.StatusCreated)
@@ -439,6 +461,7 @@ func TestCursorListRoundTripsNextCursor(t *testing.T) {
 	posts := newPostStore()
 	srv := newServerWithPosts(posts)
 	t.Cleanup(srv.Close)
+
 	for _, title := range []string{"Alpha", "Beta", "Gamma"} {
 		do(t, srv, http.MethodPost, "/posts", CreatePostRequest{Title: title}, nil, http.StatusCreated)
 	}
@@ -467,8 +490,10 @@ func TestMethodNotAllowedListsAllowedMethods(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPatch, srv.URL+"/posts", http.NoBody)
 	require.NoError(t, err)
 	resp, err := http.DefaultClient.Do(req)
+
 	require.NoError(t, err)
 	defer func() { require.NoError(t, resp.Body.Close()) }()
+
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 	require.Contains(t, resp.Header.Get("Allow"), http.MethodPost)
 }
@@ -601,8 +626,10 @@ func TestAuthorDateWireFormat(t *testing.T) {
 			}
 
 			resp, err := http.Post(srv.URL+"/authors", contentTypeJSON, strings.NewReader(body))
+
 			require.NoError(t, err)
 			defer func() { require.NoError(t, resp.Body.Close()) }()
+
 			require.Equal(t, tc.wantStatus, resp.StatusCode)
 
 			var got bodyResponse[map[string]any]

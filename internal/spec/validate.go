@@ -66,9 +66,11 @@ func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Package) == "" {
 		return errors.New("missing package name")
 	}
+
 	if strings.TrimSpace(s.Module) == "" {
 		return errors.New("missing module import path")
 	}
+
 	if len(s.Entities) == 0 {
 		return errors.New("no entities defined")
 	}
@@ -79,46 +81,59 @@ func (s *Spec) Validate() error {
 		if e.Name == "" {
 			return fmt.Errorf("entity #%d has no name", i+1)
 		}
+
 		if seen[e.Name] {
 			return fmt.Errorf("duplicate entity %q", e.Name)
 		}
+
 		seen[e.Name] = true
 
 		if len(e.Fields) == 0 {
 			return fmt.Errorf("entity %q has no fields", e.Name)
 		}
+
 		if e.Pagination != "" && e.Pagination != PaginationOffset && e.Pagination != PaginationCursor {
 			return fmt.Errorf("entity %q has unknown pagination %q: use %q or %q", e.Name, e.Pagination, PaginationOffset, PaginationCursor)
 		}
+
 		for _, f := range e.Fields {
 			if f.Name == "" {
 				return fmt.Errorf("entity %q has a field with no name", e.Name)
 			}
+
 			if _, ok := KnownTypes[f.Type]; !ok {
 				return fmt.Errorf("entity %q field %q has unknown type %q", e.Name, f.Name, f.Type)
 			}
+
 			if f.Type == TypeReferences && f.Target == "" {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
+
 			if f.OnDelete != "" && f.Type != TypeReferences {
 				return fmt.Errorf("entity %q field %q has on_delete but is not a reference", e.Name, f.Name)
 			}
+
 			if f.OnDelete != "" && f.OnDelete != OnDeleteCascade {
 				return fmt.Errorf("entity %q field %q has unknown on_delete %q: use %q", e.Name, f.Name, f.OnDelete, OnDeleteCascade)
 			}
+
 			if err := validateListModifiers(e, f); err != nil {
 				return err
 			}
+
 			if err := validateGenerate(e, f); err != nil {
 				return err
 			}
+
 			if f.Default != nil && f.Primary {
 				return fmt.Errorf("entity %q primary key %q cannot have a default", e.Name, f.Name)
 			}
+
 			if f.Default != nil && !defaultFits(f.Type, f.Default) {
 				return fmt.Errorf("entity %q field %q has default %v that does not fit type %q", e.Name, f.Name, f.Default, f.Type)
 			}
 		}
+
 		switch pk := e.PrimaryKey(); len(pk) {
 		case 1:
 			if _, ok := PrimaryKeyTypes[pk[0].Type]; !ok {
@@ -129,6 +144,7 @@ func (s *Spec) Validate() error {
 		default:
 			return fmt.Errorf("entity %q has a composite primary key, which is not supported: mark exactly one field with primary: true", e.Name)
 		}
+
 		if err := validateOrder(e); err != nil {
 			return err
 		}
@@ -141,12 +157,14 @@ func (s *Spec) Validate() error {
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
+
 	for i := range s.Entities {
 		e := &s.Entities[i]
 		for _, f := range e.Fields {
 			if f.Type != TypeReferences {
 				continue
 			}
+
 			if _, ok := byName[f.Target]; !ok {
 				return fmt.Errorf("entity %q field %q references unknown entity %q", e.Name, f.Name, f.Target)
 			}
@@ -160,9 +178,11 @@ func validateListModifiers(e *Entity, f Field) error {
 		if f.Primary {
 			return fmt.Errorf("entity %q primary key %q cannot be a filter: use GET /{id}", e.Name, f.Name)
 		}
+
 		if _, ok := unfilterableTypes[f.Type]; ok {
 			return fmt.Errorf("entity %q field %q of type %q cannot be a filter", e.Name, f.Name, f.Type)
 		}
+
 		if _, ok := reservedQueryNames[f.Name]; ok {
 			return fmt.Errorf("entity %q field %q cannot be a filter: the name is a reserved query parameter", e.Name, f.Name)
 		}

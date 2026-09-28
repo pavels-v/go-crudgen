@@ -23,6 +23,7 @@ func runGenerate(args []string) int {
 	outDir := fs.String(flagOut, "", "output directory for generated code (default: write to stdout)")
 	dryRun := fs.Bool(flagDryRun, false, "report what would be generated without writing files")
 	driver := fs.String(flagDriver, generator.DriverPgx, "database driver for the generated NewDB constructor: pgx or pq")
+
 	if err := fs.Parse(args); err != nil {
 		// An explicit -h/--help is a success, not a usage error; flag has
 		// already printed the usage text.

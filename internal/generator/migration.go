@@ -28,8 +28,10 @@ func sqlType(f spec.Field, byName map[string]*spec.Entity) (string, error) {
 		if pk.Type == spec.TypeReferences {
 			return "", fmt.Errorf("reference to %q whose primary key %q is itself a reference (not supported)", f.Target, pk.Name)
 		}
+
 		t = pk.Type
 	}
+
 	ti, ok := scalarTypes[t]
 	if !ok {
 		return "", fmt.Errorf("no SQL type for %q", t)
@@ -75,6 +77,7 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 	state := make(map[string]int, len(entities))
 	var order []*spec.Entity
 	var visit func(e *spec.Entity) error
+
 	visit = func(e *spec.Entity) error {
 		switch state[e.Name] {
 		case done:
@@ -82,15 +85,18 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 		case visiting:
 			return fmt.Errorf("reference cycle involving entity %q (inline foreign keys cannot express it)", e.Name)
 		}
+
 		state[e.Name] = visiting
 		for _, f := range e.Fields {
 			if f.Type != spec.TypeReferences || f.Target == e.Name {
 				continue
 			}
+
 			if err := visit(byName[f.Target]); err != nil {
 				return err
 			}
 		}
+
 		state[e.Name] = done
 		order = append(order, e)
 		return nil
@@ -115,6 +121,7 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 		if err != nil {
 			return migrationData{}, fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
 		}
+
 		def := sqlNow
 		if !isNowDefault(f) && f.Generate == "" {
 			def, err = sqlDefault(f.Default)
@@ -124,30 +131,38 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 		}
 
 		col := snakeCase(f.Name)
+
 		parts := []string{col, st}
 		if !isNullable(f) {
 			parts = append(parts, "NOT NULL")
 		}
+
 		if gen, ok := keyGenerator(f); ok {
 			parts = append(parts, gen)
 		}
+
 		if def != "" {
 			parts = append(parts, "DEFAULT "+def)
 		}
+
 		if f.Primary {
 			parts = append(parts, "PRIMARY KEY")
 		}
+
 		if f.Unique {
 			parts = append(parts, "UNIQUE")
 		}
+
 		if f.Type == spec.TypeReferences {
 			target := byName[f.Target]
+
 			parts = append(parts, fmt.Sprintf("REFERENCES %s (%s)",
 				plural(target.Name, target.Plural), snakeCase(target.PrimaryKey()[0].Name)))
 			if f.OnDelete == spec.OnDeleteCascade {
 				parts = append(parts, "ON DELETE CASCADE")
 			}
 		}
+
 		lines = append(lines, "    "+strings.Join(parts, " "))
 
 		if f.Index && !f.Primary {

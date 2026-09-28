@@ -21,12 +21,14 @@ func render(t *testing.T, s *spec.Spec, entity string) string {
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
+
 	var e *spec.Entity
 	for i := range s.Entities {
 		if s.Entities[i].Name == entity {
 			e = &s.Entities[i]
 		}
 	}
+
 	require.NotNilf(t, e, "entity %q not found in spec", entity)
 
 	src, err := renderModel(s, e, byName)
@@ -94,6 +96,7 @@ func TestRenderModel_ScalarTypesAndTags(t *testing.T) {
 	} {
 		wantContains(t, got, want)
 	}
+
 	require.NotContains(t, got, `db:"`, "API model should not carry db struct tags")
 	require.NotContains(t, got, `validate:"`, "API model should not carry validate tags")
 }
@@ -153,12 +156,14 @@ func renderHandlerSrc(t *testing.T, s *spec.Spec, entity string) string {
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
+
 	var e *spec.Entity
 	for i := range s.Entities {
 		if s.Entities[i].Name == entity {
 			e = &s.Entities[i]
 		}
 	}
+
 	require.NotNilf(t, e, "entity %q not found in spec", entity)
 
 	hd, err := handlerInfo(s, e, byName)
@@ -266,6 +271,7 @@ func TestRenderHandler_RequiredFields(t *testing.T) {
 					},
 				}},
 			}
+
 			got := renderHandlerSrc(t, s, "Item")
 			for _, want := range tt.want {
 				wantContains(t, got, want)
@@ -426,6 +432,7 @@ func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
 	} {
 		wantContains(t, got, want)
 	}
+
 	wantContains(t, render(t, s, "Widget"), "Get(ctx context.Context, id int32) (*Widget, error)")
 }
 
@@ -438,12 +445,14 @@ func renderRepoSrc(t *testing.T, s *spec.Spec, entity string) string {
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
+
 	var e *spec.Entity
 	for i := range s.Entities {
 		if s.Entities[i].Name == entity {
 			e = &s.Entities[i]
 		}
 	}
+
 	require.NotNilf(t, e, "entity %q not found in spec", entity)
 
 	rd, err := repoInfo(s, e, byName)
@@ -640,6 +649,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
+
 			for _, absent := range tc.absent {
 				require.NotContains(t, got, absent)
 			}
@@ -726,6 +736,7 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
+
 			for _, absent := range tc.absent {
 				require.NotContains(t, got, absent)
 			}
@@ -756,10 +767,12 @@ func TestRenderRouter_PaginationHelpers(t *testing.T) {
 			src, err := renderRouter(routerInfo(&spec.Spec{Package: "blog", Module: "example.com/blog"}, tc.shared))
 			require.NoError(t, err)
 			requireParses(t, src)
+
 			got := string(src)
 			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
+
 			for _, absent := range tc.absent {
 				require.NotContains(t, got, absent)
 			}
@@ -833,10 +846,12 @@ func TestRenderRepo_GeneratedColumns(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: []spec.Entity{{Name: "Event", Fields: tc.fields}}}
+
 			got := renderRepoSrc(t, s, "Event")
 			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
+
 			require.NotContains(t, got, "CreatedAt: m.CreatedAt", "generated columns are not written from the model")
 		})
 	}
@@ -909,12 +924,14 @@ func renderMigrationSrc(t *testing.T, s *spec.Spec, entity string) string {
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
+
 	var e *spec.Entity
 	for i := range s.Entities {
 		if s.Entities[i].Name == entity {
 			e = &s.Entities[i]
 		}
 	}
+
 	require.NotNilf(t, e, "entity %q not found in spec", entity)
 
 	md, err := migrationInfo(e, byName)
@@ -1024,6 +1041,7 @@ func TestMigrationOrder(t *testing.T) {
 
 		order, err := migrationOrder(s.Entities, byNameOf(s))
 		require.NoError(t, err)
+
 		names := []string{order[0].Name, order[1].Name}
 		require.Equal(t, []string{"Author", "Post"}, names)
 	})
@@ -1327,10 +1345,12 @@ func TestGroupImports(t *testing.T) {
 			for _, imp := range tc.in {
 				set[imp] = struct{}{}
 			}
+
 			module := tc.module
 			if module == "" {
 				module = testModule
 			}
+
 			require.Equal(t, tc.want, groupImports(set, module))
 		})
 	}
@@ -1360,6 +1380,7 @@ func TestCheckColumns(t *testing.T) {
 				require.Error(t, err)
 				return
 			}
+
 			require.NoError(t, err)
 		})
 	}
@@ -1393,11 +1414,13 @@ func TestCheckRules(t *testing.T) {
 			t.Parallel()
 
 			e := spec.Entity{Name: "Post", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, tc.field}}
+
 			err := checkRules(&e, map[string]*spec.Entity{author.Name: &author, e.Name: &e})
 			if tc.wantErr {
 				require.Error(t, err)
 				return
 			}
+
 			require.NoError(t, err)
 		})
 	}
@@ -1516,10 +1539,12 @@ func TestRenderRepo_KeyGeneration(t *testing.T) {
 					},
 				}},
 			}
+
 			got := renderRepoSrc(t, s, "Item")
 			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
+
 			require.NotContains(t, got, tc.notWant)
 		})
 	}
@@ -1628,6 +1653,7 @@ func TestCheckCollisions(t *testing.T) {
 				require.Error(t, err)
 				return
 			}
+
 			require.NoError(t, err)
 		})
 	}
@@ -1667,11 +1693,13 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: tc.entities}
 			files, err := renderFiles(s, sqlDriverPgx, importDriverPgx)
 			require.NoError(t, err)
+
 			err = checkCollisions(files)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
 			}
+
 			require.NoError(t, err)
 		})
 	}

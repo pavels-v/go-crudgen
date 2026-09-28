@@ -51,10 +51,12 @@ func listFilters(e *spec.Entity, byName map[string]*spec.Entity) ([]listFilter, 
 		if !f.Filter {
 			continue
 		}
+
 		gt, err := fieldType(f, byName)
 		if err != nil {
 			return nil, err
 		}
+
 		out = append(out, listFilter{Field: f, GoName: pascalCase(f.Name), Type: gt})
 	}
 	return out, nil
@@ -62,6 +64,7 @@ func listFilters(e *spec.Entity, byName map[string]*spec.Entity) ([]listFilter, 
 
 func listOrder(e *spec.Entity) ordering {
 	pk := e.PrimaryKey()[0]
+
 	f, _ := e.OrderField()
 	if f.Primary {
 		return keyOrder(pk)
@@ -93,6 +96,7 @@ func fieldOrder(f, pk spec.Field) ordering {
 
 func cursorFields(e *spec.Entity) []spec.Field {
 	pk := e.PrimaryKey()[0]
+
 	f, _ := e.OrderField()
 	if f.Primary {
 		return []spec.Field{pk}
@@ -111,6 +115,7 @@ func queryParser(gt goType, s *spec.Spec) (parse, imp string) {
 	case goBool:
 		return parseBool, importStrconv
 	}
+
 	q := gt.outside(s)
 	return fmt.Sprintf(exprParseText, q.expr), q.imp
 }

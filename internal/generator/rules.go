@@ -15,14 +15,17 @@ func checkRules(e *spec.Entity, byName map[string]*spec.Entity) error {
 		if f.Validate == "" {
 			continue
 		}
+
 		gt, err := fieldType(f, byName)
 		if err != nil {
 			return fmt.Errorf("entity %q field %q: %w", e.Name, f.Name, err)
 		}
+
 		tags := []string{f.Validate}
 		for rule := range strings.SplitSeq(f.Validate, ruleSep) {
 			tags = append(tags, strings.Split(rule, ruleOr)...)
 		}
+
 		for _, tag := range tags {
 			if err := tryRule(v, gt.sample, tag); err != nil {
 				return fmt.Errorf("entity %q field %q has invalid validate %q: %w", e.Name, f.Name, f.Validate, err)
@@ -38,6 +41,7 @@ func tryRule(v *validator.Validate, sample any, tag string) (err error) {
 			err = fmt.Errorf("%v", r)
 		}
 	}()
+
 	_ = v.Var(sample, tag)
 	return nil
 }

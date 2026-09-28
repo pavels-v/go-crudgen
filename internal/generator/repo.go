@@ -189,6 +189,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	if err != nil {
 		return repoData{}, err
 	}
+
 	filters, err := listFilters(e, byName)
 	if err != nil {
 		return repoData{}, err
@@ -217,8 +218,10 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	var rowFields []rowField
 	var toRow, toModel []assign
 	hasNullable := false
+
 	for _, f := range e.Fields {
 		c := col{Column: snakeCase(f.Name), GoName: pascalCase(f.Name), Generate: f.Generate}
+
 		specCols = append(specCols, c) // the primary key is supplied by the caller
 		if !f.Primary && f.Generate == "" {
 			update = append(update, c)
@@ -228,12 +231,15 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		if err != nil {
 			return repoData{}, err
 		}
+
 		ft = ft.outside(s)
 		if ft.imp != "" {
 			impSet[ft.imp] = struct{}{}
 		}
+
 		rowType := ft.expr
 		toRowExpr := fmt.Sprintf(exprModelField, c.GoName)
+
 		toModelExpr := fmt.Sprintf(exprRowField, c.GoName)
 		if isNullable(f) {
 			rowType = fmt.Sprintf(exprNull, ft.expr)
@@ -241,15 +247,18 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 			toModelExpr = fmt.Sprintf(exprFromNull, toModelExpr)
 			hasNullable = true
 		}
+
 		rowFields = append(rowFields, rowField{GoName: c.GoName, GoType: rowType, Tag: fmt.Sprintf(tagDB, c.Column)})
 		if f.Generate == "" {
 			toRow = append(toRow, assign{Field: c.GoName, Expr: toRowExpr})
 		}
+
 		toModel = append(toModel, assign{Field: c.GoName, Expr: toModelExpr})
 	}
 
 	selectCols := make([]string, 0, len(specCols))
 	var generated []string
+
 	for _, c := range specCols {
 		selectCols = append(selectCols, c.Column)
 		if c.Generate != "" {
@@ -266,6 +275,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	insPh := make([]string, 0, len(specCols))
 	insArgs := make([]string, 0, len(specCols))
 	var ret []string
+
 	for _, c := range specCols {
 		switch {
 		case pkInDB && c.Column == pkCol:
@@ -277,12 +287,15 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 			ret = append(ret, c.Column)
 			continue
 		}
+
 		insCols = append(insCols, c.Column)
 		insPh = append(insPh, fmt.Sprintf("$%d", len(insArgs)+1))
 		insArgs = append(insArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
+
 	createSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		table, strings.Join(insCols, ", "), strings.Join(insPh, ", "))
+
 	var createScan string
 	if len(ret) > 0 {
 		createSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, ", "))
@@ -296,10 +309,12 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	for _, lf := range filters {
 		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, snakeCase(lf.Field.Name))})
 	}
+
 	listDynamic := len(listFilterData) > 0 || e.CursorPagination()
 	if listDynamic {
 		impSet[importStrings] = struct{}{}
 	}
+
 	listOrd := listOrder(e)
 	listSQL := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, ", "), table)
 
@@ -308,18 +323,22 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// response carries the stored values.
 	setClauses := make([]string, 0, len(update)+len(generated))
 	updArgs := make([]string, 0, len(update)+1)
+
 	for i, c := range update {
 		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.Column, i+1))
 		updArgs = append(updArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
+
 	for _, c := range specCols {
 		if c.Generate == spec.GenerateOnWrite {
 			setClauses = append(setClauses, fmt.Sprintf(exprSetNow, c.Column))
 		}
 	}
+
 	updArgs = append(updArgs, fmt.Sprintf(exprRowField, pkGoName))
 
 	var updateSQL, updateScan string
+
 	noUpdateColumns := len(setClauses) == 0 && len(generated) == 0
 	switch {
 	case noUpdateColumns:

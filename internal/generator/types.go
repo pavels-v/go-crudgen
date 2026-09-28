@@ -117,6 +117,7 @@ func keyGenerator(f spec.Field) (string, bool) {
 	if !f.Primary {
 		return "", false
 	}
+
 	g, ok := generatedKeys[f.Type]
 	return g, ok
 }
@@ -209,10 +210,12 @@ func fieldType(f spec.Field, byName map[string]*spec.Entity) (goType, error) {
 	}
 
 	target := byName[f.Target]
+
 	pk := target.PrimaryKey()[0]
 	if pk.Type == spec.TypeReferences {
 		return goType{}, fmt.Errorf("reference to %q whose primary key %q is itself a reference (not supported)", f.Target, pk.Name)
 	}
+
 	gt, ok := scalarType(pk.Type)
 	if !ok {
 		return goType{}, fmt.Errorf("reference to %q has primary key of unsupported type %q", f.Target, pk.Type)

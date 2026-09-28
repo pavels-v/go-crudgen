@@ -47,6 +47,7 @@ linters:
     - usestdlibvars
     - usetesting
     - wastedassign
+    - wsl_v5
   settings:
     errcheck:
       check-type-assertions: true
@@ -98,6 +99,12 @@ linters:
         - name: unreachable-code
         - name: var-declaration
         - name: var-naming
+    wsl_v5:
+      allow-whole-block: true
+      disable:
+        - branch
+        - decl
+        - return
     sloglint:
       kv-only: true
       static-msg: true

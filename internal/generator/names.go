@@ -29,6 +29,7 @@ func pascalCase(s string) string {
 			b.WriteString(strings.ToUpper(w))
 			continue
 		}
+
 		b.WriteString(strings.ToUpper(w[:1]))
 		b.WriteString(w[1:])
 	}
@@ -79,17 +80,21 @@ func isVowel(b byte) bool {
 // for generated file names (e.g. "BlogPost" -> "blog_post").
 func snakeCase(s string) string {
 	var b strings.Builder
+
 	prevLower := false
 	for i, r := range s {
 		switch {
 		case r == '_' || r == '-' || r == ' ':
 			b.WriteByte('_')
+
 			prevLower = false
 		case r >= 'A' && r <= 'Z':
 			if i > 0 && prevLower {
 				b.WriteByte('_')
 			}
+
 			b.WriteRune(r - 'A' + 'a')
+
 			prevLower = false
 		default:
 			b.WriteRune(r)
