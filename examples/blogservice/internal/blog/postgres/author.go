@@ -13,9 +13,7 @@ import (
 	domain "example.com/blogservice/internal/blog"
 )
 
-// authorRow is the database representation of domain.Author. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newAuthorRow and toModel convert to and from the pointer fields on domain.Author.
+// authorRow is the database representation of domain.Author.
 type authorRow struct {
 	ID     uuid.UUID             `db:"id"`
 	Email  string                `db:"email"`
@@ -23,8 +21,7 @@ type authorRow struct {
 	BornOn sql.Null[domain.Date] `db:"born_on"`
 }
 
-// newAuthorRow builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// newAuthorRow builds the row written by Create and Update.
 func newAuthorRow(m *domain.Author) authorRow {
 	return authorRow{
 		ID:     m.ID,
@@ -44,9 +41,7 @@ func (row authorRow) toModel() domain.Author {
 	}
 }
 
-// AuthorRepository is a PostgreSQL-backed domain.AuthorRepository. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// AuthorRepository is a PostgreSQL-backed domain.AuthorRepository.
 type AuthorRepository struct {
 	db *sqlx.DB
 }

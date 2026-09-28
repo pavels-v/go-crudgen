@@ -12,9 +12,7 @@ import (
 	domain "example.com/blogservice/internal/blog"
 )
 
-// tagRow is the database representation of domain.Tag. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newTagRow and toModel convert to and from the pointer fields on domain.Tag.
+// tagRow is the database representation of domain.Tag.
 type tagRow struct {
 	Slug   string  `db:"slug"`
 	Label  string  `db:"label"`
@@ -23,8 +21,7 @@ type tagRow struct {
 	Group  string  `db:"group"`
 }
 
-// newTagRow builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// newTagRow builds the row written by Create and Update.
 func newTagRow(m *domain.Tag) tagRow {
 	return tagRow{
 		Slug:   m.Slug,
@@ -46,9 +43,7 @@ func (row tagRow) toModel() domain.Tag {
 	}
 }
 
-// TagRepository is a PostgreSQL-backed domain.TagRepository. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// TagRepository is a PostgreSQL-backed domain.TagRepository.
 type TagRepository struct {
 	db *sqlx.DB
 }

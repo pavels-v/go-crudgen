@@ -18,8 +18,7 @@ const (
 	maxBodyBytes = 1 << 20
 )
 
-// validate is the shared validator used to check request DTOs. Field names in
-// its errors are the json names, so details point at the request body.
+// validate checks request DTOs and reports fields by their json names.
 var validate = newValidator() //nolint:gochecknoglobals // caches struct metadata across requests
 
 func newValidator() *validator.Validate {

@@ -14,8 +14,7 @@ type Deps struct {
 	Tags     domain.TagRepository
 }
 
-// NewRouter registers every entity's routes on a fresh ServeMux and answers
-// unmatched requests with the JSON error envelope.
+// NewRouter serves every entity's routes wrapped in WithRouteErrors.
 func NewRouter(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 	NewPostHandler(deps.Posts).RegisterRoutes(mux)

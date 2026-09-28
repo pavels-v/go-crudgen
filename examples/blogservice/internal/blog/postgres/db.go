@@ -11,8 +11,7 @@ import (
 	domain "example.com/blogservice/internal/blog"
 )
 
-// Connection-pool defaults. Tune these for your workload, or replace NewDB with
-// your own constructor if you need them configurable.
+// Connection pool limits applied by NewDB.
 const (
 	driverName = "pgx"
 
@@ -21,11 +20,7 @@ const (
 	connMaxLifetime = 5 * time.Minute
 )
 
-// NewDB opens a connection pool through the configured driver and applies sane
-// pool limits. Like sql.Open it is lazy: it validates the arguments but defers
-// the first real connection to first use, so callers that need a startup health
-// check should Ping the returned pool themselves. Pass it to the
-// New<Entity>Repository constructors.
+// NewDB opens a lazy connection pool through the configured driver.
 func NewDB(dsn string) (*sqlx.DB, error) {
 	db, err := sqlx.Open(driverName, dsn)
 	if err != nil {

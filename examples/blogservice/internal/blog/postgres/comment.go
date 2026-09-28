@@ -14,9 +14,7 @@ import (
 	domain "example.com/blogservice/internal/blog"
 )
 
-// commentRow is the database representation of domain.Comment. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newCommentRow and toModel convert to and from the pointer fields on domain.Comment.
+// commentRow is the database representation of domain.Comment.
 type commentRow struct {
 	ID       int64     `db:"id"`
 	Post     uuid.UUID `db:"post"`
@@ -25,8 +23,7 @@ type commentRow struct {
 	PostedAt time.Time `db:"posted_at"`
 }
 
-// newCommentRow builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// newCommentRow builds the row written by Create and Update.
 func newCommentRow(m *domain.Comment) commentRow {
 	return commentRow{
 		ID:       m.ID,
@@ -48,9 +45,7 @@ func (row commentRow) toModel() domain.Comment {
 	}
 }
 
-// CommentRepository is a PostgreSQL-backed domain.CommentRepository. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// CommentRepository is a PostgreSQL-backed domain.CommentRepository.
 type CommentRepository struct {
 	db *sqlx.DB
 }

@@ -15,9 +15,7 @@ import (
 	domain "example.com/blogservice/internal/blog"
 )
 
-// postRow is the database representation of domain.Post. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// newPostRow and toModel convert to and from the pointer fields on domain.Post.
+// postRow is the database representation of domain.Post.
 type postRow struct {
 	ID        uuid.UUID                `db:"id"`
 	Title     string                   `db:"title"`
@@ -30,8 +28,7 @@ type postRow struct {
 	UpdatedAt time.Time                `db:"updated_at"`
 }
 
-// newPostRow builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// newPostRow builds the row written by Create and Update.
 func newPostRow(m *domain.Post) postRow {
 	return postRow{
 		ID:        m.ID,
@@ -59,9 +56,7 @@ func (row postRow) toModel() domain.Post {
 	}
 }
 
-// PostRepository is a PostgreSQL-backed domain.PostRepository. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// PostRepository is a PostgreSQL-backed domain.PostRepository.
 type PostRepository struct {
 	db *sqlx.DB
 }

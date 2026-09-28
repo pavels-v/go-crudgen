@@ -6,17 +6,14 @@ import (
 {{- end }}
 )
 
-// {{ .RowStruct }} is the database representation of {{ .Model }}. Nullable
-// columns use sql.Null[T] so a SQL NULL round-trips as an absent value, which
-// {{ .NewRowFunc }} and toModel convert to and from the pointer fields on {{ .Model }}.
+// {{ .RowStruct }} is the database representation of {{ .Model }}.
 type {{ .RowStruct }} struct {
 {{- range .RowFields }}
 	{{ .GoName }} {{ .GoType }} `{{ .Tag }}`
 {{- end }}
 }
 
-// {{ .NewRowFunc }} builds the row written by Create and Update. Generated
-// columns are set by the SQL itself, so they are omitted here.
+// {{ .NewRowFunc }} builds the row written by Create and Update.
 func {{ .NewRowFunc }}(m *{{ .Model }}) {{ .RowStruct }} {
 	return {{ .RowStruct }}{
 {{- range .ToRow }}
@@ -34,9 +31,7 @@ func (row {{ .RowStruct }}) toModel() {{ .Model }} {
 	}
 }
 
-// {{ .Receiver }} is a PostgreSQL-backed {{ .Repo }}. It depends on sqlx rather
-// than a concrete driver, so any database/sql-compatible Postgres driver
-// (lib/pq, pgx's stdlib adapter, ...) can back it.
+// {{ .Receiver }} is a PostgreSQL-backed {{ .Repo }}.
 type {{ .Receiver }} struct {
 	db *sqlx.DB
 }
