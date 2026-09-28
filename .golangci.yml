@@ -104,7 +104,6 @@ linters:
       disable:
         - branch
         - decl
-        - return
     sloglint:
       kv-only: true
       static-msg: true

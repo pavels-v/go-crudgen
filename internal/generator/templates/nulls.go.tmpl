@@ -7,6 +7,7 @@ func toNull[T any](p *T) sql.Null[T] {
 	if p == nil {
 		return sql.Null[T]{}
 	}
+
 	return sql.Null[T]{V: *p, Valid: true}
 }
 
@@ -15,5 +16,6 @@ func fromNull[T any](n sql.Null[T]) *T {
 	if !n.Valid {
 		return nil
 	}
+
 	return &n.V
 }

@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// KnownTypes is the set of field types the generator understands.
-var KnownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+// knownTypes is the set of field types the generator understands.
+var knownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	TypeString:     {},
 	TypeText:       {},
 	TypeInt32:      {},
@@ -22,13 +22,13 @@ var KnownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only loo
 	TypeReferences: {},
 }
 
-// PrimaryKeyTypes is the set of field types allowed for a primary key: those the
+// primaryKeyTypes is the set of field types allowed for a primary key: those the
 // generator can parse from a URL path segment to address a single row via /{id}.
 // The remaining numeric and structural types (decimal, float, bool, date,
 // datetime, json) have no path parser and are rejected. (references is allowed:
 // it resolves to the target's primary key, which this same rule guarantees is
 // path-addressable.)
-var PrimaryKeyTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+var primaryKeyTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	TypeString:     {},
 	TypeText:       {},
 	TypeInt32:      {},
@@ -101,7 +101,7 @@ func (s *Spec) Validate() error {
 				return fmt.Errorf("entity %q has a field with no name", e.Name)
 			}
 
-			if _, ok := KnownTypes[f.Type]; !ok {
+			if _, ok := knownTypes[f.Type]; !ok {
 				return fmt.Errorf("entity %q field %q has unknown type %q", e.Name, f.Name, f.Type)
 			}
 
@@ -136,7 +136,7 @@ func (s *Spec) Validate() error {
 
 		switch pk := e.PrimaryKey(); len(pk) {
 		case 1:
-			if _, ok := PrimaryKeyTypes[pk[0].Type]; !ok {
+			if _, ok := primaryKeyTypes[pk[0].Type]; !ok {
 				return fmt.Errorf("entity %q primary key %q has type %q, which cannot address a row via /{id}: use one of string, text, int32, int64, or uuid", e.Name, pk[0].Name, pk[0].Type)
 			}
 		case 0:
@@ -170,6 +170,7 @@ func (s *Spec) Validate() error {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -187,6 +188,7 @@ func validateListModifiers(e *Entity, f Field) error {
 			return fmt.Errorf("entity %q field %q cannot be a filter: the name is a reserved query parameter", e.Name, f.Name)
 		}
 	}
+
 	return nil
 }
 
@@ -200,6 +202,7 @@ func validateOrder(e *Entity) error {
 	case !f.Primary && !f.Required && f.Default == nil && f.Generate == "":
 		return fmt.Errorf("entity %q cannot order by field %q, which can be NULL: make it required or give it a default", e.Name, f.Name)
 	}
+
 	return nil
 }
 
@@ -219,6 +222,7 @@ func validateGenerate(e *Entity, f Field) error {
 	case f.Primary, f.Required, f.Default != nil, f.Validate != "":
 		return fmt.Errorf("entity %q field %q has generate, which excludes primary, required, default and validate", e.Name, f.Name)
 	}
+
 	return nil
 }
 
@@ -233,5 +237,6 @@ func defaultFits(fieldType string, v any) bool {
 	case bool:
 		return fieldType == TypeBool
 	}
+
 	return false
 }

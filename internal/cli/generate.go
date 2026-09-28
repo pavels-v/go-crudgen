@@ -28,26 +28,29 @@ func runGenerate(args []string) int {
 		// An explicit -h/--help is a success, not a usage error; flag has
 		// already printed the usage text.
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return exitOK
 		}
-		return 2
+
+		return exitUsage
 	}
 
 	if *specPath == "" {
 		fmt.Fprintln(os.Stderr, "generate: -spec is required")
 		fs.Usage()
-		return 2
+
+		return exitUsage
 	}
 
 	s, err := spec.Load(*specPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load spec: %v\n", err)
-		return 1
+		return exitError
 	}
 
 	if err := generator.Generate(s, generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver}); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to generate: %v\n", err)
-		return 1
+		return exitError
 	}
-	return 0
+
+	return exitOK
 }

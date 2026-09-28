@@ -78,6 +78,7 @@ func (r *CommentRepository) Get(ctx context.Context, id int64) (*blog.Comment, e
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, blog.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("get comment: %w", err)
 	}
 

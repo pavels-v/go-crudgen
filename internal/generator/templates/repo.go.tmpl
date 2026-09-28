@@ -75,6 +75,7 @@ func (r *{{ .Receiver }}) Get(ctx context.Context, id {{ .PKGoType }}) (*{{ .Mod
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, {{ .Domain }}.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("get {{ .LowerStruct }}: %w", err)
 	}
 
@@ -160,6 +161,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Model }}) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return {{ .Domain }}.ErrNotFound
 		}
+
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", mapWriteError(err))
 	}
 {{- else if .NoUpdateColumns }}
@@ -170,6 +172,7 @@ func (r *{{ .Receiver }}) Update(ctx context.Context, m *{{ .Model }}) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return {{ .Domain }}.ErrNotFound
 		}
+
 		return fmt.Errorf("update {{ .LowerStruct }}: %w", err)
 	}
 {{- else }}

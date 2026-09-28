@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"example.com/blogservice/internal/blog"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"example.com/blogservice/internal/blog"
 )
 
 type memStore[K comparable, M, P any] struct {
@@ -51,6 +52,7 @@ func (s *memStore[K, M, P]) Create(_ context.Context, m *M) error {
 	}
 
 	s.data[k] = *m
+
 	return nil
 }
 
@@ -62,6 +64,7 @@ func (s *memStore[K, M, P]) Get(_ context.Context, id K) (*M, error) {
 	if !ok {
 		return nil, blog.ErrNotFound
 	}
+
 	return &m, nil
 }
 
@@ -79,6 +82,7 @@ func (s *memStore[K, M, P]) List(_ context.Context, p P) ([]M, error) {
 	if s.limit != nil {
 		out = out[:min(len(out), s.limit(p))]
 	}
+
 	return out, nil
 }
 
@@ -92,6 +96,7 @@ func (s *memStore[K, M, P]) Update(_ context.Context, m *M) error {
 	}
 
 	s.data[k] = *m
+
 	return nil
 }
 
@@ -104,6 +109,7 @@ func (s *memStore[K, M, P]) Delete(_ context.Context, id K) error {
 	}
 
 	delete(s.data, id)
+
 	return nil
 }
 
@@ -114,17 +120,20 @@ func newServer() *httptest.Server {
 func newAuthorStore() *memStore[uuid.UUID, blog.Author, blog.AuthorListParams] {
 	s := newMemStore[uuid.UUID, blog.Author, blog.AuthorListParams](func(m *blog.Author) *uuid.UUID { return &m.ID }, uuid.New)
 	s.limit = func(p blog.AuthorListParams) int { return p.Limit }
+
 	return s
 }
 
 func newPostStore() *memStore[uuid.UUID, blog.Post, blog.PostListParams] {
 	s := newMemStore[uuid.UUID, blog.Post, blog.PostListParams](func(m *blog.Post) *uuid.UUID { return &m.ID }, uuid.New)
 	s.limit = func(p blog.PostListParams) int { return p.Limit }
+
 	return s
 }
 
 func newServerWithPosts(posts blog.PostRepository) *httptest.Server {
 	var commentSeq atomic.Int64
+
 	return httptest.NewServer(NewRouter(Deps{
 		Posts:    posts,
 		Authors:  newAuthorStore(),
@@ -146,12 +155,12 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 		r = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequest(method, srv.URL+path, r)
+	req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+path, r)
 	require.NoError(t, err, "new request")
 
 	resp, err := http.DefaultClient.Do(req)
-
 	require.NoErrorf(t, err, "%s %s", method, path)
+
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	if resp.StatusCode != wantStatus {
@@ -172,12 +181,12 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 func doError(t *testing.T, srv *httptest.Server, method, path, body string, wantStatus int) apiError {
 	t.Helper()
 
-	req, err := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+path, strings.NewReader(body))
 	require.NoError(t, err, "new request")
 
 	resp, err := http.DefaultClient.Do(req)
-
 	require.NoErrorf(t, err, "%s %s", method, path)
+
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	require.Equal(t, wantStatus, resp.StatusCode)
@@ -192,6 +201,7 @@ func doError(t *testing.T, srv *httptest.Server, method, path, body string, want
 
 	var env errorResponse
 	require.NoError(t, json.Unmarshal(raw, &env))
+
 	return env.Error
 }
 
@@ -200,6 +210,7 @@ func keys[V any](m map[string]V) []string {
 	for k := range m {
 		out = append(out, k)
 	}
+
 	return out
 }
 
@@ -207,7 +218,7 @@ func TestPostCRUD(t *testing.T) {
 	t.Parallel()
 
 	srv := newServer()
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	authorID := uuid.New()
 
@@ -263,107 +274,107 @@ func TestErrorResponses(t *testing.T) {
 		wantDetails []errorDetail
 	}{
 		{
-			"missing required field", http.MethodPost, "/posts", `{}`,
-			http.StatusUnprocessableEntity, codeValidationFailed,
-			[]errorDetail{{Field: "/title", Reason: "required"}},
+			name: "missing required field", method: http.MethodPost, path: "/posts", body: `{}`,
+			wantStatus: http.StatusUnprocessableEntity, wantCode: codeValidationFailed,
+			wantDetails: []errorDetail{{Field: "/title", Reason: "required"}},
 		},
 		{
-			"rule with parameter", http.MethodPost, "/posts", `{"title":"` + strings.Repeat("x", 201) + `"}`,
-			http.StatusUnprocessableEntity, codeValidationFailed,
-			[]errorDetail{{Field: "/title", Reason: "max=200"}},
+			name: "rule with parameter", method: http.MethodPost, path: "/posts", body: `{"title":"` + strings.Repeat("x", 201) + `"}`,
+			wantStatus: http.StatusUnprocessableEntity, wantCode: codeValidationFailed,
+			wantDetails: []errorDetail{{Field: "/title", Reason: "max=200"}},
 		},
 		{
-			"rule on an optional field", http.MethodPost, "/authors", `{"email":"long@example.com","name":"` + strings.Repeat("x", 101) + `"}`,
-			http.StatusUnprocessableEntity, codeValidationFailed,
-			[]errorDetail{{Field: "/name", Reason: "max=100"}},
+			name: "rule on an optional field", method: http.MethodPost, path: "/authors", body: `{"email":"long@example.com","name":"` + strings.Repeat("x", 101) + `"}`,
+			wantStatus: http.StatusUnprocessableEntity, wantCode: codeValidationFailed,
+			wantDetails: []errorDetail{{Field: "/name", Reason: "max=100"}},
 		},
 		{
-			"missing reference key", http.MethodPost, "/comments", `{"body":"Orphan"}`,
-			http.StatusUnprocessableEntity, codeValidationFailed,
-			[]errorDetail{{Field: "/post", Reason: "required"}},
+			name: "missing reference key", method: http.MethodPost, path: "/comments", body: `{"body":"Orphan"}`,
+			wantStatus: http.StatusUnprocessableEntity, wantCode: codeValidationFailed,
+			wantDetails: []errorDetail{{Field: "/post", Reason: "required"}},
 		},
 		{
-			"unknown member", http.MethodPost, "/posts", `{"title":"Hello","extra":1}`,
-			http.StatusBadRequest, codeMalformedBody,
-			[]errorDetail{{Field: "/extra", Reason: reasonUnknownField}},
+			name: "unknown member", method: http.MethodPost, path: "/posts", body: `{"title":"Hello","extra":1}`,
+			wantStatus: http.StatusBadRequest, wantCode: codeMalformedBody,
+			wantDetails: []errorDetail{{Field: "/extra", Reason: reasonUnknownField}},
 		},
 		{
-			"duplicate member", http.MethodPost, "/posts", `{"title":"Hello","title":"Bye"}`,
-			http.StatusBadRequest, codeMalformedBody,
-			[]errorDetail{{Field: "/title", Reason: reasonDuplicateField}},
+			name: "duplicate member", method: http.MethodPost, path: "/posts", body: `{"title":"Hello","title":"Bye"}`,
+			wantStatus: http.StatusBadRequest, wantCode: codeMalformedBody,
+			wantDetails: []errorDetail{{Field: "/title", Reason: reasonDuplicateField}},
 		},
 		{
-			"wrong value type", http.MethodPost, "/posts", `{"title":1}`,
-			http.StatusBadRequest, codeMalformedBody,
-			[]errorDetail{{Field: "/title", Reason: reasonInvalidValue}},
+			name: "wrong value type", method: http.MethodPost, path: "/posts", body: `{"title":1}`,
+			wantStatus: http.StatusBadRequest, wantCode: codeMalformedBody,
+			wantDetails: []errorDetail{{Field: "/title", Reason: reasonInvalidValue}},
 		},
 		{
-			"syntax error", http.MethodPost, "/posts", `{"title":`,
-			http.StatusBadRequest, codeMalformedBody,
-			[]errorDetail{{Field: "/title", Reason: reasonSyntax}},
+			name: "syntax error", method: http.MethodPost, path: "/posts", body: `{"title":`,
+			wantStatus: http.StatusBadRequest, wantCode: codeMalformedBody,
+			wantDetails: []errorDetail{{Field: "/title", Reason: reasonSyntax}},
 		},
 		{
-			"body too large", http.MethodPost, "/posts", `{"title":"` + strings.Repeat("x", maxBodyBytes) + `"}`,
-			http.StatusRequestEntityTooLarge, codeBodyTooLarge, nil,
+			name: "body too large", method: http.MethodPost, path: "/posts", body: `{"title":"` + strings.Repeat("x", maxBodyBytes) + `"}`,
+			wantStatus: http.StatusRequestEntityTooLarge, wantCode: codeBodyTooLarge,
 		},
 		{
-			"invalid id", http.MethodGet, "/posts/not-a-uuid", "",
-			http.StatusBadRequest, codeInvalidID, nil,
+			name: "invalid id", method: http.MethodGet, path: "/posts/not-a-uuid",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidID,
 		},
 		{
-			"invalid page", http.MethodGet, "/authors?limit=abc&offset=-1", "",
-			http.StatusBadRequest, codeInvalidQuery,
-			[]errorDetail{{Field: queryLimit, Reason: reasonInvalidValue}, {Field: queryOffset, Reason: reasonInvalidValue}},
+			name: "invalid page", method: http.MethodGet, path: "/authors?limit=abc&offset=-1",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
+			wantDetails: []errorDetail{{Field: queryLimit, Reason: reasonInvalidValue}, {Field: queryOffset, Reason: reasonInvalidValue}},
 		},
 		{
-			"unknown query parameter", http.MethodGet, "/posts?" + unknownParam + "=x&limit=5", "",
-			http.StatusBadRequest, codeInvalidQuery,
-			[]errorDetail{{Field: unknownParam, Reason: reasonUnknownField}},
+			name: "unknown query parameter", method: http.MethodGet, path: "/posts?" + unknownParam + "=x&limit=5",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
+			wantDetails: []errorDetail{{Field: unknownParam, Reason: reasonUnknownField}},
 		},
 		{
-			"offset on a cursor-paged entity", http.MethodGet, "/posts?offset=10", "",
-			http.StatusBadRequest, codeInvalidQuery,
-			[]errorDetail{{Field: queryOffset, Reason: reasonUnknownField}},
+			name: "offset on a cursor-paged entity", method: http.MethodGet, path: "/posts?offset=10",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
+			wantDetails: []errorDetail{{Field: queryOffset, Reason: reasonUnknownField}},
 		},
 		{
-			"malformed cursor", http.MethodGet, "/posts?cursor=not-a-cursor", "",
-			http.StatusBadRequest, codeInvalidQuery,
-			[]errorDetail{{Field: queryCursor, Reason: reasonInvalidValue}},
+			name: "malformed cursor", method: http.MethodGet, path: "/posts?cursor=not-a-cursor",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
+			wantDetails: []errorDetail{{Field: queryCursor, Reason: reasonInvalidValue}},
 		},
 		{
-			"repeated query parameter", http.MethodGet, "/posts?published=true&published=false", "",
-			http.StatusBadRequest, codeInvalidQuery,
-			[]errorDetail{{Field: queryPostPublished, Reason: reasonDuplicateField}},
+			name: "repeated query parameter", method: http.MethodGet, path: "/posts?published=true&published=false",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
+			wantDetails: []errorDetail{{Field: queryPostPublished, Reason: reasonDuplicateField}},
 		},
 		{
-			"invalid filter and direction", http.MethodGet, "/posts?author=nope&published=maybe&dir=up", "",
-			http.StatusBadRequest, codeInvalidQuery,
-			[]errorDetail{
+			name: "invalid filter and direction", method: http.MethodGet, path: "/posts?author=nope&published=maybe&dir=up",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
+			wantDetails: []errorDetail{
 				{Field: queryPostPublished, Reason: reasonInvalidValue},
 				{Field: queryPostAuthor, Reason: reasonInvalidValue},
 				{Field: queryDir, Reason: reasonInvalidValue},
 			},
 		},
 		{
-			"filter on entity without filters", http.MethodGet, "/tags?label=go", "",
-			http.StatusBadRequest, codeInvalidQuery,
-			[]errorDetail{{Field: "label", Reason: reasonUnknownField}},
+			name: "filter on entity without filters", method: http.MethodGet, path: "/tags?label=go",
+			wantStatus: http.StatusBadRequest, wantCode: codeInvalidQuery,
+			wantDetails: []errorDetail{{Field: "label", Reason: reasonUnknownField}},
 		},
 		{
-			"entity not found", http.MethodGet, "/posts/" + uuid.NewString(), "",
-			http.StatusNotFound, codeNotFound, nil,
+			name: "entity not found", method: http.MethodGet, path: "/posts/" + uuid.NewString(),
+			wantStatus: http.StatusNotFound, wantCode: codeNotFound,
 		},
 		{
-			"unknown route", http.MethodGet, "/nope", "",
-			http.StatusNotFound, codeNotFound, nil,
+			name: "unknown route", method: http.MethodGet, path: "/nope",
+			wantStatus: http.StatusNotFound, wantCode: codeNotFound,
 		},
 		{
-			"method not allowed", http.MethodPatch, "/posts", "",
-			http.StatusMethodNotAllowed, codeMethodNotAllowed, nil,
+			name: "method not allowed", method: http.MethodPatch, path: "/posts",
+			wantStatus: http.StatusMethodNotAllowed, wantCode: codeMethodNotAllowed,
 		},
 		{
-			"duplicate key", http.MethodPost, tagPath, `{"slug":"taken","label":"Again"}`,
-			http.StatusConflict, codeAlreadyExists, nil,
+			name: "duplicate key", method: http.MethodPost, path: tagPath, body: `{"slug":"taken","label":"Again"}`,
+			wantStatus: http.StatusConflict, wantCode: codeAlreadyExists,
 		},
 	}
 
@@ -427,10 +438,10 @@ func TestOffsetListReportsHasMore(t *testing.T) {
 		wantLen   int
 		wantMore  bool
 	}{
-		{"more rows than limit", authors - 1, authors - 1, authors - 1, true},
-		{"exactly limit", authors, authors, authors, false},
-		{"fewer rows than limit", authors + 1, authors + 1, authors, false},
-		{"limit is clamped", maxLimit + 1, maxLimit, authors, false},
+		{name: "more rows than limit", limit: authors - 1, wantLimit: authors - 1, wantLen: authors - 1, wantMore: true},
+		{name: "exactly limit", limit: authors, wantLimit: authors, wantLen: authors, wantMore: false},
+		{name: "fewer rows than limit", limit: authors + 1, wantLimit: authors + 1, wantLen: authors, wantMore: false},
+		{name: "limit is clamped", limit: maxLimit + 1, wantLimit: maxLimit, wantLen: authors, wantMore: false},
 	}
 
 	for _, tc := range cases {
@@ -487,11 +498,12 @@ func TestMethodNotAllowedListsAllowedMethods(t *testing.T) {
 	srv := newServer()
 	t.Cleanup(srv.Close)
 
-	req, err := http.NewRequest(http.MethodPatch, srv.URL+"/posts", http.NoBody)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, srv.URL+"/posts", http.NoBody)
 	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
 
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
+
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
@@ -560,7 +572,7 @@ func TestCommentDefaults(t *testing.T) {
 	t.Parallel()
 
 	srv := newServer()
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	before := time.Now()
 	var created blog.Comment
@@ -580,7 +592,7 @@ func TestTagClientKey(t *testing.T) {
 	t.Parallel()
 
 	srv := newServer()
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	const slug = "go"
 
@@ -604,14 +616,23 @@ func TestAuthorDateWireFormat(t *testing.T) {
 
 	const bornOn = "1815-12-10"
 
+	var got map[string]any
+	do(t, srv, http.MethodPost, "/authors", map[string]string{"email": "ada@example.com", "born_on": bornOn}, &got, http.StatusCreated)
+	require.Equal(t, bornOn, got["born_on"])
+}
+
+func TestAuthorRejectsNonDateBornOn(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer()
+	t.Cleanup(srv.Close)
+
 	cases := []struct {
-		name       string
-		bornOn     string
-		wantStatus int
+		name   string
+		bornOn string
 	}{
-		{"date only accepted", bornOn, http.StatusCreated},
-		{"timestamp rejected", bornOn + "T00:00:00Z", http.StatusBadRequest},
-		{"invalid date rejected", "1815-13-10", http.StatusBadRequest},
+		{name: "timestamp", bornOn: "1815-12-10T00:00:00Z"},
+		{name: "invalid date", bornOn: "1815-13-10"},
 	}
 
 	for _, tc := range cases {
@@ -619,22 +640,8 @@ func TestAuthorDateWireFormat(t *testing.T) {
 			t.Parallel()
 
 			body := `{"email":"ada@example.com","born_on":"` + tc.bornOn + `"}`
-			if tc.wantStatus != http.StatusCreated {
-				got := doError(t, srv, http.MethodPost, "/authors", body, tc.wantStatus)
-				require.Equal(t, []errorDetail{{Field: "/born_on", Reason: reasonInvalidValue}}, got.Details)
-				return
-			}
-
-			resp, err := http.Post(srv.URL+"/authors", contentTypeJSON, strings.NewReader(body))
-
-			require.NoError(t, err)
-			defer func() { require.NoError(t, resp.Body.Close()) }()
-
-			require.Equal(t, tc.wantStatus, resp.StatusCode)
-
-			var got bodyResponse[map[string]any]
-			require.NoError(t, json.UnmarshalRead(resp.Body, &got))
-			require.Equal(t, bornOn, got.Body["born_on"])
+			got := doError(t, srv, http.MethodPost, "/authors", body, http.StatusBadRequest)
+			require.Equal(t, []errorDetail{{Field: "/born_on", Reason: reasonInvalidValue}}, got.Details)
 		})
 	}
 }

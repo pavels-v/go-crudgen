@@ -76,6 +76,7 @@ func (e *Entity) OrderField() (Field, bool) {
 			return f, true
 		}
 	}
+
 	return Field{}, false
 }
 
@@ -89,5 +90,6 @@ func (e *Entity) PrimaryKey() []Field {
 			pk = append(pk, f)
 		}
 	}
+
 	return pk
 }

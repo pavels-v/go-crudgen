@@ -72,6 +72,7 @@ func (r *TagRepository) Get(ctx context.Context, id string) (*blog.Tag, error) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, blog.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("get tag: %w", err)
 	}
 

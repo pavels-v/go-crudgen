@@ -12,5 +12,6 @@ func ParseSortDir(s string) (SortDir, bool) {
 	case SortAsc, SortDesc:
 		return d, true
 	}
+
 	return SortAsc, s == ""
 }

@@ -21,6 +21,7 @@ func repoRoot(t *testing.T) string {
 	root, err := filepath.Abs(filepath.Join(wd, "..", ".."))
 	require.NoError(t, err, "resolve repo root")
 	require.FileExists(t, filepath.Join(root, "go.mod"), "go.mod at repo root")
+
 	return root
 }
 

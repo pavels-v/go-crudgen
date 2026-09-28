@@ -32,6 +32,7 @@ func checkRules(e *spec.Entity, byName map[string]*spec.Entity) error {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -43,5 +44,6 @@ func tryRule(v *validator.Validate, sample any, tag string) (err error) {
 	}()
 
 	_ = v.Var(sample, tag)
+
 	return nil
 }

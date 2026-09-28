@@ -75,6 +75,7 @@ func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Author,
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, blog.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("get author: %w", err)
 	}
 

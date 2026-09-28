@@ -60,6 +60,7 @@ func listFilters(e *spec.Entity, byName map[string]*spec.Entity) ([]listFilter, 
 
 		out = append(out, listFilter{Field: f, GoName: pascalCase(f.Name), Type: gt})
 	}
+
 	return out, nil
 }
 
@@ -70,11 +71,13 @@ func listOrder(e *spec.Entity) ordering {
 	if f.Primary {
 		return keyOrder(pk)
 	}
+
 	return fieldOrder(f, pk)
 }
 
 func keyOrder(pk spec.Field) ordering {
 	col := snakeCase(pk.Name)
+
 	return ordering{
 		Asc:       col,
 		Desc:      fmt.Sprintf(exprOrderDesc, col),
@@ -86,12 +89,13 @@ func keyOrder(pk spec.Field) ordering {
 
 func fieldOrder(f, pk spec.Field) ordering {
 	col, pkCol := snakeCase(f.Name), snakeCase(pk.Name)
+
 	return ordering{
-		Asc:       col + argSep + pkCol,
-		Desc:      fmt.Sprintf(exprOrderDesc, col) + argSep + fmt.Sprintf(exprOrderDesc, pkCol),
+		Asc:       col + listSep + pkCol,
+		Desc:      fmt.Sprintf(exprOrderDesc, col) + listSep + fmt.Sprintf(exprOrderDesc, pkCol),
 		AfterAsc:  fmt.Sprintf(exprAfterPair, col, pkCol, opGreater),
 		AfterDesc: fmt.Sprintf(exprAfterPair, col, pkCol, opLess),
-		AfterArgs: fmt.Sprintf(exprAfterField, pascalCase(f.Name)) + argSep + fmt.Sprintf(exprAfterField, pascalCase(pk.Name)),
+		AfterArgs: fmt.Sprintf(exprAfterField, pascalCase(f.Name)) + listSep + fmt.Sprintf(exprAfterField, pascalCase(pk.Name)),
 	}
 }
 
@@ -102,6 +106,7 @@ func cursorFields(e *spec.Entity) []spec.Field {
 	if f.Primary {
 		return []spec.Field{pk}
 	}
+
 	return []spec.Field{f, pk}
 }
 
@@ -118,5 +123,6 @@ func queryParser(gt goType, s *spec.Spec) (parse, imp string) {
 	}
 
 	q := gt.outside(s)
+
 	return fmt.Sprintf(exprParseText, q.expr), q.imp
 }

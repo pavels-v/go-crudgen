@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"go/parser"
 	"go/token"
 	"slices"
@@ -13,28 +14,27 @@ import (
 	"go-crudgen/internal/spec"
 )
 
+func findEntity(t *testing.T, s *spec.Spec, name string) *spec.Entity {
+	t.Helper()
+
+	e, ok := entitiesByName(s)[name]
+	require.Truef(t, ok, "entity %q not found in spec", name)
+
+	return e
+}
+
 // render runs renderModel for the named entity and returns the generated
 // source, failing the test on error or if the output is not valid Go.
 func render(t *testing.T, s *spec.Spec, entity string) string {
 	t.Helper()
 
-	byName := make(map[string]*spec.Entity, len(s.Entities))
-	for i := range s.Entities {
-		byName[s.Entities[i].Name] = &s.Entities[i]
-	}
-
-	var e *spec.Entity
-	for i := range s.Entities {
-		if s.Entities[i].Name == entity {
-			e = &s.Entities[i]
-		}
-	}
-
-	require.NotNilf(t, e, "entity %q not found in spec", entity)
+	byName := entitiesByName(s)
+	e := findEntity(t, s, entity)
 
 	src, err := renderModel(s, e, byName)
 	require.NoErrorf(t, err, "renderModel(%s)", entity)
 	requireParses(t, src)
+
 	return string(src)
 }
 
@@ -153,19 +153,8 @@ func TestRenderModel_GeneratedTimestamps(t *testing.T) {
 func renderHandlerSrc(t *testing.T, s *spec.Spec, entity string) string {
 	t.Helper()
 
-	byName := make(map[string]*spec.Entity, len(s.Entities))
-	for i := range s.Entities {
-		byName[s.Entities[i].Name] = &s.Entities[i]
-	}
-
-	var e *spec.Entity
-	for i := range s.Entities {
-		if s.Entities[i].Name == entity {
-			e = &s.Entities[i]
-		}
-	}
-
-	require.NotNilf(t, e, "entity %q not found in spec", entity)
+	byName := entitiesByName(s)
+	e := findEntity(t, s, entity)
 
 	hd, err := handlerInfo(s, e, byName)
 	require.NoErrorf(t, err, "handlerInfo(%s)", entity)
@@ -173,6 +162,7 @@ func renderHandlerSrc(t *testing.T, s *spec.Spec, entity string) string {
 	src, err := renderHandler(hd)
 	require.NoErrorf(t, err, "renderHandler(%s)", entity)
 	requireParses(t, src)
+
 	return string(src)
 }
 
@@ -221,7 +211,7 @@ func TestRenderHandler_DTOs(t *testing.T) {
 func TestRenderHandler_RequiredFields(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	cases := []struct {
 		name  string
 		field spec.Field
 		want  []string
@@ -257,8 +247,8 @@ func TestRenderHandler_RequiredFields(t *testing.T) {
 			want:  []string{"Code string `json:\"code\" validate:\"required,min=3\"`"},
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{
@@ -268,13 +258,13 @@ func TestRenderHandler_RequiredFields(t *testing.T) {
 					Name: "Item",
 					Fields: []spec.Field{
 						{Name: "id", Type: spec.TypeInt64, Primary: true},
-						tt.field,
+						tc.field,
 					},
 				}},
 			}
 
 			got := renderHandlerSrc(t, s, "Item")
-			for _, want := range tt.want {
+			for _, want := range tc.want {
 				wantContains(t, got, want)
 			}
 		})
@@ -434,19 +424,8 @@ func TestRenderHandler_Int32PKUsesParseInt32(t *testing.T) {
 func renderRepoSrc(t *testing.T, s *spec.Spec, entity string) string {
 	t.Helper()
 
-	byName := make(map[string]*spec.Entity, len(s.Entities))
-	for i := range s.Entities {
-		byName[s.Entities[i].Name] = &s.Entities[i]
-	}
-
-	var e *spec.Entity
-	for i := range s.Entities {
-		if s.Entities[i].Name == entity {
-			e = &s.Entities[i]
-		}
-	}
-
-	require.NotNilf(t, e, "entity %q not found in spec", entity)
+	byName := entitiesByName(s)
+	e := findEntity(t, s, entity)
 
 	rd, err := repoInfo(s, e, byName)
 	require.NoErrorf(t, err, "repoInfo(%s)", entity)
@@ -454,6 +433,7 @@ func renderRepoSrc(t *testing.T, s *spec.Spec, entity string) string {
 	src, err := renderRepo(rd)
 	require.NoErrorf(t, err, "renderRepo(%s)", entity)
 	requireParses(t, src)
+
 	return string(src)
 }
 
@@ -748,9 +728,9 @@ func TestRenderRouter_PaginationHelpers(t *testing.T) {
 		want   []string
 		absent []string
 	}{
-		{"offset only", sharedFiles{Offset: true}, offset, cursor},
-		{"cursor only", sharedFiles{Cursor: true}, cursor, offset},
-		{"both", sharedFiles{Offset: true, Cursor: true}, slices.Concat(offset, cursor), nil},
+		{name: "offset only", shared: sharedFiles{Offset: true}, want: offset, absent: cursor},
+		{name: "cursor only", shared: sharedFiles{Cursor: true}, want: cursor, absent: offset},
+		{name: "both", shared: sharedFiles{Offset: true, Cursor: true}, want: slices.Concat(offset, cursor)},
 	}
 
 	for _, tc := range cases {
@@ -898,14 +878,6 @@ func TestRenderRepo_GeneratedColumns(t *testing.T) {
 func TestRepoInfo_HasNullable(t *testing.T) {
 	t.Parallel()
 
-	byNameOf := func(s *spec.Spec) map[string]*spec.Entity {
-		m := make(map[string]*spec.Entity, len(s.Entities))
-		for i := range s.Entities {
-			m[s.Entities[i].Name] = &s.Entities[i]
-		}
-		return m
-	}
-
 	cases := []struct {
 		name   string
 		fields []spec.Field
@@ -928,7 +900,7 @@ func TestRepoInfo_HasNullable(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: []spec.Entity{{Name: "Thing", Fields: tc.fields}}}
-			rd, err := repoInfo(s, &s.Entities[0], byNameOf(s))
+			rd, err := repoInfo(s, &s.Entities[0], entitiesByName(s))
 			require.NoError(t, err)
 			require.Equal(t, tc.want, rd.HasNullable)
 		})
@@ -958,24 +930,14 @@ func TestRenderNulls_GenericHelpers(t *testing.T) {
 func renderMigrationSrc(t *testing.T, s *spec.Spec, entity string) string {
 	t.Helper()
 
-	byName := make(map[string]*spec.Entity, len(s.Entities))
-	for i := range s.Entities {
-		byName[s.Entities[i].Name] = &s.Entities[i]
-	}
-
-	var e *spec.Entity
-	for i := range s.Entities {
-		if s.Entities[i].Name == entity {
-			e = &s.Entities[i]
-		}
-	}
-
-	require.NotNilf(t, e, "entity %q not found in spec", entity)
+	byName := entitiesByName(s)
+	e := findEntity(t, s, entity)
 
 	md, err := migrationInfo(e, byName)
 	require.NoErrorf(t, err, "migrationInfo(%s)", entity)
 	src, err := renderMigration(md)
 	require.NoErrorf(t, err, "renderMigration(%s)", entity)
+
 	return string(src)
 }
 
@@ -1056,66 +1018,62 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 func TestMigrationOrder(t *testing.T) {
 	t.Parallel()
 
-	byNameOf := func(s *spec.Spec) map[string]*spec.Entity {
-		m := make(map[string]*spec.Entity, len(s.Entities))
-		for i := range s.Entities {
-			m[s.Entities[i].Name] = &s.Entities[i]
-		}
-		return m
+	uuidKey := spec.Field{Name: "id", Type: spec.TypeUUID, Primary: true}
+	cases := []struct {
+		name     string
+		entities []spec.Entity
+		want     []string
+		wantErr  bool
+	}{
+		{
+			// Post references Author but is declared first; Author must still come first
+			// so its table exists when the posts foreign key is created.
+			name: "referenced entity is ordered first",
+			entities: []spec.Entity{
+				{Name: "Post", Fields: []spec.Field{uuidKey, {Name: "author", Type: spec.TypeReferences, Target: "Author"}}},
+				{Name: "Author", Fields: []spec.Field{uuidKey}},
+			},
+			want: []string{"Author", "Post"},
+		},
+		{
+			name: "self-reference is allowed",
+			entities: []spec.Entity{
+				{Name: "Node", Fields: []spec.Field{uuidKey, {Name: "parent", Type: spec.TypeReferences, Target: "Node"}}},
+			},
+			want: []string{"Node"},
+		},
+		{
+			name: "reference cycle errors",
+			entities: []spec.Entity{
+				{Name: "A", Fields: []spec.Field{uuidKey, {Name: "b", Type: spec.TypeReferences, Target: "B"}}},
+				{Name: "B", Fields: []spec.Field{uuidKey, {Name: "a", Type: spec.TypeReferences, Target: "A"}}},
+			},
+			wantErr: true,
+		},
 	}
 
-	t.Run("referenced entity is ordered first", func(t *testing.T) {
-		t.Parallel()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-		// Post references Author but is declared first; Author must still come first
-		// so its table exists when the posts foreign key is created.
-		s := &spec.Spec{Package: "blog", Entities: []spec.Entity{
-			{Name: "Post", Fields: []spec.Field{
-				{Name: "id", Type: spec.TypeUUID, Primary: true},
-				{Name: "author", Type: spec.TypeReferences, Target: "Author"},
-			}},
-			{Name: "Author", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
-		}}
+			s := &spec.Spec{Entities: tc.entities}
 
-		order, err := migrationOrder(s.Entities, byNameOf(s))
-		require.NoError(t, err)
+			order, err := migrationOrder(s.Entities, entitiesByName(s))
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
 
-		names := []string{order[0].Name, order[1].Name}
-		require.Equal(t, []string{"Author", "Post"}, names)
-	})
+			require.NoError(t, err)
 
-	t.Run("self-reference is allowed", func(t *testing.T) {
-		t.Parallel()
+			names := make([]string, len(order))
+			for i, e := range order {
+				names[i] = e.Name
+			}
 
-		s := &spec.Spec{Package: "tree", Entities: []spec.Entity{
-			{Name: "Node", Fields: []spec.Field{
-				{Name: "id", Type: spec.TypeUUID, Primary: true},
-				{Name: "parent", Type: spec.TypeReferences, Target: "Node"},
-			}},
-		}}
-
-		order, err := migrationOrder(s.Entities, byNameOf(s))
-		require.NoError(t, err)
-		require.Len(t, order, 1)
-	})
-
-	t.Run("reference cycle errors", func(t *testing.T) {
-		t.Parallel()
-
-		s := &spec.Spec{Package: "loop", Entities: []spec.Entity{
-			{Name: "A", Fields: []spec.Field{
-				{Name: "id", Type: spec.TypeUUID, Primary: true},
-				{Name: "b", Type: spec.TypeReferences, Target: "B"},
-			}},
-			{Name: "B", Fields: []spec.Field{
-				{Name: "id", Type: spec.TypeUUID, Primary: true},
-				{Name: "a", Type: spec.TypeReferences, Target: "A"},
-			}},
-		}}
-
-		_, err := migrationOrder(s.Entities, byNameOf(s))
-		require.Error(t, err)
-	})
+			require.Equal(t, tc.want, names)
+		})
+	}
 }
 
 func TestSQLType(t *testing.T) {
@@ -1129,17 +1087,17 @@ func TestSQLType(t *testing.T) {
 		field spec.Field
 		want  string
 	}{
-		{name: "string", field: spec.Field{Type: spec.TypeString}, want: "TEXT"},
-		{name: "int32", field: spec.Field{Type: spec.TypeInt32}, want: "INTEGER"},
-		{name: "int64", field: spec.Field{Type: spec.TypeInt64}, want: "BIGINT"},
-		{name: "float", field: spec.Field{Type: spec.TypeFloat}, want: "DOUBLE PRECISION"},
-		{name: "decimal", field: spec.Field{Type: spec.TypeDecimal}, want: "NUMERIC"},
-		{name: "bool", field: spec.Field{Type: spec.TypeBool}, want: "BOOLEAN"},
-		{name: "date", field: spec.Field{Type: spec.TypeDate}, want: "DATE"},
-		{name: "datetime", field: spec.Field{Type: spec.TypeDatetime}, want: "TIMESTAMPTZ"},
-		{name: "uuid", field: spec.Field{Type: spec.TypeUUID}, want: "UUID"},
-		{name: "json", field: spec.Field{Type: spec.TypeJSON}, want: "JSONB"},
-		{name: "reference takes target PK type", field: spec.Field{Type: spec.TypeReferences, Target: "Author"}, want: "BIGINT"},
+		{name: "string", field: spec.Field{Type: spec.TypeString}, want: sqlText},
+		{name: "int32", field: spec.Field{Type: spec.TypeInt32}, want: sqlInteger},
+		{name: "int64", field: spec.Field{Type: spec.TypeInt64}, want: sqlBigint},
+		{name: "float", field: spec.Field{Type: spec.TypeFloat}, want: sqlDouble},
+		{name: "decimal", field: spec.Field{Type: spec.TypeDecimal}, want: sqlNumeric},
+		{name: "bool", field: spec.Field{Type: spec.TypeBool}, want: sqlBoolean},
+		{name: "date", field: spec.Field{Type: spec.TypeDate}, want: sqlDate},
+		{name: "datetime", field: spec.Field{Type: spec.TypeDatetime}, want: sqlTimestamptz},
+		{name: "uuid", field: spec.Field{Type: spec.TypeUUID}, want: sqlUUID},
+		{name: "json", field: spec.Field{Type: spec.TypeJSON}, want: sqlJSONB},
+		{name: "reference takes target PK type", field: spec.Field{Type: spec.TypeReferences, Target: "Author"}, want: sqlBigint},
 	}
 
 	for _, tc := range cases {
@@ -1189,9 +1147,9 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 		wantName   string
 		wantImport string
 	}{
-		{name: "default is pgx", driver: "", wantName: `"pgx"`, wantImport: `_ "github.com/jackc/pgx/v5/stdlib"`},
-		{name: "explicit pgx", driver: DriverPgx, wantName: `"pgx"`, wantImport: `_ "github.com/jackc/pgx/v5/stdlib"`},
-		{name: "pq maps to postgres", driver: DriverPq, wantName: `"postgres"`, wantImport: `_ "github.com/lib/pq"`},
+		{name: "default is pgx", wantName: sqlDriverPgx, wantImport: importDriverPgx},
+		{name: "explicit pgx", driver: DriverPgx, wantName: sqlDriverPgx, wantImport: importDriverPgx},
+		{name: "pq maps to postgres", driver: DriverPq, wantName: sqlDriverPq, wantImport: importDriverPq},
 	}
 
 	for _, tc := range cases {
@@ -1207,16 +1165,16 @@ func TestRenderDB_DriverSelection(t *testing.T) {
 			requireParses(t, src)
 
 			got := string(src)
-			wantContains(t, got, "driverName = "+tc.wantName)
-			wantContains(t, got, tc.wantImport)
+			wantContains(t, got, fmt.Sprintf("driverName = %q", tc.wantName))
+			wantContains(t, got, fmt.Sprintf("_ %q", tc.wantImport))
 			wantContains(t, got, "func NewDB(dsn string) (*sqlx.DB, error)")
 			wantContains(t, got, "db, err := sqlx.Open(driverName, dsn)")
 			wantContains(t, got, "db.SetMaxOpenConns(maxOpenConns)")
 			wantContains(t, got, `sqlStateUniqueViolation = "23505"`)
 			wantContains(t, got, "package postgres")
 			wantContains(t, got, `"example.com/blog" )`)
-			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", blog.ErrAlreadyExists, err)")
-			wantContains(t, got, "return fmt.Errorf(\"%w: %v\", blog.ErrStillReferenced, err)")
+			wantContains(t, got, `return fmt.Errorf("%w: %v", blog.ErrAlreadyExists, err)`)
+			wantContains(t, got, `return fmt.Errorf("%w: %v", blog.ErrStillReferenced, err)`)
 		})
 	}
 }
@@ -1581,14 +1539,24 @@ func TestRenderRepo_KeyGeneration(t *testing.T) {
 		want    []string
 		notWant string
 	}{
-		{"uuid in code", spec.TypeUUID, []string{
-			"INSERT INTO items (id, name) VALUES ($1, $2)`",
-			"m.ID = uuid.New()",
-		}, "RETURNING"},
-		{"int64 identity in database", spec.TypeInt64, []string{
-			"INSERT INTO items (name) VALUES ($1) RETURNING id`",
-			"Scan(&m.ID)",
-		}, "m.ID ="},
+		{
+			name:    "uuid in code",
+			keyType: spec.TypeUUID,
+			want: []string{
+				"INSERT INTO items (id, name) VALUES ($1, $2)`",
+				"m.ID = uuid.New()",
+			},
+			notWant: "RETURNING",
+		},
+		{
+			name:    "int64 identity in database",
+			keyType: spec.TypeInt64,
+			want: []string{
+				"INSERT INTO items (name) VALUES ($1) RETURNING id`",
+				"Scan(&m.ID)",
+			},
+			notWant: "m.ID =",
+		},
 	}
 
 	for _, tc := range cases {
@@ -1758,7 +1726,7 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: tc.entities}
-			files, err := renderFiles(s, sqlDriverPgx, importDriverPgx)
+			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx)
 			require.NoError(t, err)
 
 			err = checkCollisions(files)

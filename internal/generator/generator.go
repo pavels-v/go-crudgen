@@ -69,6 +69,11 @@ const (
 )
 
 const (
+	destStdout     = "stdout"
+	filesPerEntity = 4
+)
+
+const (
 	ruleRequired = "required"
 	ruleOmitNil  = "omitnil"
 	ruleSep      = ","
@@ -108,11 +113,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		return fmt.Errorf("unknown driver %q (supported: pgx, pq)", opts.Driver)
 	}
 
-	byName := make(map[string]*spec.Entity, len(s.Entities))
-	for i := range s.Entities {
-		byName[s.Entities[i].Name] = &s.Entities[i]
-	}
-
+	byName := entitiesByName(s)
 	for i := range s.Entities {
 		if err := checkColumns(&s.Entities[i]); err != nil {
 			return err
@@ -127,7 +128,7 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	dest := opts.OutDir
 	if toStdout {
-		dest = "stdout"
+		dest = destStdout
 	}
 
 	fmt.Fprintf(os.Stderr, "go-crudgen: package %q, %d %s -> %s\n",
@@ -142,7 +143,7 @@ func Generate(s *spec.Spec, opts Options) error {
 		return nil
 	}
 
-	files, err := renderFiles(s, driverName, driverImp)
+	files, err := renderFiles(s, byName, driverName, driverImp)
 	if err != nil {
 		return err
 	}
@@ -162,6 +163,7 @@ func Generate(s *spec.Spec, opts Options) error {
 	if !toStdout {
 		fmt.Fprintf(os.Stderr, "go-crudgen: done. Run `go mod tidy` in %s to resolve dependencies.\n", opts.OutDir)
 	}
+
 	return nil
 }
 
@@ -170,6 +172,7 @@ func emit(outDir string, f genFile) error {
 		if _, err := fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", f.Path, f.Src); err != nil {
 			return fmt.Errorf("write %s: %w", f.Path, err)
 		}
+
 		return nil
 	}
 
@@ -185,15 +188,29 @@ func emit(outDir string, f genFile) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "  wrote %s\n", path)
+
 	return nil
 }
 
-func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) {
+func entitiesByName(s *spec.Spec) map[string]*spec.Entity {
 	byName := make(map[string]*spec.Entity, len(s.Entities))
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
 
+	return byName
+}
+
+type sharedFiles struct {
+	Routes   []routerEntity
+	Parsers  map[string]bool
+	Nullable bool
+	Date     bool
+	Offset   bool
+	Cursor   bool
+}
+
+func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, driverImp string) ([]genFile, error) {
 	// Migrations are numbered so that a referenced table is created before the
 	// table whose foreign key points at it, regardless of declaration order.
 	order, err := migrationOrder(s.Entities, byName)
@@ -206,7 +223,7 @@ func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) 
 		migNum[e.Name] = i + 1
 	}
 
-	var files []genFile
+	files := make([]genFile, 0, len(s.Entities)*filesPerEntity)
 	shared := sharedFiles{Parsers: make(map[string]bool)}
 
 	for i := range s.Entities {
@@ -237,15 +254,6 @@ func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) 
 	}
 
 	return appendShared(files, s, driverName, driverImp, shared)
-}
-
-type sharedFiles struct {
-	Routes   []routerEntity
-	Parsers  map[string]bool
-	Nullable bool
-	Date     bool
-	Offset   bool
-	Cursor   bool
 }
 
 func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, shared sharedFiles) ([]genFile, error) {
@@ -348,6 +356,7 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 		{Path: fmt.Sprintf(fileHandler, base), Src: hsrc},
 		{Path: fmt.Sprintf(fileRepo, base), Src: rsrc},
 	}
+
 	return files, hd, rd, nil
 }
 
@@ -485,26 +494,22 @@ func qualified(s *spec.Spec, name string) string {
 }
 
 func checkColumns(e *spec.Entity) error {
-	names := make([]string, 0, len(e.Fields)+3)
+	columns := make(map[string]string, len(e.Fields))
+	goNames := make(map[string]string, len(e.Fields))
+
 	for _, f := range e.Fields {
-		names = append(names, f.Name)
-	}
-
-	columns := make(map[string]string, len(names))
-	goNames := make(map[string]string, len(names))
-
-	for _, n := range names {
-		col, goName := snakeCase(n), pascalCase(n)
+		col, goName := snakeCase(f.Name), pascalCase(f.Name)
 		if prev, ok := columns[col]; ok {
-			return fmt.Errorf("entity %q: %q and %q map to the same column %q", e.Name, prev, n, col)
+			return fmt.Errorf("entity %q: %q and %q map to the same column %q", e.Name, prev, f.Name, col)
 		}
 
 		if prev, ok := goNames[goName]; ok {
-			return fmt.Errorf("entity %q: %q and %q map to the same Go field %q", e.Name, prev, n, goName)
+			return fmt.Errorf("entity %q: %q and %q map to the same Go field %q", e.Name, prev, f.Name, goName)
 		}
 
-		columns[col], goNames[goName] = n, n
+		columns[col], goNames[goName] = f.Name, f.Name
 	}
+
 	return nil
 }
 
@@ -610,11 +615,11 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 
 		a := assign{Field: gn, Expr: expr}
 
-		if !f.Primary {
-			if gt.imp != "" {
-				imports[gt.imp] = struct{}{}
-			}
+		if gt.imp != "" {
+			imports[gt.imp] = struct{}{}
+		}
 
+		if !f.Primary {
 			data.CreateBody = append(data.CreateBody, mf)
 			data.UpdateBody = append(data.UpdateBody, mf)
 			data.CreateAssign = append(data.CreateAssign, a)
@@ -623,10 +628,6 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 
 		if _, generated := keyGenerator(f); !generated {
-			if gt.imp != "" {
-				imports[gt.imp] = struct{}{}
-			}
-
 			data.CreateBody = append(data.CreateBody, mf)
 			data.CreateAssign = append(data.CreateAssign, a)
 		}
@@ -672,6 +673,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("format generated source: %w", err)
 	}
+
 	return formatted, nil
 }
 
@@ -682,6 +684,7 @@ func renderMigration(data migrationData) ([]byte, error) {
 	if err := tmpl.ExecuteTemplate(&buf, tmplMigration, data); err != nil {
 		return nil, fmt.Errorf("render migration: %w", err)
 	}
+
 	return buf.Bytes(), nil
 }
 
@@ -723,12 +726,12 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 
 	// The model carries only json tags: request validation lives on the restapi
 	// DTOs and sqlx column mapping on the postgres row struct.
-	add := func(name, goExpr, imp string, tag string) {
+	add := func(field, goExpr, imp, tag string) {
 		if imp != "" {
 			imports[imp] = struct{}{}
 		}
 
-		data.Fields = append(data.Fields, modelField{GoName: pascalCase(name), GoType: goExpr, Tag: tag})
+		data.Fields = append(data.Fields, modelField{GoName: pascalCase(field), GoType: goExpr, Tag: tag})
 	}
 
 	for _, f := range e.Fields {
@@ -764,6 +767,7 @@ func modelType(f spec.Field, base string) string {
 	if isNullable(f) {
 		return fmt.Sprintf(exprPointer, base)
 	}
+
 	return base
 }
 
@@ -774,6 +778,7 @@ func jsonTag(f spec.Field) string {
 	if isNullable(f) {
 		jsonName += jsonOmit
 	}
+
 	return fmt.Sprintf(tagJSON, jsonName)
 }
 
@@ -798,6 +803,7 @@ func fieldTag(f spec.Field) string {
 	if len(rules) > 0 {
 		tag += fmt.Sprintf(tagValidate, strings.Join(rules, ruleSep))
 	}
+
 	return tag
 }
 
@@ -855,6 +861,7 @@ func hasFieldType(e *spec.Entity, typ string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -862,5 +869,6 @@ func entityWord(n int) string {
 	if n == 1 {
 		return "entity"
 	}
+
 	return "entities"
 }

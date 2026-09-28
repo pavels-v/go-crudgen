@@ -18,24 +18,18 @@ type migrationData struct {
 }
 
 // sqlType maps a spec field to its PostgreSQL column type. A reference resolves
-// to the target entity's primary-key type; validation guarantees the target
-// exists with a single primary key, and fieldType already rejects a target whose
-// key is itself a reference, so the same case is an error here.
+// to the target entity's primary-key type.
 func sqlType(f spec.Field, byName map[string]*spec.Entity) (string, error) {
-	t := f.Type
-	if t == spec.TypeReferences {
-		pk := byName[f.Target].PrimaryKey()[0]
-		if pk.Type == spec.TypeReferences {
-			return "", fmt.Errorf("reference to %q whose primary key %q is itself a reference (not supported)", f.Target, pk.Name)
-		}
-
-		t = pk.Type
+	t, err := storedType(f, byName)
+	if err != nil {
+		return "", err
 	}
 
 	ti, ok := scalarTypes[t]
 	if !ok {
 		return "", fmt.Errorf("no SQL type for %q", t)
 	}
+
 	return ti.sqlType, nil
 }
 
@@ -49,16 +43,18 @@ func sqlDefault(v any) (string, error) {
 		if d {
 			return "TRUE", nil
 		}
+
 		return "FALSE", nil
 	case int:
 		return strconv.Itoa(d), nil
 	case int64:
 		return strconv.FormatInt(d, 10), nil
 	case float64:
-		return strconv.FormatFloat(d, 'g', -1, 64), nil
+		return formatFloat(d), nil
 	case string:
 		return "'" + strings.ReplaceAll(d, "'", "''") + "'", nil
 	}
+
 	return "", fmt.Errorf("unsupported default value %v (%T)", v, v)
 }
 
@@ -99,6 +95,7 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 
 		state[e.Name] = done
 		order = append(order, e)
+
 		return nil
 	}
 	for i := range entities {
@@ -106,6 +103,7 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 			return nil, err
 		}
 	}
+
 	return order, nil
 }
 
@@ -115,7 +113,9 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationData, error) {
 	table := plural(e.Name, e.Plural)
 
-	var lines, indexes []string
+	lines := make([]string, 0, len(e.Fields))
+
+	var indexes []string
 	for _, f := range e.Fields {
 		st, err := sqlType(f, byName)
 		if err != nil {

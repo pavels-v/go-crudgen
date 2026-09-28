@@ -90,6 +90,7 @@ func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, err
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, blog.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("get post: %w", err)
 	}
 
@@ -152,6 +153,7 @@ func (r *PostRepository) Update(ctx context.Context, m *blog.Post) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return blog.ErrNotFound
 		}
+
 		return fmt.Errorf("update post: %w", mapWriteError(err))
 	}
 

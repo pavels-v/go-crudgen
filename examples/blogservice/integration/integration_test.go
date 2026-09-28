@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	"example.com/blogservice/internal/blog"
-	"example.com/blogservice/internal/blog/postgres"
-	"example.com/blogservice/internal/blog/restapi"
-
 	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/postgres"
+	"example.com/blogservice/internal/blog/restapi"
 )
 
 // TestIntegration drives the generated service against a real PostgreSQL instance
@@ -132,6 +132,7 @@ func TestIntegration(t *testing.T) {
 			for i, p := range list.Items {
 				out[i] = p.Title
 			}
+
 			return out
 		}
 		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, titles(""))
@@ -160,6 +161,7 @@ func TestIntegration(t *testing.T) {
 			}
 
 			require.Fail(t, "cursor walk did not end", query)
+
 			return nil
 		}
 		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, walk(""))
@@ -186,9 +188,9 @@ func TestIntegration(t *testing.T) {
 			status  int
 			wantErr error
 		}{
-			{"duplicate unique field", http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: email}, http.StatusConflict, blog.ErrAlreadyExists},
-			{"unknown reference", http.MethodPost, "/posts", restapi.CreatePostRequest{Title: "Orphan", Author: new(uuid.New())}, http.StatusUnprocessableEntity, blog.ErrReferenceNotFound},
-			{"delete referenced entity", http.MethodDelete, "/authors/" + author.ID.String(), nil, http.StatusConflict, blog.ErrStillReferenced},
+			{name: "duplicate unique field", method: http.MethodPost, path: "/authors", body: restapi.CreateAuthorRequest{Email: email}, status: http.StatusConflict, wantErr: blog.ErrAlreadyExists},
+			{name: "unknown reference", method: http.MethodPost, path: "/posts", body: restapi.CreatePostRequest{Title: "Orphan", Author: new(uuid.New())}, status: http.StatusUnprocessableEntity, wantErr: blog.ErrReferenceNotFound},
+			{name: "delete referenced entity", method: http.MethodDelete, path: "/authors/" + author.ID.String(), status: http.StatusConflict, wantErr: blog.ErrStillReferenced},
 		}
 
 		for _, tc := range cases {
@@ -299,6 +301,7 @@ func startPostgres(t *testing.T) string {
 
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err, "connection string")
+
 	return dsn
 }
 
@@ -337,12 +340,12 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 		r = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequest(method, srv.URL+path, r)
+	req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+path, r)
 	require.NoError(t, err, "new request")
 
 	resp, err := http.DefaultClient.Do(req)
-
 	require.NoErrorf(t, err, "%s %s", method, path)
+
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	if resp.StatusCode != wantStatus {

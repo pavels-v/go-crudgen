@@ -29,5 +29,6 @@ func Load(path string) (*Spec, error) {
 	if err := s.Validate(); err != nil {
 		return nil, fmt.Errorf("validate spec %s: %w", path, err)
 	}
+
 	return &s, nil
 }

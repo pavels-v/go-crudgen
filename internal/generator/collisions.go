@@ -49,6 +49,7 @@ func checkCollisions(files []genFile) error {
 			decls[dir][name] = f.Path
 		}
 	}
+
 	return nil
 }
 
@@ -75,5 +76,6 @@ func topLevelNames(f *ast.File) []string {
 			}
 		}
 	}
+
 	return names
 }

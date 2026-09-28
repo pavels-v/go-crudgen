@@ -118,10 +118,10 @@ func TestValidate_Errors(t *testing.T) {
 				{Name: "b", Type: TypeUUID, Primary: true},
 			}
 		}},
-		{"decimal primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "decimal" }},
-		{"bool primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "bool" }},
-		{"datetime primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "datetime" }},
-		{"json primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = "json" }},
+		{"decimal primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = TypeDecimal }},
+		{"bool primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = TypeBool }},
+		{"datetime primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = TypeDatetime }},
+		{"json primary key", func(s *Spec) { s.Entities[0].Fields[0].Type = TypeJSON }},
 		{"primary key with default", func(s *Spec) { s.Entities[0].Fields[0].Default = "x" }},
 		{"string default on int", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "n", Type: TypeInt32, Default: "1"})
@@ -147,7 +147,7 @@ func TestValidate_Errors(t *testing.T) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "score", Type: TypeFloat, Filter: true})
 		}},
 		{"filter named like a paging parameter", func(s *Spec) {
-			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "limit", Type: TypeInt32, Filter: true})
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: queryLimit, Type: TypeInt32, Filter: true})
 		}},
 		{"filter named like the direction parameter", func(s *Spec) {
 			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: queryDir, Type: TypeString, Filter: true})
