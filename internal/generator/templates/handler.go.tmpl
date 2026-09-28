@@ -2,7 +2,7 @@ package {{ .Package }}
 
 import (
 {{- range .Imports }}
-	{{ if . }}{{ printf "%q" . }}{{ end }}
+	{{ . }}
 {{- end }}
 )
 
@@ -11,6 +11,15 @@ import (
 const (
 {{- range .Filters }}
 	{{ .Const }} = {{ printf "%q" .Name }}
+{{- end }}
+)
+{{- end }}
+
+{{- if .Defaults }}
+
+const (
+{{- range .Defaults }}
+	{{ .Name }} = {{ .Value }}
 {{- end }}
 )
 {{- end }}
@@ -59,13 +68,15 @@ func Register{{ .Struct }}Routes(mux *http.ServeMux, h *{{ .Struct }}Handler) {
 func (h *{{ .Struct }}Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req {{ .CreateName }}
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+		writeDecodeError(w, r, err)
 		return
 	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := {{ .Model }}{
 {{- range .CreateAssign }}
 		{{ .Field }}: {{ .Expr }},
@@ -75,17 +86,23 @@ func (h *{{ .Struct }}Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusCreated, m)
+
+	writeBody(w, r, http.StatusCreated, m)
 }
 
 func (h *{{ .Struct }}Handler) Get(w http.ResponseWriter, r *http.Request) {
-	{{ template "parseID" . }}
+	id, ok := pathID(w, r, {{ .PK.Parse }})
+	if !ok {
+		return
+	}
+
 	m, err := h.repo.Get(r.Context(), id)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -102,25 +119,31 @@ func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
 {{- end }}
 	}
 {{- if .Cursor }}
+
 	if c := queryCursorValue[{{ .Cursor }}](q); c != nil {
 		if c.Dir != p.Dir {
 			q.invalid(queryCursor)
 		}
+
 		p.After = &c.After
 	}
 {{- end }}
+
 	if q.details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
+		writeError(w, r, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details...)
 		return
 	}
+
 	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	items, more := trimPage(items, limit)
 {{- if .Cursor }}
 	page := cursorPage[{{ .Model }}]{Items: items}
+
 	if more {
 		last := items[len(items)-1]
 		c := {{ .Cursor }}{
@@ -131,28 +154,36 @@ func (h *{{ .Struct }}Handler) List(w http.ResponseWriter, r *http.Request) {
 {{- end }}
 			},
 		}
+
 		if page.NextCursor, err = encodeCursor(c); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 	}
-	writeBody(w, http.StatusOK, page)
+
+	writeBody(w, r, http.StatusOK, page)
 {{- else }}
-	writeBody(w, http.StatusOK, offsetPage[{{ .Model }}]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+	writeBody(w, r, http.StatusOK, offsetPage[{{ .Model }}]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 {{- end }}
 }
 
 func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
-	{{ template "parseID" . }}
-	var req {{ .UpdateName }}
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+	id, ok := pathID(w, r, {{ .PK.Parse }})
+	if !ok {
 		return
 	}
+
+	var req {{ .UpdateName }}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, r, err)
+		return
+	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := {{ .Model }}{
 		{{ .PK.GoName }}: id,
 {{- range .UpdateAssign }}
@@ -163,27 +194,20 @@ func (h *{{ .Struct }}Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *{{ .Struct }}Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	{{ template "parseID" . }}
+	id, ok := pathID(w, r, {{ .PK.Parse }})
+	if !ok {
+		return
+	}
+
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
-
-{{- define "parseID" -}}
-{{ if not .PK.NeedsErr }}id := {{ .PK.Expr }}{{ else if .PK.Cast }}idRaw, err := {{ .PK.Expr }}
-	if err != nil {
-		writeInvalidID(w)
-		return
-	}
-	id := {{ .PK.Cast }}(idRaw){{ else }}id, err := {{ .PK.Expr }}
-	if err != nil {
-		writeInvalidID(w)
-		return
-	}{{ end }}
-{{- end -}}

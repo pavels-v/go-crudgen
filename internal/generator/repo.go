@@ -7,32 +7,6 @@ import (
 	"go-crudgen/internal/spec"
 )
 
-// dbData is the template input for postgres/db.gen.go.
-type dbData struct {
-	Package      string
-	Imports      []string
-	Domain       string
-	DriverName   string // database/sql driver name, e.g. "pgx" or "postgres"
-	DriverImport string // blank-imported driver package
-}
-
-func dbInfo(s *spec.Spec, driverName, driverImp string) dbData {
-	return dbData{
-		Package: pkgPostgres,
-		Imports: groupImports(map[string]struct{}{
-			importErrors: {},
-			importFmt:    {},
-			importTime:   {},
-			importSQLx:   {},
-			driverImp:    {},
-			s.Module:     {},
-		}, s.Module),
-		Domain:       s.Package,
-		DriverName:   driverName,
-		DriverImport: driverImp,
-	}
-}
-
 const (
 	DriverPgx = "pgx"
 	DriverPq  = "pq"
@@ -67,19 +41,6 @@ const (
 	importBase64      = "encoding/base64"
 )
 
-// driverInfo maps a --driver choice to its database/sql driver name and the
-// package that must be blank-imported to register it. An empty choice defaults
-// to pgx. ok is false for unsupported drivers.
-func driverInfo(driver string) (name, imp string, ok bool) {
-	switch driver {
-	case "", DriverPgx:
-		return sqlDriverPgx, importDriverPgx, true
-	case DriverPq:
-		return sqlDriverPq, importDriverPq, true
-	}
-	return "", "", false
-}
-
 const (
 	tagDB       = "db:%q"
 	tagJSON     = "json:%q"
@@ -103,13 +64,53 @@ const (
 	exprModelField = "m.%s"
 	exprRowField   = "row.%s"
 	exprScanTarget = "&m.%s"
-	argSep         = ", "
+	listSep        = ", "
 )
 
 const (
 	nameRow    = "%sRow"
 	nameNewRow = "new%sRow"
 )
+
+// dbData is the template input for postgres/db.gen.go.
+type dbData struct {
+	Package      string
+	Imports      []string
+	Domain       string
+	DriverName   string // database/sql driver name, e.g. "pgx" or "postgres"
+	DriverImport string // blank-imported driver package
+}
+
+func dbInfo(s *spec.Spec, driverName, driverImp string) dbData {
+	return dbData{
+		Package: pkgPostgres,
+		Imports: groupImports(map[string]struct{}{
+			importErrors: {},
+			importFmt:    {},
+			importTime:   {},
+			importSQLx:   {},
+			driverImp:    {},
+			s.Module:     {},
+		}, s.Module, s.Package),
+		Domain:       s.Package,
+		DriverName:   driverName,
+		DriverImport: driverImp,
+	}
+}
+
+// driverInfo maps a --driver choice to its database/sql driver name and the
+// package that must be blank-imported to register it. An empty choice defaults
+// to pgx. ok is false for unsupported drivers.
+func driverInfo(driver string) (name, imp string, ok bool) {
+	switch driver {
+	case "", DriverPgx:
+		return sqlDriverPgx, importDriverPgx, true
+	case DriverPq:
+		return sqlDriverPq, importDriverPq, true
+	}
+
+	return "", "", false
+}
 
 // scanList renders the scan-target list for a set of columns, e.g. ["created_at"]
 // -> "&m.CreatedAt". It shares the column list with the SQL builder so a
@@ -119,7 +120,8 @@ func scanList(cols []string) string {
 	for i, c := range cols {
 		out[i] = fmt.Sprintf(exprScanTarget, pascalCase(c))
 	}
-	return strings.Join(out, argSep)
+
+	return strings.Join(out, listSep)
 }
 
 // repoData is the template input for one entity's PostgreSQL repository file.
@@ -185,10 +187,11 @@ type assign struct {
 
 // repoInfo builds the repository template data for an entity.
 func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (repoData, error) {
-	pk, gt, _, err := serveKey(e, byName)
+	pk, gt, err := serveKey(e, byName)
 	if err != nil {
 		return repoData{}, err
 	}
+
 	filters, err := listFilters(e, byName)
 	if err != nil {
 		return repoData{}, err
@@ -213,12 +216,16 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		GoName   string
 		Generate string
 	}
-	var specCols, update []col
-	var rowFields []rowField
-	var toRow, toModel []assign
-	hasNullable := false
+	specCols := make([]col, 0, len(e.Fields))
+	rowFields := make([]rowField, 0, len(e.Fields))
+	toRow := make([]assign, 0, len(e.Fields))
+	toModel := make([]assign, 0, len(e.Fields))
+	var update []col
+	var hasNullable bool
+
 	for _, f := range e.Fields {
 		c := col{Column: snakeCase(f.Name), GoName: pascalCase(f.Name), Generate: f.Generate}
+
 		specCols = append(specCols, c) // the primary key is supplied by the caller
 		if !f.Primary && f.Generate == "" {
 			update = append(update, c)
@@ -228,12 +235,15 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		if err != nil {
 			return repoData{}, err
 		}
+
 		ft = ft.outside(s)
 		if ft.imp != "" {
 			impSet[ft.imp] = struct{}{}
 		}
+
 		rowType := ft.expr
 		toRowExpr := fmt.Sprintf(exprModelField, c.GoName)
+
 		toModelExpr := fmt.Sprintf(exprRowField, c.GoName)
 		if isNullable(f) {
 			rowType = fmt.Sprintf(exprNull, ft.expr)
@@ -241,15 +251,18 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 			toModelExpr = fmt.Sprintf(exprFromNull, toModelExpr)
 			hasNullable = true
 		}
+
 		rowFields = append(rowFields, rowField{GoName: c.GoName, GoType: rowType, Tag: fmt.Sprintf(tagDB, c.Column)})
 		if f.Generate == "" {
 			toRow = append(toRow, assign{Field: c.GoName, Expr: toRowExpr})
 		}
+
 		toModel = append(toModel, assign{Field: c.GoName, Expr: toModelExpr})
 	}
 
 	selectCols := make([]string, 0, len(specCols))
 	var generated []string
+
 	for _, c := range specCols {
 		selectCols = append(selectCols, c.Column)
 		if c.Generate != "" {
@@ -266,6 +279,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	insPh := make([]string, 0, len(specCols))
 	insArgs := make([]string, 0, len(specCols))
 	var ret []string
+
 	for _, c := range specCols {
 		switch {
 		case pkInDB && c.Column == pkCol:
@@ -277,49 +291,58 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 			ret = append(ret, c.Column)
 			continue
 		}
+
 		insCols = append(insCols, c.Column)
 		insPh = append(insPh, fmt.Sprintf("$%d", len(insArgs)+1))
 		insArgs = append(insArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
+
 	createSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		table, strings.Join(insCols, ", "), strings.Join(insPh, ", "))
+		table, strings.Join(insCols, listSep), strings.Join(insPh, listSep))
+
 	var createScan string
 	if len(ret) > 0 {
-		createSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, ", "))
+		createSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, listSep))
 		createScan = scanList(ret)
 	}
 
 	getSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1",
-		strings.Join(selectCols, ", "), table, pkCol)
+		strings.Join(selectCols, listSep), table, pkCol)
 
 	var listFilterData []repoFilter
 	for _, lf := range filters {
 		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, snakeCase(lf.Field.Name))})
 	}
+
 	listDynamic := len(listFilterData) > 0 || e.CursorPagination()
 	if listDynamic {
 		impSet[importStrings] = struct{}{}
 	}
+
 	listOrd := listOrder(e)
-	listSQL := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, ", "), table)
+	listSQL := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectCols, listSep), table)
 
 	// UPDATE: non-PK fields get placeholders $1..$n, the PK gets $n+1; on_write
 	// columns are reset to now(), and every generated column is returned so the
 	// response carries the stored values.
 	setClauses := make([]string, 0, len(update)+len(generated))
 	updArgs := make([]string, 0, len(update)+1)
+
 	for i, c := range update {
 		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.Column, i+1))
 		updArgs = append(updArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
+
 	for _, c := range specCols {
 		if c.Generate == spec.GenerateOnWrite {
 			setClauses = append(setClauses, fmt.Sprintf(exprSetNow, c.Column))
 		}
 	}
+
 	updArgs = append(updArgs, fmt.Sprintf(exprRowField, pkGoName))
 
 	var updateSQL, updateScan string
+
 	noUpdateColumns := len(setClauses) == 0 && len(generated) == 0
 	switch {
 	case noUpdateColumns:
@@ -330,13 +353,13 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	case len(setClauses) == 0:
 		// Only on_create columns besides the key: nothing to write, but the
 		// response still needs their stored values.
-		updateSQL = fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", strings.Join(generated, ", "), table, pkCol)
+		updateSQL = fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", strings.Join(generated, listSep), table, pkCol)
 		updateScan = scanList(generated)
 	default:
 		updateSQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d",
-			table, strings.Join(setClauses, ", "), pkCol, len(update)+1)
+			table, strings.Join(setClauses, listSep), pkCol, len(update)+1)
 		if len(generated) > 0 {
-			updateSQL += fmt.Sprintf(clauseReturning, strings.Join(generated, ", "))
+			updateSQL += fmt.Sprintf(clauseReturning, strings.Join(generated, listSep))
 			updateScan = scanList(generated)
 		}
 	}
@@ -346,7 +369,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed
 	// context/database/sql/errors/fmt/sqlx packages.
-	imports := groupImports(impSet, s.Module)
+	imports := groupImports(impSet, s.Module, s.Package)
 
 	return repoData{
 		Package:         pkgPostgres,
@@ -377,8 +400,8 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		Cursor:          e.CursorPagination(),
 		UpdateSQL:       updateSQL,
 		DeleteSQL:       deleteSQL,
-		InsertArgs:      strings.Join(insArgs, argSep),
-		UpdateArgs:      strings.Join(updArgs, argSep),
+		InsertArgs:      strings.Join(insArgs, listSep),
+		UpdateArgs:      strings.Join(updArgs, listSep),
 		CreateScan:      createScan,
 		UpdateScan:      updateScan,
 		Imports:         imports,

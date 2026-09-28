@@ -2,6 +2,17 @@ package generator
 
 import "strings"
 
+const (
+	suffixS   = "s"
+	suffixX   = "x"
+	suffixZ   = "z"
+	suffixCH  = "ch"
+	suffixSH  = "sh"
+	suffixY   = "y"
+	suffixES  = "es"
+	suffixIES = "ies"
+)
+
 // initialisms get fully upper-cased in Go identifiers for idiomatic output.
 var initialisms = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	"id":   {},
@@ -29,9 +40,11 @@ func pascalCase(s string) string {
 			b.WriteString(strings.ToUpper(w))
 			continue
 		}
+
 		b.WriteString(strings.ToUpper(w[:1]))
 		b.WriteString(w[1:])
 	}
+
 	return b.String()
 }
 
@@ -41,6 +54,7 @@ func unexport(s string) string {
 	if s == "" {
 		return s
 	}
+
 	return strings.ToLower(s[:1]) + s[1:]
 }
 
@@ -50,6 +64,7 @@ func plural(name, override string) string {
 	if strings.TrimSpace(override) != "" {
 		return override
 	}
+
 	return pluralize(snakeCase(name))
 }
 
@@ -57,13 +72,13 @@ func plural(name, override string) string {
 // out of scope; the spec's `plural` override is the escape hatch.
 func pluralize(s string) string {
 	switch {
-	case strings.HasSuffix(s, "s"), strings.HasSuffix(s, "x"), strings.HasSuffix(s, "z"),
-		strings.HasSuffix(s, "ch"), strings.HasSuffix(s, "sh"):
-		return s + "es"
-	case strings.HasSuffix(s, "y") && len(s) >= 2 && !isVowel(s[len(s)-2]):
-		return s[:len(s)-1] + "ies"
+	case strings.HasSuffix(s, suffixS), strings.HasSuffix(s, suffixX), strings.HasSuffix(s, suffixZ),
+		strings.HasSuffix(s, suffixCH), strings.HasSuffix(s, suffixSH):
+		return s + suffixES
+	case strings.HasSuffix(s, suffixY) && len(s) >= 2 && !isVowel(s[len(s)-2]):
+		return s[:len(s)-1] + suffixIES
 	default:
-		return s + "s"
+		return s + suffixS
 	}
 }
 
@@ -72,29 +87,37 @@ func isVowel(b byte) bool {
 	case 'a', 'e', 'i', 'o', 'u':
 		return true
 	}
+
 	return false
 }
 
 // snakeCase lower-cases and joins an identifier's words with underscores; used
 // for generated file names (e.g. "BlogPost" -> "blog_post").
 func snakeCase(s string) string {
-	var b strings.Builder
-	prevLower := false
+	var (
+		b         strings.Builder
+		prevLower bool
+	)
+
 	for i, r := range s {
 		switch {
 		case r == '_' || r == '-' || r == ' ':
 			b.WriteByte('_')
+
 			prevLower = false
 		case r >= 'A' && r <= 'Z':
 			if i > 0 && prevLower {
 				b.WriteByte('_')
 			}
+
 			b.WriteRune(r - 'A' + 'a')
+
 			prevLower = false
 		default:
 			b.WriteRune(r)
 			prevLower = r >= 'a' && r <= 'z'
 		}
 	}
+
 	return b.String()
 }

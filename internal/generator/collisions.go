@@ -18,31 +18,38 @@ func checkCollisions(files []genFile) error {
 	fset := token.NewFileSet()
 	paths := make(map[string]string, len(files))
 	decls := make(map[string]map[string]string)
+
 	for _, f := range files {
 		key := strings.ToLower(f.Path)
 		if prev, ok := paths[key]; ok {
 			return fmt.Errorf("generated files %s and %s share one path", prev, f.Path)
 		}
+
 		paths[key] = f.Path
 
 		if !strings.HasSuffix(f.Path, extGo) {
 			continue
 		}
+
 		file, err := parser.ParseFile(fset, f.Path, f.Src, parser.SkipObjectResolution)
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", f.Path, err)
 		}
+
 		dir := path.Dir(f.Path)
 		if decls[dir] == nil {
 			decls[dir] = make(map[string]string)
 		}
+
 		for _, name := range topLevelNames(file) {
 			if prev, ok := decls[dir][name]; ok {
 				return fmt.Errorf("%s is declared in both %s and %s", name, prev, f.Path)
 			}
+
 			decls[dir][name] = f.Path
 		}
 	}
+
 	return nil
 }
 
@@ -69,5 +76,6 @@ func topLevelNames(f *ast.File) []string {
 			}
 		}
 	}
+
 	return names
 }

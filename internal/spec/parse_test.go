@@ -67,6 +67,7 @@ entities:
 				require.Error(t, err)
 				return
 			}
+
 			require.NoError(t, err)
 		})
 	}

@@ -76,9 +76,11 @@ var _ blog.PostRepository = (*PostRepository)(nil)
 func (r *PostRepository) Create(ctx context.Context, m *blog.Post) error {
 	m.ID = uuid.New()
 	row := newPostRow(m)
+
 	if err := r.db.QueryRowContext(ctx, `INSERT INTO posts (id, title, body, published, views, metadata, author, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now()) RETURNING created_at, updated_at`, row.ID, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		return fmt.Errorf("create post: %w", mapWriteError(err))
 	}
+
 	return nil
 }
 
@@ -88,9 +90,12 @@ func (r *PostRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Post, err
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, blog.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("get post: %w", err)
 	}
+
 	m := row.toModel()
+
 	return &m, nil
 }
 
@@ -104,14 +109,17 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 		where []string
 		args  []any
 	)
+
 	if p.Published != nil {
 		where = append(where, `published = ?`)
 		args = append(args, *p.Published)
 	}
+
 	if p.Author != nil {
 		where = append(where, `author = ?`)
 		args = append(args, *p.Author)
 	}
+
 	if p.After != nil {
 		where = append(where, after)
 		args = append(args, p.After.CreatedAt, p.After.ID)
@@ -121,28 +129,34 @@ func (r *PostRepository) List(ctx context.Context, p blog.PostListParams) ([]blo
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	q += ` ORDER BY ` + order + ` LIMIT ?`
+
 	args = append(args, p.Limit)
+	q += ` ORDER BY ` + order + ` LIMIT ?`
 
 	var rows []postRow
 	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 		return nil, fmt.Errorf("list post: %w", err)
 	}
+
 	out := make([]blog.Post, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
+
 	return out, nil
 }
 
 func (r *PostRepository) Update(ctx context.Context, m *blog.Post) error {
 	row := newPostRow(m)
+
 	if err := r.db.QueryRowContext(ctx, `UPDATE posts SET title = $1, body = $2, published = $3, views = $4, metadata = $5, author = $6, updated_at = now() WHERE id = $7 RETURNING created_at, updated_at`, row.Title, row.Body, row.Published, row.Views, row.Metadata, row.Author, row.ID).Scan(&m.CreatedAt, &m.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return blog.ErrNotFound
 		}
+
 		return fmt.Errorf("update post: %w", mapWriteError(err))
 	}
+
 	return nil
 }
 
@@ -151,12 +165,15 @@ func (r *PostRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("delete post: %w", mapDeleteError(err))
 	}
+
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("delete post: %w", err)
 	}
+
 	if n == 0 {
 		return blog.ErrNotFound
 	}
+
 	return nil
 }

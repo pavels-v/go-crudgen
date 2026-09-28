@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// KnownTypes is the set of field types the generator understands.
-var KnownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+// knownTypes is the set of field types the generator understands.
+var knownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	TypeString:     {},
 	TypeText:       {},
 	TypeInt32:      {},
@@ -22,13 +22,13 @@ var KnownTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only loo
 	TypeReferences: {},
 }
 
-// PrimaryKeyTypes is the set of field types allowed for a primary key: those the
+// primaryKeyTypes is the set of field types allowed for a primary key: those the
 // generator can parse from a URL path segment to address a single row via /{id}.
 // The remaining numeric and structural types (decimal, float, bool, date,
 // datetime, json) have no path parser and are rejected. (references is allowed:
 // it resolves to the target's primary key, which this same rule guarantees is
 // path-addressable.)
-var PrimaryKeyTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
+var primaryKeyTypes = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table
 	TypeString:     {},
 	TypeText:       {},
 	TypeInt32:      {},
@@ -66,9 +66,11 @@ func (s *Spec) Validate() error {
 	if strings.TrimSpace(s.Package) == "" {
 		return errors.New("missing package name")
 	}
+
 	if strings.TrimSpace(s.Module) == "" {
 		return errors.New("missing module import path")
 	}
+
 	if len(s.Entities) == 0 {
 		return errors.New("no entities defined")
 	}
@@ -79,49 +81,62 @@ func (s *Spec) Validate() error {
 		if e.Name == "" {
 			return fmt.Errorf("entity #%d has no name", i+1)
 		}
+
 		if seen[e.Name] {
 			return fmt.Errorf("duplicate entity %q", e.Name)
 		}
+
 		seen[e.Name] = true
 
 		if len(e.Fields) == 0 {
 			return fmt.Errorf("entity %q has no fields", e.Name)
 		}
+
 		if e.Pagination != "" && e.Pagination != PaginationOffset && e.Pagination != PaginationCursor {
 			return fmt.Errorf("entity %q has unknown pagination %q: use %q or %q", e.Name, e.Pagination, PaginationOffset, PaginationCursor)
 		}
+
 		for _, f := range e.Fields {
 			if f.Name == "" {
 				return fmt.Errorf("entity %q has a field with no name", e.Name)
 			}
-			if _, ok := KnownTypes[f.Type]; !ok {
+
+			if _, ok := knownTypes[f.Type]; !ok {
 				return fmt.Errorf("entity %q field %q has unknown type %q", e.Name, f.Name, f.Type)
 			}
+
 			if f.Type == TypeReferences && f.Target == "" {
 				return fmt.Errorf("entity %q field %q is a reference but has no target", e.Name, f.Name)
 			}
+
 			if f.OnDelete != "" && f.Type != TypeReferences {
 				return fmt.Errorf("entity %q field %q has on_delete but is not a reference", e.Name, f.Name)
 			}
+
 			if f.OnDelete != "" && f.OnDelete != OnDeleteCascade {
 				return fmt.Errorf("entity %q field %q has unknown on_delete %q: use %q", e.Name, f.Name, f.OnDelete, OnDeleteCascade)
 			}
+
 			if err := validateListModifiers(e, f); err != nil {
 				return err
 			}
+
 			if err := validateGenerate(e, f); err != nil {
 				return err
 			}
+
 			if f.Default != nil && f.Primary {
 				return fmt.Errorf("entity %q primary key %q cannot have a default", e.Name, f.Name)
 			}
+
 			if f.Default != nil && !defaultFits(f.Type, f.Default) {
 				return fmt.Errorf("entity %q field %q has default %v that does not fit type %q", e.Name, f.Name, f.Default, f.Type)
 			}
 		}
+
 		switch pk := e.PrimaryKey(); len(pk) {
 		case 1:
-			if _, ok := PrimaryKeyTypes[pk[0].Type]; !ok {
+			if _, ok := primaryKeyTypes[pk[0].Type]; !ok {
 				return fmt.Errorf("entity %q primary key %q has type %q, which cannot address a row via /{id}: use one of string, text, int32, int64, or uuid", e.Name, pk[0].Name, pk[0].Type)
 			}
 		case 0:
@@ -129,6 +144,7 @@ func (s *Spec) Validate() error {
 		default:
 			return fmt.Errorf("entity %q has a composite primary key, which is not supported: mark exactly one field with primary: true", e.Name)
 		}
+
 		if err := validateOrder(e); err != nil {
 			return err
 		}
@@ -141,17 +157,20 @@ func (s *Spec) Validate() error {
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
+
 	for i := range s.Entities {
 		e := &s.Entities[i]
 		for _, f := range e.Fields {
 			if f.Type != TypeReferences {
 				continue
 			}
+
 			if _, ok := byName[f.Target]; !ok {
 				return fmt.Errorf("entity %q field %q references unknown entity %q", e.Name, f.Name, f.Target)
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -160,13 +179,16 @@ func validateListModifiers(e *Entity, f Field) error {
 		if f.Primary {
 			return fmt.Errorf("entity %q primary key %q cannot be a filter: use GET /{id}", e.Name, f.Name)
 		}
+
 		if _, ok := unfilterableTypes[f.Type]; ok {
 			return fmt.Errorf("entity %q field %q of type %q cannot be a filter", e.Name, f.Name, f.Type)
 		}
+
 		if _, ok := reservedQueryNames[f.Name]; ok {
 			return fmt.Errorf("entity %q field %q cannot be a filter: the name is a reserved query parameter", e.Name, f.Name)
 		}
 	}
+
 	return nil
 }
 
@@ -180,6 +202,7 @@ func validateOrder(e *Entity) error {
 	case !f.Primary && !f.Required && f.Default == nil && f.Generate == "":
 		return fmt.Errorf("entity %q cannot order by field %q, which can be NULL: make it required or give it a default", e.Name, f.Name)
 	}
+
 	return nil
 }
 
@@ -199,6 +222,7 @@ func validateGenerate(e *Entity, f Field) error {
 	case f.Primary, f.Required, f.Default != nil, f.Validate != "":
 		return fmt.Errorf("entity %q field %q has generate, which excludes primary, required, default and validate", e.Name, f.Name)
 	}
+
 	return nil
 }
 
@@ -213,5 +237,6 @@ func defaultFits(fieldType string, v any) bool {
 	case bool:
 		return fieldType == TypeBool
 	}
+
 	return false
 }

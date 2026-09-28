@@ -2,7 +2,6 @@ package restapi
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +11,10 @@ import (
 
 const (
 	queryCommentPost = "post"
+)
+
+const (
+	defaultCommentLikes = 0
 )
 
 // CreateCommentRequest is the request body for creating the comment entity.
@@ -52,38 +55,42 @@ func RegisterCommentRoutes(mux *http.ServeMux, h *CommentHandler) {
 func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateCommentRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+		writeDecodeError(w, r, err)
 		return
 	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := blog.Comment{
 		Post:     *req.Post,
 		Body:     req.Body,
-		Likes:    valueOr(req.Likes, 0),
+		Likes:    valueOr(req.Likes, defaultCommentLikes),
 		PostedAt: valueOr(req.PostedAt, time.Now()),
 	}
 	if err := h.repo.Create(r.Context(), &m); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusCreated, m)
+
+	writeBody(w, r, http.StatusCreated, m)
 }
 
 func (h *CommentHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue(pathParamID), 10, 64)
-	if err != nil {
-		writeInvalidID(w)
+	id, ok := pathID(w, r, parseInt64)
+	if !ok {
 		return
 	}
+
 	m, err := h.repo.Get(r.Context(), id)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -95,57 +102,64 @@ func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
 		Limit:  limit + 1,
 		Offset: q.offset(),
 	}
+
 	if q.details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
+		writeError(w, r, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details...)
 		return
 	}
+
 	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	items, more := trimPage(items, limit)
-	writeBody(w, http.StatusOK, offsetPage[blog.Comment]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+	writeBody(w, r, http.StatusOK, offsetPage[blog.Comment]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *CommentHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue(pathParamID), 10, 64)
-	if err != nil {
-		writeInvalidID(w)
+	id, ok := pathID(w, r, parseInt64)
+	if !ok {
 		return
 	}
+
 	var req UpdateCommentRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+		writeDecodeError(w, r, err)
 		return
 	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := blog.Comment{
 		ID:       id,
 		Post:     *req.Post,
 		Body:     req.Body,
-		Likes:    valueOr(req.Likes, 0),
+		Likes:    valueOr(req.Likes, defaultCommentLikes),
 		PostedAt: valueOr(req.PostedAt, time.Now()),
 	}
 	if err := h.repo.Update(r.Context(), &m); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *CommentHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue(pathParamID), 10, 64)
-	if err != nil {
-		writeInvalidID(w)
+	id, ok := pathID(w, r, parseInt64)
+	if !ok {
 		return
 	}
+
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

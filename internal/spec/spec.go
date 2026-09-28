@@ -70,11 +70,13 @@ func (e *Entity) OrderField() (Field, bool) {
 	if e.Order == "" {
 		return e.PrimaryKey()[0], true
 	}
+
 	for _, f := range e.Fields {
 		if f.Name == e.Order {
 			return f, true
 		}
 	}
+
 	return Field{}, false
 }
 
@@ -88,5 +90,6 @@ func (e *Entity) PrimaryKey() []Field {
 			pk = append(pk, f)
 		}
 	}
+
 	return pk
 }

@@ -29,11 +29,13 @@ const (
 func NewDB(dsn string) (*sqlx.DB, error) {
 	db, err := sqlx.Open(driverName, dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open db: %w", err)
 	}
+
 	db.SetMaxOpenConns(maxOpenConns)
 	db.SetMaxIdleConns(maxIdleConns)
 	db.SetConnMaxLifetime(connMaxLifetime)
+
 	return db, nil
 }
 
@@ -51,6 +53,7 @@ func sqlState(err error) string {
 	if errors.As(err, &se) {
 		return se.SQLState()
 	}
+
 	return ""
 }
 
@@ -61,6 +64,7 @@ func mapWriteError(err error) error {
 	case sqlStateForeignKeyViolation:
 		return fmt.Errorf("%w: %v", blog.ErrReferenceNotFound, err)
 	}
+
 	return err
 }
 
@@ -68,5 +72,6 @@ func mapDeleteError(err error) error {
 	if sqlState(err) == sqlStateForeignKeyViolation {
 		return fmt.Errorf("%w: %v", blog.ErrStillReferenced, err)
 	}
+
 	return err
 }

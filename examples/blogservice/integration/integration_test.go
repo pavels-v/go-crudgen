@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	"example.com/blogservice/internal/blog"
-	"example.com/blogservice/internal/blog/postgres"
-	"example.com/blogservice/internal/blog/restapi"
-
 	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"example.com/blogservice/internal/blog"
+	"example.com/blogservice/internal/blog/postgres"
+	"example.com/blogservice/internal/blog/restapi"
 )
 
 // TestIntegration drives the generated service against a real PostgreSQL instance
@@ -115,6 +115,7 @@ func TestIntegration(t *testing.T) {
 	t.Run("list filters, orders and pages in SQL", func(t *testing.T) {
 		var author blog.Author
 		do(t, srv, http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: "ordered@example.com"}, &author, http.StatusCreated)
+
 		for _, req := range []restapi.CreatePostRequest{
 			{Title: "Beta", Author: &author.ID, Views: new(int64(2))},
 			{Title: "Alpha", Author: &author.ID, Views: new(int64(3)), Published: new(true)},
@@ -126,10 +127,12 @@ func TestIntegration(t *testing.T) {
 		titles := func(query string) []string {
 			var list cursorPage[blog.Post]
 			do(t, srv, http.MethodGet, "/posts?author="+author.ID.String()+query, nil, &list, http.StatusOK)
+
 			out := make([]string, len(list.Items))
 			for i, p := range list.Items {
 				out[i] = p.Title
 			}
+
 			return out
 		}
 		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, titles(""))
@@ -140,19 +143,25 @@ func TestIntegration(t *testing.T) {
 		walk := func(query string) []string {
 			var out []string
 			path := "/posts?author=" + author.ID.String() + "&limit=1" + query
+
 			next := path
 			for range 10 {
 				var list cursorPage[blog.Post]
 				do(t, srv, http.MethodGet, next, nil, &list, http.StatusOK)
+
 				for _, p := range list.Items {
 					out = append(out, p.Title)
 				}
+
 				if list.NextCursor == "" {
 					return out
 				}
+
 				next = path + "&cursor=" + list.NextCursor
 			}
+
 			require.Fail(t, "cursor walk did not end", query)
+
 			return nil
 		}
 		require.Equal(t, []string{"Beta", "Alpha", "Gamma"}, walk(""))
@@ -179,9 +188,9 @@ func TestIntegration(t *testing.T) {
 			status  int
 			wantErr error
 		}{
-			{"duplicate unique field", http.MethodPost, "/authors", restapi.CreateAuthorRequest{Email: email}, http.StatusConflict, blog.ErrAlreadyExists},
-			{"unknown reference", http.MethodPost, "/posts", restapi.CreatePostRequest{Title: "Orphan", Author: new(uuid.New())}, http.StatusUnprocessableEntity, blog.ErrReferenceNotFound},
-			{"delete referenced entity", http.MethodDelete, "/authors/" + author.ID.String(), nil, http.StatusConflict, blog.ErrStillReferenced},
+			{name: "duplicate unique field", method: http.MethodPost, path: "/authors", body: restapi.CreateAuthorRequest{Email: email}, status: http.StatusConflict, wantErr: blog.ErrAlreadyExists},
+			{name: "unknown reference", method: http.MethodPost, path: "/posts", body: restapi.CreatePostRequest{Title: "Orphan", Author: new(uuid.New())}, status: http.StatusUnprocessableEntity, wantErr: blog.ErrReferenceNotFound},
+			{name: "delete referenced entity", method: http.MethodDelete, path: "/authors/" + author.ID.String(), status: http.StatusConflict, wantErr: blog.ErrStillReferenced},
 		}
 
 		for _, tc := range cases {
@@ -274,6 +283,7 @@ func TestIntegration(t *testing.T) {
 // it, registering termination as test cleanup.
 func startPostgres(t *testing.T) string {
 	t.Helper()
+
 	ctx := context.Background()
 
 	ctr, err := tcpostgres.Run(ctx, "postgres:16-alpine",
@@ -291,6 +301,7 @@ func startPostgres(t *testing.T) string {
 
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err, "connection string")
+
 	return dsn
 }
 
@@ -320,17 +331,21 @@ type apiError struct {
 // out when out is non-nil: its body on success, its error otherwise.
 func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, wantStatus int) {
 	t.Helper()
+
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		require.NoError(t, err, "marshal body")
+
 		r = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, srv.URL+path, r)
+
+	req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+path, r)
 	require.NoError(t, err, "new request")
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoErrorf(t, err, "%s %s", method, path)
+
 	defer func() { require.NoError(t, resp.Body.Close()) }()
 
 	if resp.StatusCode != wantStatus {
@@ -338,14 +353,17 @@ func do(t *testing.T, srv *httptest.Server, method, path string, body, out any, 
 		require.Failf(t, "unexpected status",
 			"%s %s: status = %d, want %d (body: %s)", method, path, resp.StatusCode, wantStatus, b)
 	}
+
 	if out == nil {
 		return
 	}
 	var env envelope
 	require.NoError(t, json.UnmarshalRead(resp.Body, &env), "decode response")
+
 	payload := env.Body
 	if wantStatus >= http.StatusBadRequest {
 		payload = env.Error
 	}
+
 	require.NoError(t, json.Unmarshal(payload, out), "decode payload")
 }

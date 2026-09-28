@@ -20,6 +20,7 @@ func Load(path string) (*Spec, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var s Spec
+
 	err = dec.Decode(&s)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse spec %s: %w", path, err)
@@ -28,5 +29,6 @@ func Load(path string) (*Spec, error) {
 	if err := s.Validate(); err != nil {
 		return nil, fmt.Errorf("validate spec %s: %w", path, err)
 	}
+
 	return &s, nil
 }

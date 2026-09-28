@@ -22,6 +22,12 @@ Run "go-crudgen <command> -h" for command-specific flags.
 `
 
 const (
+	exitOK    = 0
+	exitError = 1
+	exitUsage = 2
+)
+
+const (
 	cmdGenerate     = "generate"
 	cmdVersion      = "version"
 	cmdVersionLong  = "--version"
@@ -35,7 +41,7 @@ const (
 func Run(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
-		return 2
+		return exitUsage
 	}
 
 	cmd, rest := args[0], args[1:]
@@ -44,12 +50,12 @@ func Run(args []string) int {
 		return runGenerate(rest)
 	case cmdVersion, cmdVersionLong, cmdVersionShort:
 		fmt.Println("go-crudgen", version)
-		return 0
+		return exitOK
 	case cmdHelp, cmdHelpShort, cmdHelpLong:
 		fmt.Print(usage)
-		return 0
+		return exitOK
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage)
-		return 2
+		return exitUsage
 	}
 }

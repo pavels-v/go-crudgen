@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"go/format"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -56,11 +58,19 @@ const (
 	nameRepoCtor      = "New%sRepository"
 	nameCreateRequest = "Create%sRequest"
 	nameUpdateRequest = "Update%sRequest"
+	nameDefault       = "default%s%s"
 )
 
 const (
-	importPathSep = "/"
-	importHostDot = "."
+	importPathSep  = "/"
+	importHostDot  = "."
+	importAliasSep = " "
+	typeParamOpen  = "["
+)
+
+const (
+	destStdout     = "stdout"
+	filesPerEntity = 4
 )
 
 const (
@@ -103,14 +113,12 @@ func Generate(s *spec.Spec, opts Options) error {
 		return fmt.Errorf("unknown driver %q (supported: pgx, pq)", opts.Driver)
 	}
 
-	byName := make(map[string]*spec.Entity, len(s.Entities))
-	for i := range s.Entities {
-		byName[s.Entities[i].Name] = &s.Entities[i]
-	}
+	byName := entitiesByName(s)
 	for i := range s.Entities {
 		if err := checkColumns(&s.Entities[i]); err != nil {
 			return err
 		}
+
 		if err := checkRules(&s.Entities[i], byName); err != nil {
 			return err
 		}
@@ -120,10 +128,12 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	dest := opts.OutDir
 	if toStdout {
-		dest = "stdout"
+		dest = destStdout
 	}
+
 	fmt.Fprintf(os.Stderr, "go-crudgen: package %q, %d %s -> %s\n",
 		s.Package, len(s.Entities), entityWord(len(s.Entities)), dest)
+
 	for _, e := range s.Entities {
 		fmt.Fprintf(os.Stderr, "  - %s (%d fields)\n", e.Name, len(e.Fields))
 	}
@@ -133,10 +143,11 @@ func Generate(s *spec.Spec, opts Options) error {
 		return nil
 	}
 
-	files, err := renderFiles(s, driverName, driverImp)
+	files, err := renderFiles(s, byName, driverName, driverImp)
 	if err != nil {
 		return err
 	}
+
 	if err := checkCollisions(files); err != nil {
 		return err
 	}
@@ -152,6 +163,7 @@ func Generate(s *spec.Spec, opts Options) error {
 	if !toStdout {
 		fmt.Fprintf(os.Stderr, "go-crudgen: done. Run `go mod tidy` in %s to resolve dependencies.\n", opts.OutDir)
 	}
+
 	return nil
 }
 
@@ -160,51 +172,80 @@ func emit(outDir string, f genFile) error {
 		if _, err := fmt.Fprintf(os.Stdout, "// file: %s\n%s\n", f.Path, f.Src); err != nil {
 			return fmt.Errorf("write %s: %w", f.Path, err)
 		}
+
 		return nil
 	}
+
 	path := filepath.Join(outDir, filepath.FromSlash(f.Path))
+
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
+
 	if err := os.WriteFile(path, f.Src, 0o644); err != nil { //nolint:gosec // generated source is world-readable
 		return fmt.Errorf("write %s: %w", path, err)
 	}
+
 	fmt.Fprintf(os.Stderr, "  wrote %s\n", path)
+
 	return nil
 }
 
-func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) {
+func entitiesByName(s *spec.Spec) map[string]*spec.Entity {
 	byName := make(map[string]*spec.Entity, len(s.Entities))
 	for i := range s.Entities {
 		byName[s.Entities[i].Name] = &s.Entities[i]
 	}
 
+	return byName
+}
+
+type sharedFiles struct {
+	Routes   []routerEntity
+	Parsers  map[string]bool
+	Nullable bool
+	Date     bool
+	Offset   bool
+	Cursor   bool
+}
+
+func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, driverImp string) ([]genFile, error) {
 	// Migrations are numbered so that a referenced table is created before the
 	// table whose foreign key points at it, regardless of declaration order.
 	order, err := migrationOrder(s.Entities, byName)
 	if err != nil {
 		return nil, err
 	}
+
 	migNum := make(map[string]int, len(order))
 	for i, e := range order {
 		migNum[e.Name] = i + 1
 	}
 
-	var files []genFile
-	var shared sharedFiles
+	files := make([]genFile, 0, len(s.Entities)*filesPerEntity)
+	shared := sharedFiles{Parsers: make(map[string]bool)}
+
 	for i := range s.Entities {
 		e := &s.Entities[i]
+
 		ef, hd, rd, err := renderEntity(s, e, byName, migNum[e.Name])
 		if err != nil {
 			return nil, err
 		}
+
 		files = append(files, ef...)
 
 		shared.Nullable = shared.Nullable || rd.HasNullable
 		shared.Date = shared.Date || hasFieldType(e, spec.TypeDate)
 		shared.Cursor = shared.Cursor || e.CursorPagination()
 		shared.Offset = shared.Offset || !e.CursorPagination()
+
+		for _, p := range hd.parsers {
+			helper, _, _ := strings.Cut(p, typeParamOpen)
+			shared.Parsers[helper] = true
+		}
+
 		shared.Routes = append(shared.Routes, routerEntity{
 			Struct:    hd.Struct,
 			Repo:      hd.Repo,
@@ -213,14 +254,6 @@ func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) 
 	}
 
 	return appendShared(files, s, driverName, driverImp, shared)
-}
-
-type sharedFiles struct {
-	Routes   []routerEntity
-	Nullable bool
-	Date     bool
-	Offset   bool
-	Cursor   bool
 }
 
 func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, shared sharedFiles) ([]genFile, error) {
@@ -232,24 +265,28 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 	if err != nil {
 		return nil, fmt.Errorf("generate errors: %w", err)
 	}
+
 	add(fileErrors, esrc)
 
 	sortSrc, err := renderSort(packageData{Package: s.Package})
 	if err != nil {
 		return nil, fmt.Errorf("generate sort direction: %w", err)
 	}
+
 	add(fileSort, sortSrc)
 
 	ssrc, err := renderRouter(routerInfo(s, shared))
 	if err != nil {
 		return nil, fmt.Errorf("generate router: %w", err)
 	}
+
 	add(fileRouter, ssrc)
 
 	dbsrc, err := renderDB(dbInfo(s, driverName, driverImp))
 	if err != nil {
 		return nil, fmt.Errorf("generate db connection: %w", err)
 	}
+
 	add(fileDB, dbsrc)
 
 	// The sql.Null[T] conversion helpers are only needed when at least one
@@ -259,6 +296,7 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 		if err != nil {
 			return nil, fmt.Errorf("generate null helpers: %w", err)
 		}
+
 		add(fileNulls, nsrc)
 	}
 
@@ -267,6 +305,7 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 		if err != nil {
 			return nil, fmt.Errorf("generate date type: %w", err)
 		}
+
 		add(fileDate, dsrc)
 	}
 
@@ -285,6 +324,7 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 	if err != nil {
 		return nil, handlerData{}, repoData{}, fmt.Errorf("generate migration for %q: %w", e.Name, err)
 	}
+
 	msrc, err := renderMigration(md)
 	if err != nil {
 		return nil, handlerData{}, repoData{}, fmt.Errorf("generate migration for %q: %w", e.Name, err)
@@ -294,6 +334,7 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 	if err != nil {
 		return nil, handlerData{}, repoData{}, fmt.Errorf("generate handlers for %q: %w", e.Name, err)
 	}
+
 	hsrc, err := renderHandler(hd)
 	if err != nil {
 		return nil, handlerData{}, repoData{}, fmt.Errorf("generate handlers for %q: %w", e.Name, err)
@@ -303,6 +344,7 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 	if err != nil {
 		return nil, handlerData{}, repoData{}, fmt.Errorf("generate repository for %q: %w", e.Name, err)
 	}
+
 	rsrc, err := renderRepo(rd)
 	if err != nil {
 		return nil, handlerData{}, repoData{}, fmt.Errorf("generate repository for %q: %w", e.Name, err)
@@ -314,6 +356,7 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 		{Path: fmt.Sprintf(fileHandler, base), Src: hsrc},
 		{Path: fmt.Sprintf(fileRepo, base), Src: rsrc},
 	}
+
 	return files, hd, rd, nil
 }
 
@@ -362,6 +405,13 @@ type handlerData struct {
 	Cursor       string   // wire cursor type, e.g. "postCursor", empty under offset pagination
 	CursorType   string   // qualified domain cursor, e.g. "blog.PostCursor"
 	CursorFields []string // Go names copied from the last item into the next cursor
+	Defaults     []defaultConst
+	parsers      []string // router parse helpers the handlers call
+}
+
+type defaultConst struct {
+	Name  string
+	Value string
 }
 
 type handlerFilter struct {
@@ -372,10 +422,8 @@ type handlerFilter struct {
 }
 
 type pkData struct {
-	GoName   string
-	Expr     string // parse expression for the {id} path value
-	NeedsErr bool
-	Cast     string // Go type to convert the parsed value to ("" when none needed)
+	GoName string
+	Parse  string // func(string) (T, error) for the {id} path value
 }
 
 type packageData struct {
@@ -389,6 +437,11 @@ type routerData struct {
 	Entities []routerEntity
 	Offset   bool // some entity pages by offset
 	Cursor   bool // some entity pages by cursor
+
+	ParseString bool
+	ParseInt32  bool
+	ParseInt64  bool
+	ParseText   bool
 }
 
 type routerEntity struct {
@@ -401,7 +454,6 @@ func routerInfo(s *spec.Spec, shared sharedFiles) routerData {
 	imports := map[string]struct{}{
 		importJSONv2:    {},
 		importJSON:      {},
-		importEncoding:  {},
 		importErrors:    {},
 		importMaps:      {},
 		importSlices:    {},
@@ -418,13 +470,22 @@ func routerInfo(s *spec.Spec, shared sharedFiles) routerData {
 		imports[importBase64] = struct{}{}
 		imports[importFmt] = struct{}{}
 	}
+
+	if shared.Parsers[parseText] {
+		imports[importEncoding] = struct{}{}
+	}
+
 	return routerData{
-		Package:  pkgREST,
-		Imports:  groupImports(imports, s.Module),
-		Domain:   s.Package,
-		Entities: shared.Routes,
-		Offset:   shared.Offset,
-		Cursor:   shared.Cursor,
+		Package:     pkgREST,
+		Imports:     groupImports(imports, s.Module, s.Package),
+		Domain:      s.Package,
+		Entities:    shared.Routes,
+		Offset:      shared.Offset,
+		Cursor:      shared.Cursor,
+		ParseString: shared.Parsers[parseString],
+		ParseInt32:  shared.Parsers[parseInt32],
+		ParseInt64:  shared.Parsers[parseInt64],
+		ParseText:   shared.Parsers[parseText],
 	}
 }
 
@@ -433,50 +494,52 @@ func qualified(s *spec.Spec, name string) string {
 }
 
 func checkColumns(e *spec.Entity) error {
-	names := make([]string, 0, len(e.Fields)+3)
+	columns := make(map[string]string, len(e.Fields))
+	goNames := make(map[string]string, len(e.Fields))
+
 	for _, f := range e.Fields {
-		names = append(names, f.Name)
+		col, goName := snakeCase(f.Name), pascalCase(f.Name)
+		if prev, ok := columns[col]; ok {
+			return fmt.Errorf("entity %q: %q and %q map to the same column %q", e.Name, prev, f.Name, col)
+		}
+
+		if prev, ok := goNames[goName]; ok {
+			return fmt.Errorf("entity %q: %q and %q map to the same Go field %q", e.Name, prev, f.Name, goName)
+		}
+
+		columns[col], goNames[goName] = f.Name, f.Name
 	}
 
-	columns := make(map[string]string, len(names))
-	goNames := make(map[string]string, len(names))
-	for _, n := range names {
-		col, goName := snakeCase(n), pascalCase(n)
-		if prev, ok := columns[col]; ok {
-			return fmt.Errorf("entity %q: %q and %q map to the same column %q", e.Name, prev, n, col)
-		}
-		if prev, ok := goNames[goName]; ok {
-			return fmt.Errorf("entity %q: %q and %q map to the same Go field %q", e.Name, prev, n, goName)
-		}
-		columns[col], goNames[goName] = n, n
-	}
 	return nil
 }
 
 // serveKey resolves the path-addressable primary key used to build an entity's
 // handler and repository. Validation guarantees exactly one primary key of a
-// path-addressable type, so the pkParser miss below is a defensive check against
+// path-addressable type, so the pathAddressable miss below is a defensive check against
 // an unvalidated spec, not a normal skip. handlerInfo and repoInfo share this so
 // their notion of the primary key can never drift apart.
-func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, pp pkParse, err error) {
+func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, err error) {
 	pk = e.PrimaryKey()[0]
+
 	gt, err = fieldType(pk, byName)
 	if err != nil {
-		return spec.Field{}, goType{}, pkParse{}, err
+		return spec.Field{}, goType{}, err
 	}
-	pp, ok := pkParser(gt.expr)
-	if !ok {
-		return spec.Field{}, goType{}, pkParse{}, fmt.Errorf("entity %q primary key %q has non-path-addressable type %q (validation should have rejected it)", e.Name, pk.Name, pk.Type)
+
+	if !pathAddressable(gt.expr) {
+		return spec.Field{}, goType{}, fmt.Errorf("entity %q primary key %q has non-path-addressable type %q (validation should have rejected it)", e.Name, pk.Name, pk.Type)
 	}
-	return pk, gt, pp, nil
+
+	return pk, gt, nil
 }
 
 // handlerInfo builds the restapi template data for an entity.
 func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, error) {
-	pk, _, pp, err := serveKey(e, byName)
+	pk, pkType, err := serveKey(e, byName)
 	if err != nil {
 		return handlerData{}, err
 	}
+
 	filters, err := listFilters(e, byName)
 	if err != nil {
 		return handlerData{}, err
@@ -494,23 +557,29 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 		ListParams: qualified(s, fmt.Sprintf(nameListParams, name)),
 		SortDir:    qualified(s, nameSortDir),
-		PK: pkData{
-			GoName:   pascalCase(pk.Name),
-			Expr:     pp.expr,
-			NeedsErr: pp.needsErr,
-			Cast:     pp.cast,
-		},
 	}
+
+	pkParse, pkImp := queryParser(pkType, s)
+	data.PK = pkData{GoName: pascalCase(pk.Name), Parse: pkParse}
+	data.parsers = append(data.parsers, pkParse)
+
 	imports := map[string]struct{}{importNetHTTP: {}, s.Module: {}}
+	if pkImp != "" {
+		imports[pkImp] = struct{}{}
+	}
+
 	for _, f := range e.Fields {
 		if f.Generate != "" {
 			continue
 		}
+
 		gn := pascalCase(f.Name)
+
 		gt, err := fieldType(f, byName)
 		if err != nil {
 			return handlerData{}, err
 		}
+
 		gt = gt.outside(s)
 
 		// The create body accepts every writable field; the update body omits the
@@ -518,66 +587,78 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		req := f
 		req.Required = f.Required || f.Primary
 		mf := modelField{GoName: gn, GoType: modelType(f, gt.expr), Tag: fieldTag(req)}
+
 		expr := fmt.Sprintf(exprReqField, gn)
 		if requiresPresence(req, gt) {
 			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
 			expr = fmt.Sprintf(exprDeref, expr)
 		}
+
 		if hasRequestDefault(f) {
 			mf.GoType = fmt.Sprintf(exprPointer, gt.expr)
+
 			lit, err := goDefault(f)
 			if err != nil {
 				return handlerData{}, fmt.Errorf("field %q: %w", f.Name, err)
 			}
-			expr = fmt.Sprintf(exprValueOr, expr, lit)
+
 			if isNowDefault(f) {
 				imports[importTime] = struct{}{}
+			} else {
+				c := defaultConst{Name: fmt.Sprintf(nameDefault, name, gn), Value: lit}
+				data.Defaults = append(data.Defaults, c)
+				lit = c.Name
 			}
+
+			expr = fmt.Sprintf(exprValueOr, expr, lit)
 		}
+
 		a := assign{Field: gn, Expr: expr}
 
+		if gt.imp != "" {
+			imports[gt.imp] = struct{}{}
+		}
+
 		if !f.Primary {
-			if gt.imp != "" {
-				imports[gt.imp] = struct{}{}
-			}
 			data.CreateBody = append(data.CreateBody, mf)
 			data.UpdateBody = append(data.UpdateBody, mf)
 			data.CreateAssign = append(data.CreateAssign, a)
 			data.UpdateAssign = append(data.UpdateAssign, a)
 			continue
 		}
+
 		if _, generated := keyGenerator(f); !generated {
-			if gt.imp != "" {
-				imports[gt.imp] = struct{}{}
-			}
 			data.CreateBody = append(data.CreateBody, mf)
 			data.CreateAssign = append(data.CreateAssign, a)
 		}
 	}
 
-	if pp.imp != "" {
-		imports[pp.imp] = struct{}{}
-	}
 	for _, lf := range filters {
 		parse, imp := queryParser(lf.Type, s)
 		if imp != "" {
 			imports[imp] = struct{}{}
 		}
+
 		data.Filters = append(data.Filters, handlerFilter{
 			GoName: lf.GoName,
 			Const:  fmt.Sprintf(nameQueryParam, name, lf.GoName),
 			Name:   lf.Field.Name,
 			Parse:  parse,
 		})
+		data.parsers = append(data.parsers, parse)
 	}
+
 	if e.CursorPagination() {
 		data.Cursor = unexport(fmt.Sprintf(nameCursor, name))
 		data.CursorType = qualified(s, fmt.Sprintf(nameCursor, name))
+
 		for _, f := range cursorFields(e) {
 			data.CursorFields = append(data.CursorFields, pascalCase(f.Name))
 		}
 	}
-	data.Imports = groupImports(imports, s.Module)
+
+	data.Imports = groupImports(imports, s.Module, s.Package)
+
 	return data, nil
 }
 
@@ -587,10 +668,12 @@ func renderTemplate(name string, data any) ([]byte, error) {
 	if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
 		return nil, fmt.Errorf("render %s: %w", name, err)
 	}
+
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("format generated source: %w", err)
 	}
+
 	return formatted, nil
 }
 
@@ -601,6 +684,7 @@ func renderMigration(data migrationData) ([]byte, error) {
 	if err := tmpl.ExecuteTemplate(&buf, tmplMigration, data); err != nil {
 		return nil, fmt.Errorf("render migration: %w", err)
 	}
+
 	return buf.Bytes(), nil
 }
 
@@ -615,7 +699,7 @@ func renderSort(data packageData) ([]byte, error)    { return renderTemplate(tmp
 
 // renderModel builds, executes, and gofmt-formats the domain file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
-	_, pkType, _, err := serveKey(e, byName)
+	_, pkType, err := serveKey(e, byName)
 	if err != nil {
 		return nil, err
 	}
@@ -635,17 +719,19 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		ListParams: fmt.Sprintf(nameListParams, name),
 	}
 	imports := map[string]struct{}{importContext: {}}
+
 	for _, lf := range filters {
 		data.Filters = append(data.Filters, modelField{GoName: lf.GoName, GoType: fmt.Sprintf(exprPointer, lf.Type.expr)})
 	}
 
 	// The model carries only json tags: request validation lives on the restapi
 	// DTOs and sqlx column mapping on the postgres row struct.
-	add := func(name, goExpr, imp string, tag string) {
+	add := func(field, goExpr, imp, tag string) {
 		if imp != "" {
 			imports[imp] = struct{}{}
 		}
-		data.Fields = append(data.Fields, modelField{GoName: pascalCase(name), GoType: goExpr, Tag: tag})
+
+		data.Fields = append(data.Fields, modelField{GoName: pascalCase(field), GoType: goExpr, Tag: tag})
 	}
 
 	for _, f := range e.Fields {
@@ -653,6 +739,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		if err != nil {
 			return nil, err
 		}
+
 		add(f.Name, modelType(f, gt.expr), gt.imp, jsonTag(f))
 	}
 
@@ -663,11 +750,12 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			if err != nil {
 				return nil, err
 			}
+
 			data.Cursor = append(data.Cursor, modelField{GoName: pascalCase(f.Name), GoType: gt.expr, Tag: jsonTag(f)})
 		}
 	}
 
-	data.Imports = groupImports(imports, s.Module)
+	data.Imports = groupImports(imports, s.Module, s.Package)
 
 	return renderTemplate(tmplModel, data)
 }
@@ -679,6 +767,7 @@ func modelType(f spec.Field, base string) string {
 	if isNullable(f) {
 		return fmt.Sprintf(exprPointer, base)
 	}
+
 	return base
 }
 
@@ -689,6 +778,7 @@ func jsonTag(f spec.Field) string {
 	if isNullable(f) {
 		jsonName += jsonOmit
 	}
+
 	return fmt.Sprintf(tagJSON, jsonName)
 }
 
@@ -701,15 +791,19 @@ func fieldTag(f spec.Field) string {
 	if f.Required && !slices.Contains(strings.Split(f.Validate, ruleSep), ruleRequired) {
 		rules = append(rules, ruleRequired)
 	}
+
 	if f.Validate != "" && (isNullable(f) || hasRequestDefault(f)) {
 		rules = append(rules, ruleOmitNil)
 	}
+
 	if f.Validate != "" {
 		rules = append(rules, f.Validate)
 	}
+
 	if len(rules) > 0 {
 		tag += fmt.Sprintf(tagValidate, strings.Join(rules, ruleSep))
 	}
+
 	return tag
 }
 
@@ -718,7 +812,7 @@ func requiresPresence(f spec.Field, gt goType) bool {
 	return f.Required && !isString
 }
 
-func groupImports(set map[string]struct{}, module string) []string {
+func groupImports(set map[string]struct{}, module, pkg string) []string {
 	var std, ext, local []string
 	for imp := range set {
 		host, _, _ := strings.Cut(imp, importPathSep)
@@ -737,13 +831,28 @@ func groupImports(set map[string]struct{}, module string) []string {
 		if len(group) == 0 {
 			continue
 		}
+
 		if len(out) > 0 {
 			out = append(out, "")
 		}
+
 		sort.Strings(group)
-		out = append(out, group...)
+
+		for _, imp := range group {
+			out = append(out, importSpec(imp, module, pkg))
+		}
 	}
+
 	return out
+}
+
+func importSpec(imp, module, pkg string) string {
+	quoted := strconv.Quote(imp)
+	if imp == module && path.Base(module) != pkg {
+		return pkg + importAliasSep + quoted
+	}
+
+	return quoted
 }
 
 func hasFieldType(e *spec.Entity, typ string) bool {
@@ -752,6 +861,7 @@ func hasFieldType(e *spec.Entity, typ string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -759,5 +869,6 @@ func entityWord(n int) string {
 	if n == 1 {
 		return "entity"
 	}
+
 	return "entities"
 }

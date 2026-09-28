@@ -61,9 +61,11 @@ var _ blog.AuthorRepository = (*AuthorRepository)(nil)
 func (r *AuthorRepository) Create(ctx context.Context, m *blog.Author) error {
 	m.ID = uuid.New()
 	row := newAuthorRow(m)
+
 	if _, err := r.db.ExecContext(ctx, `INSERT INTO authors (id, email, name, born_on) VALUES ($1, $2, $3, $4)`, row.ID, row.Email, row.Name, row.BornOn); err != nil {
 		return fmt.Errorf("create author: %w", mapWriteError(err))
 	}
+
 	return nil
 }
 
@@ -73,9 +75,12 @@ func (r *AuthorRepository) Get(ctx context.Context, id uuid.UUID) (*blog.Author,
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, blog.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("get author: %w", err)
 	}
+
 	m := row.toModel()
+
 	return &m, nil
 }
 
@@ -89,6 +94,7 @@ func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([
 		where []string
 		args  []any
 	)
+
 	if p.Email != nil {
 		where = append(where, `email = ?`)
 		args = append(args, *p.Email)
@@ -98,33 +104,40 @@ func (r *AuthorRepository) List(ctx context.Context, p blog.AuthorListParams) ([
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
+
 	args = append(args, p.Limit, p.Offset)
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 
 	var rows []authorRow
 	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 		return nil, fmt.Errorf("list author: %w", err)
 	}
+
 	out := make([]blog.Author, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
+
 	return out, nil
 }
 
 func (r *AuthorRepository) Update(ctx context.Context, m *blog.Author) error {
 	row := newAuthorRow(m)
+
 	res, err := r.db.ExecContext(ctx, `UPDATE authors SET email = $1, name = $2, born_on = $3 WHERE id = $4`, row.Email, row.Name, row.BornOn, row.ID)
 	if err != nil {
 		return fmt.Errorf("update author: %w", mapWriteError(err))
 	}
+
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update author: %w", err)
 	}
+
 	if n == 0 {
 		return blog.ErrNotFound
 	}
+
 	return nil
 }
 
@@ -133,12 +146,15 @@ func (r *AuthorRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("delete author: %w", mapDeleteError(err))
 	}
+
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("delete author: %w", err)
 	}
+
 	if n == 0 {
 		return blog.ErrNotFound
 	}
+
 	return nil
 }
