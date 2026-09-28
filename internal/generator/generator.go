@@ -4,8 +4,10 @@ package generator
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"go/format"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -46,19 +48,19 @@ const (
 )
 
 const (
-	fileModel     = "%s.gen.go"
-	fileErrors    = "errors.gen.go"
-	fileDate      = "date.gen.go"
-	fileSort      = "sort.gen.go"
-	fileHandler   = pkgREST + "/%s.gen.go"
-	fileRequest   = pkgREST + "/request.gen.go"
-	fileResponse  = pkgREST + "/response.gen.go"
-	fileQuery     = pkgREST + "/query.gen.go"
-	fileRoutes    = pkgREST + "/routes.gen.go"
-	fileRouter    = pkgREST + "/router.gen.go"
-	fileRepo      = pkgPostgres + "/%s.gen.go"
-	fileDB        = pkgPostgres + "/db.gen.go"
-	fileNulls     = pkgPostgres + "/nulls.gen.go"
+	fileModel     = "%s.go"
+	fileErrors    = "errors.go"
+	fileDate      = "date.go"
+	fileSort      = "sort.go"
+	fileHandler   = pkgREST + "/%s.go"
+	fileRequest   = pkgREST + "/request.go"
+	fileResponse  = pkgREST + "/response.go"
+	fileQuery     = pkgREST + "/query.go"
+	fileRoutes    = pkgREST + "/routes.go"
+	fileRouter    = pkgREST + "/router.go"
+	fileRepo      = pkgPostgres + "/%s.go"
+	fileDB        = pkgPostgres + "/db.go"
+	fileNulls     = pkgPostgres + "/nulls.go"
 	fileMigration = dirMigrations + "/%s_create_%s.sql"
 )
 
@@ -86,8 +88,9 @@ const (
 const (
 	dirMigrations          = "migrations"
 	migrationVersionLayout = "20060102150405"
-	globGenerated          = "*.gen.go"
+	globGo                 = "*.go"
 	globAny                = "*"
+	suffixTest             = "_test.go"
 )
 
 const (
@@ -163,12 +166,6 @@ func Generate(s *spec.Spec, opts Options) error {
 		return nil
 	}
 
-	if !toStdout {
-		if err := checkOutDir(opts.OutDir); err != nil {
-			return err
-		}
-	}
-
 	if opts.MigrationTime.IsZero() {
 		opts.MigrationTime = time.Now()
 	}
@@ -180,6 +177,12 @@ func Generate(s *spec.Spec, opts Options) error {
 
 	if err := checkCollisions(files); err != nil {
 		return err
+	}
+
+	if !toStdout {
+		if err := checkOutDir(opts.OutDir, files); err != nil {
+			return err
+		}
 	}
 
 	for _, f := range files {
@@ -222,13 +225,26 @@ func emit(outDir string, f genFile) error {
 	return nil
 }
 
-// checkOutDir refuses a directory that already holds generated files or
-// migrations, so a second run never overwrites or mixes with the first.
-func checkOutDir(dir string) error {
+// checkOutDir refuses a directory where any file to be written exists, where
+// restapi/ or postgres/ hold code other than tests, or where migrations/ is not
+// empty, so a second run never overwrites or mixes with the first.
+func checkOutDir(dir string, files []genFile) error {
+	for _, f := range files {
+		target := filepath.Join(dir, filepath.FromSlash(f.Path))
+
+		_, err := os.Stat(target)
+		if err == nil {
+			return outDirTaken(dir, target)
+		}
+
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("check output directory: %w", err)
+		}
+	}
+
 	patterns := []string{
-		globGenerated,
-		path.Join(pkgREST, globGenerated),
-		path.Join(pkgPostgres, globGenerated),
+		path.Join(pkgREST, globGo),
+		path.Join(pkgPostgres, globGo),
 		path.Join(dirMigrations, globAny),
 	}
 
@@ -238,12 +254,18 @@ func checkOutDir(dir string) error {
 			return fmt.Errorf("check output directory: %w", err)
 		}
 
-		if len(matches) > 0 {
-			return fmt.Errorf("output directory %s already has generated files or migrations (%s): generate into a clean directory", dir, matches[0])
+		for _, m := range matches {
+			if !strings.HasSuffix(m, suffixTest) {
+				return outDirTaken(dir, m)
+			}
 		}
 	}
 
 	return nil
+}
+
+func outDirTaken(dir, file string) error {
+	return fmt.Errorf("output directory %s already has generated code or migrations (%s): generate into a clean directory", dir, file)
 }
 
 func entitiesByName(s *spec.Spec) map[string]*spec.Entity {
@@ -467,7 +489,7 @@ type handlerData struct {
 	CursorType   string   // qualified domain cursor, e.g. "domain.PostCursor"
 	CursorFields []string // Go names copied from the last item into the next cursor
 	Defaults     []defaultConst
-	parsers      []string // request.gen.go parse helpers the handlers call
+	parsers      []string // request.go parse helpers the handlers call
 	usesValueOr  bool
 }
 

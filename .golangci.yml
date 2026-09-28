@@ -114,8 +114,6 @@ linters:
         - -ST1000
   exclusions:
     generated: lax
-    paths:
-      - \.gen\.go$
     rules:
       - path: _test\.go
         linters:
@@ -135,5 +133,3 @@ formatters:
         - go-crudgen
   exclusions:
     generated: lax
-    paths:
-      - \.gen\.go$

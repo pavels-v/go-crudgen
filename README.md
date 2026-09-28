@@ -50,7 +50,7 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api --router # also emit 
 cd ./internal/api && go mod tidy
 ```
 
-`--out` must hold no `*.gen.go` files and nothing in `migrations/`; to start over, delete them and generate again.
+`--out` must hold none of the files to be written, no code but tests in `restapi/` and `postgres/`, and nothing in `migrations/`; to start over, delete them and generate again.
 
 ```go
 db, err := postgres.NewDB(dsn)
@@ -68,17 +68,17 @@ Developer tasks: `make help`.
 
 ## Output
 
-- `<entity>.gen.go` - model and repository interface, in the root package named by `package`.
-- `errors.gen.go` - sentinel errors shared by all layers.
-- `sort.gen.go` - `SortDir` for List ordering.
-- `date.gen.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
-- `restapi/<entity>.gen.go` - `Create`/`Update` request DTOs, CRUD handlers and `RegisterRoutes`.
-- `restapi/request.gen.go`, `response.gen.go`, `query.gen.go` - request decoding, response envelope, List query parsing.
-- `restapi/routes.gen.go` - `WithRouteErrors`: the JSON envelope for unmatched routes.
-- `restapi/router.gen.go` - `NewRouter` and `Deps` wiring every entity, with `--router`.
-- `postgres/<entity>.gen.go` - `sqlx` PostgreSQL repository.
-- `postgres/db.gen.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
-- `postgres/nulls.gen.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
+- `<entity>.go` - model and repository interface, in the root package named by `package`.
+- `errors.go` - sentinel errors shared by all layers.
+- `sort.go` - `SortDir` for List ordering.
+- `date.go` - `Date` type, `YYYY-MM-DD` in JSON, emitted when any field is `date`.
+- `restapi/<entity>.go` - `Create`/`Update` request DTOs, CRUD handlers and `RegisterRoutes`.
+- `restapi/request.go`, `response.go`, `query.go` - request decoding, response envelope, List query parsing.
+- `restapi/routes.go` - `WithRouteErrors`: the JSON envelope for unmatched routes.
+- `restapi/router.go` - `NewRouter` and `Deps` wiring every entity, with `--router`.
+- `postgres/<entity>.go` - `sqlx` PostgreSQL repository.
+- `postgres/db.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
+- `postgres/nulls.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
 - `migrations/<timestamp>_create_<table>.sql` - goose migrations, a second apart in foreign-key order; `SOURCE_DATE_EPOCH` pins the first timestamp.
 - Generation fails when an entity name collides with a generated declaration or file.
 

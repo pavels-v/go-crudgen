@@ -72,7 +72,7 @@ const (
 	nameNewRow = "new%sRow"
 )
 
-// dbData is the template input for postgres/db.gen.go.
+// dbData is the template input for postgres/db.go.
 type dbData struct {
 	Package      string
 	Imports      []string

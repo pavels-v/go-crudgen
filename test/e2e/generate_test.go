@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,16 +41,20 @@ func run(t *testing.T, dir, name string, args ...string) {
 // exampleEpoch pins the example's migration versions to 2026-01-01 00:00:00 UTC.
 const exampleEpoch = "1767225600"
 
-// clean removes the previous generator output, since the generator refuses to
-// write over it.
+// clean removes the previous generator output, keeping hand-written tests,
+// since the generator refuses to write over it.
 func clean(t *testing.T, dir string) {
 	t.Helper()
 
-	for _, pattern := range []string{"*.gen.go", "restapi/*.gen.go", "postgres/*.gen.go"} {
+	for _, pattern := range []string{"*.go", "restapi/*.go", "postgres/*.go"} {
 		matches, err := filepath.Glob(filepath.Join(dir, filepath.FromSlash(pattern)))
 		require.NoError(t, err, "glob %s", pattern)
 
 		for _, m := range matches {
+			if strings.HasSuffix(m, "_test.go") {
+				continue
+			}
+
 			require.NoError(t, os.Remove(m), "remove %s", m)
 		}
 	}
@@ -78,23 +83,23 @@ func TestGenerateBlogExample(t *testing.T) {
 		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog", "--router")
 
 	for _, f := range []string{
-		"post.gen.go", "author.gen.go", "comment.gen.go", "tag.gen.go",
-		"errors.gen.go", "date.gen.go", "sort.gen.go",
-		filepath.Join("restapi", "post.gen.go"),
-		filepath.Join("restapi", "author.gen.go"),
-		filepath.Join("restapi", "comment.gen.go"),
-		filepath.Join("restapi", "tag.gen.go"),
-		filepath.Join("restapi", "request.gen.go"),
-		filepath.Join("restapi", "response.gen.go"),
-		filepath.Join("restapi", "query.gen.go"),
-		filepath.Join("restapi", "routes.gen.go"),
-		filepath.Join("restapi", "router.gen.go"),
-		filepath.Join("postgres", "post.gen.go"),
-		filepath.Join("postgres", "author.gen.go"),
-		filepath.Join("postgres", "comment.gen.go"),
-		filepath.Join("postgres", "tag.gen.go"),
-		filepath.Join("postgres", "db.gen.go"),
-		filepath.Join("postgres", "nulls.gen.go"),
+		"post.go", "author.go", "comment.go", "tag.go",
+		"errors.go", "date.go", "sort.go",
+		filepath.Join("restapi", "post.go"),
+		filepath.Join("restapi", "author.go"),
+		filepath.Join("restapi", "comment.go"),
+		filepath.Join("restapi", "tag.go"),
+		filepath.Join("restapi", "request.go"),
+		filepath.Join("restapi", "response.go"),
+		filepath.Join("restapi", "query.go"),
+		filepath.Join("restapi", "routes.go"),
+		filepath.Join("restapi", "router.go"),
+		filepath.Join("postgres", "post.go"),
+		filepath.Join("postgres", "author.go"),
+		filepath.Join("postgres", "comment.go"),
+		filepath.Join("postgres", "tag.go"),
+		filepath.Join("postgres", "db.go"),
+		filepath.Join("postgres", "nulls.go"),
 		filepath.Join("migrations", "20260101000000_create_authors.sql"),
 		filepath.Join("migrations", "20260101000001_create_posts.sql"),
 		filepath.Join("migrations", "20260101000002_create_comments.sql"),
@@ -109,7 +114,7 @@ func TestGenerateBlogExample(t *testing.T) {
 	again.Dir = root
 	out, err := again.CombinedOutput()
 	require.Errorf(t, err, "second generation should fail:\n%s", out)
-	require.Contains(t, string(out), "already has generated files")
+	require.Contains(t, string(out), "already has generated code")
 
 	// Prove the freshly generated module compiles and its handler tests pass.
 	run(t, blogDir, "go", "test", "./...")

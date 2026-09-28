@@ -1040,16 +1040,18 @@ func TestRenderFiles_MigrationVersions(t *testing.T) {
 func TestCheckOutDir(t *testing.T) {
 	t.Parallel()
 
+	targets := []genFile{{Path: "post.go"}, {Path: "restapi/post.go"}, {Path: "postgres/post.go"}}
 	cases := []struct {
 		name    string
 		files   []string
 		wantErr bool
 	}{
 		{name: "empty"},
-		{name: "hand-written files only", files: []string{"go.mod", "restapi/api_test.go", "cmd/main.go"}},
-		{name: "domain file", files: []string{"post.gen.go"}, wantErr: true},
-		{name: "restapi file", files: []string{"restapi/router.gen.go"}, wantErr: true},
-		{name: "postgres file", files: []string{"postgres/db.gen.go"}, wantErr: true},
+		{name: "hand-written files only", files: []string{"go.mod", "service.go", "cmd/main.go", "restapi/api_test.go", "postgres/post_test.go"}},
+		{name: "target in the root", files: []string{"post.go"}, wantErr: true},
+		{name: "target in a subpackage", files: []string{"restapi/post.go"}, wantErr: true},
+		{name: "other restapi code", files: []string{"restapi/middleware.go"}, wantErr: true},
+		{name: "other postgres code", files: []string{"postgres/tx.go"}, wantErr: true},
 		{name: "any migration", files: []string{"migrations/20260101000000_add_index.sql"}, wantErr: true},
 	}
 
@@ -1064,7 +1066,7 @@ func TestCheckOutDir(t *testing.T) {
 				require.NoError(t, os.WriteFile(p, nil, 0o600))
 			}
 
-			err := checkOutDir(dir)
+			err := checkOutDir(dir, targets)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -1077,7 +1079,7 @@ func TestCheckOutDir(t *testing.T) {
 	t.Run("missing directory", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, checkOutDir(filepath.Join(t.TempDir(), "absent")))
+		require.NoError(t, checkOutDir(filepath.Join(t.TempDir(), "absent"), targets))
 	})
 }
 
@@ -1776,31 +1778,31 @@ func TestCheckCollisions(t *testing.T) {
 		wantErr bool
 	}{
 		{"distinct names", []genFile{
-			goFile("a.gen.go", "package blog\ntype A struct{}"),
-			goFile("b.gen.go", "package blog\ntype B struct{}"),
+			goFile("a.go", "package blog\ntype A struct{}"),
+			goFile("b.go", "package blog\ntype B struct{}"),
 		}, false},
 		{"same name in different packages", []genFile{
-			goFile("post.gen.go", "package blog\ntype PostRepository interface{}"),
-			goFile("postgres/post.gen.go", "package postgres\ntype PostRepository struct{}"),
+			goFile("post.go", "package blog\ntype PostRepository interface{}"),
+			goFile("postgres/post.go", "package postgres\ntype PostRepository struct{}"),
 		}, false},
 		{"methods and blank identifiers are not declarations", []genFile{
-			goFile("a.gen.go", "package blog\ntype A struct{}\nfunc (A) M() {}\nvar _ = 1"),
-			goFile("b.gen.go", "package blog\ntype B struct{}\nfunc (B) M() {}\nvar _ = 2"),
+			goFile("a.go", "package blog\ntype A struct{}\nfunc (A) M() {}\nvar _ = 1"),
+			goFile("b.go", "package blog\ntype B struct{}\nfunc (B) M() {}\nvar _ = 2"),
 		}, false},
 		{"non-Go files are not parsed", []genFile{
 			goFile("migrations/00001_create_dates.sql", "CREATE TABLE dates ();"),
 		}, false},
 		{"duplicate type in one package", []genFile{
-			goFile("date.gen.go", "package blog\ntype Date struct{}"),
-			goFile("calendar_date.gen.go", "package blog\ntype Date int"),
+			goFile("date.go", "package blog\ntype Date struct{}"),
+			goFile("calendar_date.go", "package blog\ntype Date int"),
 		}, true},
 		{"duplicate func and var in one package", []genFile{
-			goFile("postgres/a.gen.go", "package postgres\nfunc NewDB() {}"),
-			goFile("postgres/b.gen.go", "package postgres\nvar NewDB = 1"),
+			goFile("postgres/a.go", "package postgres\nfunc NewDB() {}"),
+			goFile("postgres/b.go", "package postgres\nvar NewDB = 1"),
 		}, true},
 		{"duplicate path", []genFile{
-			goFile("date.gen.go", "package blog\ntype Date struct{}"),
-			goFile("date.gen.go", "package blog\ntype Other struct{}"),
+			goFile("date.go", "package blog\ntype Date struct{}"),
+			goFile("date.go", "package blog\ntype Other struct{}"),
 		}, true},
 		{"paths differing only in case", []genFile{
 			goFile("migrations/00001_create_Posts.sql", ""),
