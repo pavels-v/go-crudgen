@@ -94,10 +94,15 @@ const (
 )
 
 const (
-	ruleRequired = "required"
-	ruleOmitNil  = "omitnil"
-	ruleSep      = ","
-	ruleOr       = "|"
+	ruleRequired  = "required"
+	ruleExcluded  = "excluded"
+	ruleOmitEmpty = "omitempty"
+	ruleOmitNil   = "omitnil"
+	ruleOmitZero  = "omitzero"
+	ruleUUID      = "uuid"
+	ruleSep       = ","
+	ruleOr        = "|"
+	ruleParamSep  = "="
 )
 
 const (
@@ -225,9 +230,6 @@ func emit(outDir string, f genFile) error {
 	return nil
 }
 
-// checkOutDir refuses a directory where any file to be written exists, where
-// restapi/ or postgres/ hold code other than tests, or where migrations/ is not
-// empty, so a second run never overwrites or mixes with the first.
 func checkOutDir(dir string, files []genFile) error {
 	for _, f := range files {
 		target := filepath.Join(dir, filepath.FromSlash(f.Path))

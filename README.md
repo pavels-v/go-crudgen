@@ -119,6 +119,7 @@ entities:
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
 - `required` fields must be present in the request body; `false` and `0` are accepted, an empty `string` or `text` is not.
 - `validate` rules are checked against the field's Go type at generation; on optional fields they apply only when the value is present.
+- `date`, `datetime` and `decimal` take only presence rules (`required*`, `excluded*`, `omitempty`, `omitnil`, `omitzero`); `uuid` also takes the `uuid*` rules.
 - `generate: on_create` sets a `datetime` to `now()` on insert, `generate: on_write` on insert and every update; both are read-only in the API.
 - `filter: true` makes List accept `?<name>=<value>` (equality); unknown or repeated query parameters are rejected; pair filters and `order` with `index: true`.
 - Exactly one `primary` field per entity, typed `string`, `text`, `int32`, `int64`, `uuid` or `references`.
@@ -142,7 +143,7 @@ entities:
   - [x] `belongs_to` via `references` fields
   - [x] `has_many` via `filter: true` on the reference field
 - [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, optional `--router`
-- [ ] Reject `validate` rules the validator ignores or misapplies (`min`/`max` on `date` and `datetime`, rules on `decimal`, length rules on `uuid`)
+- [x] Reject `validate` rules the validator ignores or misapplies (`min`/`max` on `date` and `datetime`, rules on `decimal`, length rules on `uuid`)
 - [ ] Service entry point: optional `main.go` with config, `NewDB`, migrations, routes and graceful shutdown (`--main`)
 - [ ] Handler test scaffold: `restapi/<entity>_test.go` with a fake repository and table-driven tests
 

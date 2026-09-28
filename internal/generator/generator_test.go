@@ -1563,6 +1563,14 @@ func TestCheckRules(t *testing.T) {
 		{"empty rule", spec.Field{Name: "title", Type: spec.TypeString, Validate: "min=1,,max=2"}, true},
 		{"length on bool", spec.Field{Name: "published", Type: spec.TypeBool, Validate: "min=1"}, true},
 		{"dive on string", spec.Field{Name: "title", Type: spec.TypeString, Validate: "dive"}, true},
+		{"presence on decimal", spec.Field{Name: "price", Type: spec.TypeDecimal, Validate: "required"}, false},
+		{"range on decimal", spec.Field{Name: "price", Type: spec.TypeDecimal, Validate: "gt=0"}, true},
+		{"presence on date", spec.Field{Name: "born_on", Type: spec.TypeDate, Validate: "omitnil,required_with=Title"}, false},
+		{"range on date", spec.Field{Name: "born_on", Type: spec.TypeDate, Validate: "min=2000-01-01"}, true},
+		{"range on datetime", spec.Field{Name: "at", Type: spec.TypeDatetime, Validate: "omitempty,lte=1"}, true},
+		{"uuid version", spec.Field{Name: "ext", Type: spec.TypeUUID, Validate: "uuid4|uuid5"}, false},
+		{"length on uuid", spec.Field{Name: "ext", Type: spec.TypeUUID, Validate: "len=16"}, true},
+		{"length on a uuid reference", spec.Field{Name: "author", Type: spec.TypeReferences, Target: "Author", Validate: "min=1"}, true},
 	}
 
 	for _, tc := range cases {
