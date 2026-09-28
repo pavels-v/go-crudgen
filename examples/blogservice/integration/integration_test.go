@@ -223,8 +223,8 @@ func TestIntegration(t *testing.T) {
 
 		before := time.Now()
 		var first, second blog.Comment
-		do(t, srv, http.MethodPost, "/comments", restapi.CreateCommentRequest{Post: post.ID, Body: "First"}, &first, http.StatusCreated)
-		do(t, srv, http.MethodPost, "/comments", restapi.CreateCommentRequest{Post: post.ID, Body: "Second"}, &second, http.StatusCreated)
+		do(t, srv, http.MethodPost, "/comments", restapi.CreateCommentRequest{Post: new(post.ID), Body: "First"}, &first, http.StatusCreated)
+		do(t, srv, http.MethodPost, "/comments", restapi.CreateCommentRequest{Post: new(post.ID), Body: "Second"}, &second, http.StatusCreated)
 		require.Positive(t, first.ID)
 		require.Greater(t, second.ID, first.ID, "ids come from IDENTITY")
 		require.Zero(t, first.Likes)

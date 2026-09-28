@@ -212,6 +212,90 @@ func TestRenderHandler_DTOs(t *testing.T) {
 	require.NotContains(t, create, "ID uuid.UUID", "a generated key is not part of CreatePostRequest")
 }
 
+func TestRenderHandler_RequiredFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		field spec.Field
+		want  []string
+	}{
+		{
+			name:  "bool accepts false",
+			field: spec.Field{Name: "active", Type: spec.TypeBool, Required: true},
+			want:  []string{"Active *bool `json:\"active\" validate:\"required\"`", "Active: *req.Active,"},
+		},
+		{
+			name:  "int keeps value rules",
+			field: spec.Field{Name: "qty", Type: spec.TypeInt32, Required: true, Validate: "gte=0"},
+			want:  []string{"Qty *int32 `json:\"qty\" validate:\"required,gte=0\"`", "Qty: *req.Qty,"},
+		},
+		{
+			name:  "decimal",
+			field: spec.Field{Name: "price", Type: spec.TypeDecimal, Required: true},
+			want:  []string{"Price *decimal.Decimal `json:\"price\" validate:\"required\"`", "Price: *req.Price,"},
+		},
+		{
+			name:  "string rejects empty",
+			field: spec.Field{Name: "code", Type: spec.TypeString, Required: true},
+			want:  []string{"Code string `json:\"code\" validate:\"required\"`", "Code: req.Code,"},
+		},
+		{
+			name:  "required_with does not replace required",
+			field: spec.Field{Name: "code", Type: spec.TypeString, Required: true, Validate: "required_with=Qty"},
+			want:  []string{"Code string `json:\"code\" validate:\"required,required_with=Qty\"`"},
+		},
+		{
+			name:  "explicit required is not repeated",
+			field: spec.Field{Name: "code", Type: spec.TypeString, Required: true, Validate: "required,min=3"},
+			want:  []string{"Code string `json:\"code\" validate:\"required,min=3\"`"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{
+				Package: "shop",
+				Module:  "example.com/shop",
+				Entities: []spec.Entity{{
+					Name: "Item",
+					Fields: []spec.Field{
+						{Name: "id", Type: spec.TypeInt64, Primary: true},
+						tt.field,
+					},
+				}},
+			}
+			got := renderHandlerSrc(t, s, "Item")
+			for _, want := range tt.want {
+				wantContains(t, got, want)
+			}
+		})
+	}
+}
+
+func TestRenderHandler_ClientKeyReferencingIntKey(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "shop",
+		Module:  "example.com/shop",
+		Entities: []spec.Entity{
+			{
+				Name:   "Item",
+				Fields: []spec.Field{{Name: "id", Type: spec.TypeInt64, Primary: true}},
+			},
+			{
+				Name:   "Stock",
+				Fields: []spec.Field{{Name: "item", Type: spec.TypeReferences, Target: "Item", Primary: true}},
+			},
+		},
+	}
+	got := renderHandlerSrc(t, s, "Stock")
+	wantContains(t, got, "Item *int64 `json:\"item\" validate:\"required\"`")
+	wantContains(t, got, "Item: *req.Item,")
+}
+
 func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
 	t.Parallel()
 

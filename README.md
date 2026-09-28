@@ -112,6 +112,7 @@ entities:
 - `package` names the root package; `module` is the import path of the `--out` directory.
 - Types: `string`, `text`, `int32`, `int64`, `float`, `decimal`, `bool`, `date`, `datetime`, `uuid`, `json`, `references`.
 - Modifiers: `primary`, `required`, `unique`, `index`, `default`, `validate` (go-playground/validator rules), `on_delete: cascade` (references only), `filter`, `generate`.
+- `required` fields must be present in the request body; `false` and `0` are accepted, an empty `string` or `text` is not.
 - `validate` rules are checked against the field's Go type at generation; on optional fields they apply only when the value is present.
 - `generate: on_create` sets a `datetime` to `now()` on insert, `generate: on_write` on insert and every update; both are read-only in the API.
 - `filter: true` makes List accept `?<name>=<value>` (equality); unknown or repeated query parameters are rejected; pair filters and `order` with `index: true`.

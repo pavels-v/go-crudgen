@@ -16,7 +16,7 @@ const (
 
 // CreateCommentRequest is the request body for creating the comment entity.
 type CreateCommentRequest struct {
-	Post     uuid.UUID  `json:"post" validate:"required"`
+	Post     *uuid.UUID `json:"post" validate:"required"`
 	Body     string     `json:"body" validate:"required,max=2000"`
 	Likes    *int32     `json:"likes"`
 	PostedAt *time.Time `json:"posted_at"`
@@ -24,7 +24,7 @@ type CreateCommentRequest struct {
 
 // UpdateCommentRequest is the request body for replacing the comment entity.
 type UpdateCommentRequest struct {
-	Post     uuid.UUID  `json:"post" validate:"required"`
+	Post     *uuid.UUID `json:"post" validate:"required"`
 	Body     string     `json:"body" validate:"required,max=2000"`
 	Likes    *int32     `json:"likes"`
 	PostedAt *time.Time `json:"posted_at"`
@@ -60,7 +60,7 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := blog.Comment{
-		Post:     req.Post,
+		Post:     *req.Post,
 		Body:     req.Body,
 		Likes:    valueOr(req.Likes, 0),
 		PostedAt: valueOr(req.PostedAt, time.Now()),
@@ -125,7 +125,7 @@ func (h *CommentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	m := blog.Comment{
 		ID:       id,
-		Post:     req.Post,
+		Post:     *req.Post,
 		Body:     req.Body,
 		Likes:    valueOr(req.Likes, 0),
 		PostedAt: valueOr(req.PostedAt, time.Now()),
