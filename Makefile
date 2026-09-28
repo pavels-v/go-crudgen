@@ -27,7 +27,7 @@ e2e: ## Run end-to-end tests (regenerates examples/blogservice from its spec, th
 integration: ## Run examples/blogservice integration tests against real Postgres via testcontainers (requires Docker)
 	cd examples/blogservice/integration && go test -count=1 -v ./...
 
-verify-examples: e2e ## Regenerate examples via e2e and fail if the committed output is stale (CI gate)
+verify-examples: e2e ## Regenerate examples via e2e and fail if the committed output is stale
 	@git status --short examples/blogservice
 	@test -z "$$(git status --porcelain examples/blogservice)"
 
