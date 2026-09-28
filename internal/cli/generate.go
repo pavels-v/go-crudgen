@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 
 	"go-crudgen/internal/generator"
 	"go-crudgen/internal/spec"
@@ -17,6 +19,8 @@ const (
 	flagDriver = "driver"
 	flagRouter = "router"
 )
+
+const envSourceDateEpoch = "SOURCE_DATE_EPOCH"
 
 func runGenerate(args []string) int {
 	fs := flag.NewFlagSet(cmdGenerate, flag.ContinueOnError)
@@ -49,10 +53,33 @@ func runGenerate(args []string) int {
 		return exitError
 	}
 
-	if err := generator.Generate(s, generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: *router}); err != nil {
+	migrationTime, err := sourceDateEpoch()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read %s: %v\n", envSourceDateEpoch, err)
+		return exitUsage
+	}
+
+	opts := generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: *router, MigrationTime: migrationTime}
+	if err := generator.Generate(s, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to generate: %v\n", err)
 		return exitError
 	}
 
 	return exitOK
+}
+
+// sourceDateEpoch pins migration versions to SOURCE_DATE_EPOCH when it is set,
+// so repeated generations produce the same file names.
+func sourceDateEpoch() (time.Time, error) {
+	v, ok := os.LookupEnv(envSourceDateEpoch)
+	if !ok {
+		return time.Time{}, nil
+	}
+
+	sec, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse unix seconds: %w", err)
+	}
+
+	return time.Unix(sec, 0), nil
 }

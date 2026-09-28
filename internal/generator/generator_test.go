@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -1008,6 +1011,76 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 	require.True(t, strings.HasPrefix(got, "-- +goose Up"), "migration starts with the goose Up annotation")
 }
 
+func TestRenderFiles_MigrationVersions(t *testing.T) {
+	t.Parallel()
+
+	uuidKey := spec.Field{Name: "id", Type: spec.TypeUUID, Primary: true}
+	s := &spec.Spec{Package: "blog", Module: "example.com/blog", Entities: []spec.Entity{
+		{Name: "Post", Fields: []spec.Field{uuidKey, {Name: "author", Type: spec.TypeReferences, Target: "Author"}}},
+		{Name: "Author", Fields: []spec.Field{uuidKey}},
+	}}
+
+	files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, Options{MigrationTime: time.Date(2026, 1, 2, 3, 4, 59, 0, time.UTC)})
+	require.NoError(t, err)
+
+	var got []string
+	for _, f := range files {
+		if strings.HasPrefix(f.Path, dirMigrations+"/") {
+			got = append(got, f.Path)
+		}
+	}
+
+	slices.Sort(got)
+	require.Equal(t, []string{
+		"migrations/20260102030459_create_authors.sql",
+		"migrations/20260102030500_create_posts.sql",
+	}, got)
+}
+
+func TestCheckOutDir(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		files   []string
+		wantErr bool
+	}{
+		{name: "empty"},
+		{name: "hand-written files only", files: []string{"go.mod", "restapi/api_test.go", "cmd/main.go"}},
+		{name: "domain file", files: []string{"post.gen.go"}, wantErr: true},
+		{name: "restapi file", files: []string{"restapi/router.gen.go"}, wantErr: true},
+		{name: "postgres file", files: []string{"postgres/db.gen.go"}, wantErr: true},
+		{name: "any migration", files: []string{"migrations/20260101000000_add_index.sql"}, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for _, f := range tc.files {
+				p := filepath.Join(dir, filepath.FromSlash(f))
+				require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+				require.NoError(t, os.WriteFile(p, nil, 0o600))
+			}
+
+			err := checkOutDir(dir)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("missing directory", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, checkOutDir(filepath.Join(t.TempDir(), "absent")))
+	})
+}
+
 func TestMigrationOrder(t *testing.T) {
 	t.Parallel()
 
@@ -1782,7 +1855,7 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: tc.entities}
-			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, tc.router)
+			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, Options{Router: tc.router})
 			require.NoError(t, err)
 
 			err = checkCollisions(files)

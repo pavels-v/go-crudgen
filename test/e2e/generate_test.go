@@ -37,6 +37,26 @@ func run(t *testing.T, dir, name string, args ...string) {
 	t.Logf("%s %v:\n%s", name, args, out)
 }
 
+// exampleEpoch pins the example's migration versions to 2026-01-01 00:00:00 UTC.
+const exampleEpoch = "1767225600"
+
+// clean removes the previous generator output, since the generator refuses to
+// write over it.
+func clean(t *testing.T, dir string) {
+	t.Helper()
+
+	for _, pattern := range []string{"*.gen.go", "restapi/*.gen.go", "postgres/*.gen.go"} {
+		matches, err := filepath.Glob(filepath.Join(dir, filepath.FromSlash(pattern)))
+		require.NoError(t, err, "glob %s", pattern)
+
+		for _, m := range matches {
+			require.NoError(t, os.Remove(m), "remove %s", m)
+		}
+	}
+
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "migrations")), "remove migrations")
+}
+
 // TestGenerateBlogExample drives the real CLI end to end: it regenerates the
 // blog example from examples/blog.yaml into examples/blogservice/internal/blog,
 // then builds and tests that (separate) module to prove the generated code
@@ -49,6 +69,9 @@ func TestGenerateBlogExample(t *testing.T) {
 	root := repoRoot(t)
 	blogDir := filepath.Join(root, "examples", "blogservice")
 	outDir := filepath.Join(blogDir, "internal", "blog")
+
+	clean(t, outDir)
+	t.Setenv("SOURCE_DATE_EPOCH", exampleEpoch)
 
 	// Regenerate the example with the default (pgx) driver and NewRouter.
 	run(t, root, "go", "run", "./cmd/go-crudgen", "generate",
@@ -72,13 +95,21 @@ func TestGenerateBlogExample(t *testing.T) {
 		filepath.Join("postgres", "tag.gen.go"),
 		filepath.Join("postgres", "db.gen.go"),
 		filepath.Join("postgres", "nulls.gen.go"),
-		filepath.Join("migrations", "00001_create_authors.sql"),
-		filepath.Join("migrations", "00002_create_posts.sql"),
-		filepath.Join("migrations", "00003_create_comments.sql"),
-		filepath.Join("migrations", "00004_create_tags.sql"),
+		filepath.Join("migrations", "20260101000000_create_authors.sql"),
+		filepath.Join("migrations", "20260101000001_create_posts.sql"),
+		filepath.Join("migrations", "20260101000002_create_comments.sql"),
+		filepath.Join("migrations", "20260101000003_create_tags.sql"),
 	} {
 		require.FileExists(t, filepath.Join(outDir, f), "expected generated file")
 	}
+
+	// A second generation into the same directory must refuse to write.
+	again := exec.Command("go", "run", "./cmd/go-crudgen", "generate",
+		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog", "--router")
+	again.Dir = root
+	out, err := again.CombinedOutput()
+	require.Errorf(t, err, "second generation should fail:\n%s", out)
+	require.Contains(t, string(out), "already has generated files")
 
 	// Prove the freshly generated module compiles and its handler tests pass.
 	run(t, blogDir, "go", "test", "./...")
