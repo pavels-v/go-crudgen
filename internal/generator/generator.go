@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"go/format"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -56,11 +58,14 @@ const (
 	nameRepoCtor      = "New%sRepository"
 	nameCreateRequest = "Create%sRequest"
 	nameUpdateRequest = "Update%sRequest"
+	nameDefault       = "default%s%s"
 )
 
 const (
-	importPathSep = "/"
-	importHostDot = "."
+	importPathSep  = "/"
+	importHostDot  = "."
+	importAliasSep = " "
+	typeParamOpen  = "["
 )
 
 const (
@@ -202,7 +207,7 @@ func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) 
 	}
 
 	var files []genFile
-	var shared sharedFiles
+	shared := sharedFiles{Parsers: make(map[string]bool)}
 
 	for i := range s.Entities {
 		e := &s.Entities[i]
@@ -218,6 +223,12 @@ func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) 
 		shared.Date = shared.Date || hasFieldType(e, spec.TypeDate)
 		shared.Cursor = shared.Cursor || e.CursorPagination()
 		shared.Offset = shared.Offset || !e.CursorPagination()
+
+		for _, p := range hd.parsers {
+			helper, _, _ := strings.Cut(p, typeParamOpen)
+			shared.Parsers[helper] = true
+		}
+
 		shared.Routes = append(shared.Routes, routerEntity{
 			Struct:    hd.Struct,
 			Repo:      hd.Repo,
@@ -230,6 +241,7 @@ func renderFiles(s *spec.Spec, driverName, driverImp string) ([]genFile, error) 
 
 type sharedFiles struct {
 	Routes   []routerEntity
+	Parsers  map[string]bool
 	Nullable bool
 	Date     bool
 	Offset   bool
@@ -384,6 +396,13 @@ type handlerData struct {
 	Cursor       string   // wire cursor type, e.g. "postCursor", empty under offset pagination
 	CursorType   string   // qualified domain cursor, e.g. "blog.PostCursor"
 	CursorFields []string // Go names copied from the last item into the next cursor
+	Defaults     []defaultConst
+	parsers      []string // router parse helpers the handlers call
+}
+
+type defaultConst struct {
+	Name  string
+	Value string
 }
 
 type handlerFilter struct {
@@ -394,10 +413,8 @@ type handlerFilter struct {
 }
 
 type pkData struct {
-	GoName   string
-	Expr     string // parse expression for the {id} path value
-	NeedsErr bool
-	Cast     string // Go type to convert the parsed value to ("" when none needed)
+	GoName string
+	Parse  string // func(string) (T, error) for the {id} path value
 }
 
 type packageData struct {
@@ -411,6 +428,11 @@ type routerData struct {
 	Entities []routerEntity
 	Offset   bool // some entity pages by offset
 	Cursor   bool // some entity pages by cursor
+
+	ParseString bool
+	ParseInt32  bool
+	ParseInt64  bool
+	ParseText   bool
 }
 
 type routerEntity struct {
@@ -423,7 +445,6 @@ func routerInfo(s *spec.Spec, shared sharedFiles) routerData {
 	imports := map[string]struct{}{
 		importJSONv2:    {},
 		importJSON:      {},
-		importEncoding:  {},
 		importErrors:    {},
 		importMaps:      {},
 		importSlices:    {},
@@ -440,13 +461,22 @@ func routerInfo(s *spec.Spec, shared sharedFiles) routerData {
 		imports[importBase64] = struct{}{}
 		imports[importFmt] = struct{}{}
 	}
+
+	if shared.Parsers[parseText] {
+		imports[importEncoding] = struct{}{}
+	}
+
 	return routerData{
-		Package:  pkgREST,
-		Imports:  groupImports(imports, s.Module),
-		Domain:   s.Package,
-		Entities: shared.Routes,
-		Offset:   shared.Offset,
-		Cursor:   shared.Cursor,
+		Package:     pkgREST,
+		Imports:     groupImports(imports, s.Module, s.Package),
+		Domain:      s.Package,
+		Entities:    shared.Routes,
+		Offset:      shared.Offset,
+		Cursor:      shared.Cursor,
+		ParseString: shared.Parsers[parseString],
+		ParseInt32:  shared.Parsers[parseInt32],
+		ParseInt64:  shared.Parsers[parseInt64],
+		ParseText:   shared.Parsers[parseText],
 	}
 }
 
@@ -480,27 +510,27 @@ func checkColumns(e *spec.Entity) error {
 
 // serveKey resolves the path-addressable primary key used to build an entity's
 // handler and repository. Validation guarantees exactly one primary key of a
-// path-addressable type, so the pkParser miss below is a defensive check against
+// path-addressable type, so the pathAddressable miss below is a defensive check against
 // an unvalidated spec, not a normal skip. handlerInfo and repoInfo share this so
 // their notion of the primary key can never drift apart.
-func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, pp pkParse, err error) {
+func serveKey(e *spec.Entity, byName map[string]*spec.Entity) (pk spec.Field, gt goType, err error) {
 	pk = e.PrimaryKey()[0]
 
 	gt, err = fieldType(pk, byName)
 	if err != nil {
-		return spec.Field{}, goType{}, pkParse{}, err
+		return spec.Field{}, goType{}, err
 	}
 
-	pp, ok := pkParser(gt.expr)
-	if !ok {
-		return spec.Field{}, goType{}, pkParse{}, fmt.Errorf("entity %q primary key %q has non-path-addressable type %q (validation should have rejected it)", e.Name, pk.Name, pk.Type)
+	if !pathAddressable(gt.expr) {
+		return spec.Field{}, goType{}, fmt.Errorf("entity %q primary key %q has non-path-addressable type %q (validation should have rejected it)", e.Name, pk.Name, pk.Type)
 	}
-	return pk, gt, pp, nil
+
+	return pk, gt, nil
 }
 
 // handlerInfo builds the restapi template data for an entity.
 func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (handlerData, error) {
-	pk, _, pp, err := serveKey(e, byName)
+	pk, pkType, err := serveKey(e, byName)
 	if err != nil {
 		return handlerData{}, err
 	}
@@ -522,15 +552,17 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		UpdateName: fmt.Sprintf(nameUpdateRequest, name),
 		ListParams: qualified(s, fmt.Sprintf(nameListParams, name)),
 		SortDir:    qualified(s, nameSortDir),
-		PK: pkData{
-			GoName:   pascalCase(pk.Name),
-			Expr:     pp.expr,
-			NeedsErr: pp.needsErr,
-			Cast:     pp.cast,
-		},
 	}
 
+	pkParse, pkImp := queryParser(pkType, s)
+	data.PK = pkData{GoName: pascalCase(pk.Name), Parse: pkParse}
+	data.parsers = append(data.parsers, pkParse)
+
 	imports := map[string]struct{}{importNetHTTP: {}, s.Module: {}}
+	if pkImp != "" {
+		imports[pkImp] = struct{}{}
+	}
+
 	for _, f := range e.Fields {
 		if f.Generate != "" {
 			continue
@@ -565,11 +597,15 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 				return handlerData{}, fmt.Errorf("field %q: %w", f.Name, err)
 			}
 
-			expr = fmt.Sprintf(exprValueOr, expr, lit)
-
 			if isNowDefault(f) {
 				imports[importTime] = struct{}{}
+			} else {
+				c := defaultConst{Name: fmt.Sprintf(nameDefault, name, gn), Value: lit}
+				data.Defaults = append(data.Defaults, c)
+				lit = c.Name
 			}
+
+			expr = fmt.Sprintf(exprValueOr, expr, lit)
 		}
 
 		a := assign{Field: gn, Expr: expr}
@@ -596,10 +632,6 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 	}
 
-	if pp.imp != "" {
-		imports[pp.imp] = struct{}{}
-	}
-
 	for _, lf := range filters {
 		parse, imp := queryParser(lf.Type, s)
 		if imp != "" {
@@ -612,18 +644,20 @@ func handlerInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 			Name:   lf.Field.Name,
 			Parse:  parse,
 		})
+		data.parsers = append(data.parsers, parse)
 	}
 
 	if e.CursorPagination() {
 		data.Cursor = unexport(fmt.Sprintf(nameCursor, name))
-
 		data.CursorType = qualified(s, fmt.Sprintf(nameCursor, name))
+
 		for _, f := range cursorFields(e) {
 			data.CursorFields = append(data.CursorFields, pascalCase(f.Name))
 		}
 	}
 
-	data.Imports = groupImports(imports, s.Module)
+	data.Imports = groupImports(imports, s.Module, s.Package)
+
 	return data, nil
 }
 
@@ -662,7 +696,7 @@ func renderSort(data packageData) ([]byte, error)    { return renderTemplate(tmp
 
 // renderModel builds, executes, and gofmt-formats the domain file for one entity.
 func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) ([]byte, error) {
-	_, pkType, _, err := serveKey(e, byName)
+	_, pkType, err := serveKey(e, byName)
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +752,7 @@ func renderModel(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (
 		}
 	}
 
-	data.Imports = groupImports(imports, s.Module)
+	data.Imports = groupImports(imports, s.Module, s.Package)
 
 	return renderTemplate(tmplModel, data)
 }
@@ -772,7 +806,7 @@ func requiresPresence(f spec.Field, gt goType) bool {
 	return f.Required && !isString
 }
 
-func groupImports(set map[string]struct{}, module string) []string {
+func groupImports(set map[string]struct{}, module, pkg string) []string {
 	var std, ext, local []string
 	for imp := range set {
 		host, _, _ := strings.Cut(imp, importPathSep)
@@ -797,9 +831,22 @@ func groupImports(set map[string]struct{}, module string) []string {
 		}
 
 		sort.Strings(group)
-		out = append(out, group...)
+
+		for _, imp := range group {
+			out = append(out, importSpec(imp, module, pkg))
+		}
 	}
+
 	return out
+}
+
+func importSpec(imp, module, pkg string) string {
+	quoted := strconv.Quote(imp)
+	if imp == module && path.Base(module) != pkg {
+		return pkg + importAliasSep + quoted
+	}
+
+	return quoted
 }
 
 func hasFieldType(e *spec.Entity, typ string) bool {

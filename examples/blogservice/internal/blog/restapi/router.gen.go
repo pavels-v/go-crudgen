@@ -21,19 +21,6 @@ import (
 	"example.com/blogservice/internal/blog"
 )
 
-// validate is the shared validator used to check request DTOs. Field names in
-// its errors are the json names, so details point at the request body.
-var validate = newValidator()
-
-func newValidator() *validator.Validate {
-	v := validator.New()
-	v.RegisterTagNameFunc(func(f reflect.StructField) string {
-		name, _, _ := strings.Cut(f.Tag.Get(tagJSON), tagOptionSep)
-		return name
-	})
-	return v
-}
-
 const (
 	codeMalformedBody     = "malformed_body"
 	codeBodyTooLarge      = "body_too_large"
@@ -55,16 +42,39 @@ const (
 	reasonInvalidValue   = "invalid_value"
 )
 
+const (
+	pathParamID     = "id"
+	queryLimit      = "limit"
+	queryDir        = "dir"
+	queryOffset     = "offset"
+	queryCursor     = "cursor"
+	contentTypeJSON = "application/json"
+	tagJSON         = "json"
+	tagOptionSep    = ","
+	ruleParamSep    = "="
+	jsonPointerRoot = "/"
+	maxBodyBytes    = 1 << 20
+)
+
+const (
+	defaultLimit = 50
+	maxLimit     = 200
+)
+
+// validate is the shared validator used to check request DTOs. Field names in
+// its errors are the json names, so details point at the request body.
+var validate = newValidator() //nolint:gochecknoglobals // caches struct metadata across requests
+
+var repoErrors = map[error]repoError{ //nolint:gochecknoglobals // read-only lookup table
+	blog.ErrNotFound:          {status: http.StatusNotFound, code: codeNotFound},
+	blog.ErrAlreadyExists:     {status: http.StatusConflict, code: codeAlreadyExists},
+	blog.ErrReferenceNotFound: {status: http.StatusUnprocessableEntity, code: codeReferenceNotFound},
+	blog.ErrStillReferenced:   {status: http.StatusConflict, code: codeStillReferenced},
+}
+
 type repoError struct {
 	status int
 	code   string
-}
-
-var repoErrors = map[error]repoError{
-	blog.ErrNotFound:          {http.StatusNotFound, codeNotFound},
-	blog.ErrAlreadyExists:     {http.StatusConflict, codeAlreadyExists},
-	blog.ErrReferenceNotFound: {http.StatusUnprocessableEntity, codeReferenceNotFound},
-	blog.ErrStillReferenced:   {http.StatusConflict, codeStillReferenced},
 }
 
 // Deps holds the repository implementation for each entity.
@@ -83,6 +93,7 @@ func NewRouter(deps Deps) http.Handler {
 	RegisterAuthorRoutes(mux, NewAuthorHandler(deps.Authors))
 	RegisterCommentRoutes(mux, NewCommentHandler(deps.Comments))
 	RegisterTagRoutes(mux, NewTagHandler(deps.Tags))
+
 	return withRouteErrors(mux)
 }
 
@@ -93,14 +104,18 @@ func withRouteErrors(mux *http.ServeMux) http.Handler {
 			mux.ServeHTTP(w, r)
 			return
 		}
-		rec := &statusRecorder{header: http.Header{}}
+
+		rec := &statusRecorder{header: make(http.Header)}
 		h.ServeHTTP(rec, r)
+
 		if rec.status == http.StatusMethodNotAllowed {
 			w.Header().Set("Allow", rec.header.Get("Allow"))
-			writeError(w, http.StatusMethodNotAllowed, codeMethodNotAllowed, "method not allowed", nil)
+			writeError(w, r, http.StatusMethodNotAllowed, codeMethodNotAllowed, "method not allowed")
+
 			return
 		}
-		writeError(w, http.StatusNotFound, codeNotFound, "route not found", nil)
+
+		writeError(w, r, http.StatusNotFound, codeNotFound, "route not found")
 	})
 }
 
@@ -113,17 +128,15 @@ func (s *statusRecorder) Header() http.Header         { return s.header }
 func (s *statusRecorder) Write(b []byte) (int, error) { return len(b), nil }
 func (s *statusRecorder) WriteHeader(status int)      { s.status = status }
 
-const (
-	pathParamID     = "id"
-	queryLimit      = "limit"
-	queryDir        = "dir"
-	contentTypeJSON = "application/json"
-	tagJSON         = "json"
-	tagOptionSep    = ","
-	ruleParamSep    = "="
-	jsonPointerRoot = "/"
-	maxBodyBytes    = 1 << 20
-)
+func newValidator() *validator.Validate {
+	v := validator.New()
+	v.RegisterTagNameFunc(func(f reflect.StructField) string {
+		name, _, _ := strings.Cut(f.Tag.Get(tagJSON), tagOptionSep)
+		return name
+	})
+
+	return v
+}
 
 type bodyResponse[T any] struct {
 	Body T `json:"body"`
@@ -144,16 +157,12 @@ type errorDetail struct {
 	Reason string `json:"reason"`
 }
 
-const queryOffset = "offset"
-
 type offsetPage[T any] struct {
 	Items   []T  `json:"items"`
 	Limit   int  `json:"limit"`
 	Offset  int  `json:"offset"`
 	HasMore bool `json:"has_more"`
 }
-
-const queryCursor = "cursor"
 
 type cursorPage[T any] struct {
 	Items      []T    `json:"items"`
@@ -164,30 +173,35 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	return json.UnmarshalRead(http.MaxBytesReader(w, r.Body, maxBodyBytes), v, json.RejectUnknownMembers(true))
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(status)
-	_ = json.MarshalWrite(w, v)
+
+	if err := json.MarshalWrite(w, v); err != nil {
+		slog.ErrorContext(r.Context(), "failed to write response", "method", r.Method, "path", r.URL.Path, "error", err)
+	}
 }
 
-func writeBody[T any](w http.ResponseWriter, status int, body T) {
-	writeJSON(w, status, bodyResponse[T]{Body: body})
+func writeBody[T any](w http.ResponseWriter, r *http.Request, status int, body T) {
+	writeJSON(w, r, status, bodyResponse[T]{Body: body})
 }
 
-func writeError(w http.ResponseWriter, status int, code, message string, details []errorDetail) {
-	writeJSON(w, status, errorResponse{Error: apiError{Code: code, Message: message, Details: details}})
+func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string, details ...errorDetail) {
+	writeJSON(w, r, status, errorResponse{Error: apiError{Code: code, Message: message, Details: details}})
 }
 
-func writeDecodeError(w http.ResponseWriter, err error) {
+func writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
-		writeError(w, http.StatusRequestEntityTooLarge, codeBodyTooLarge, "request body too large", nil)
+		writeError(w, r, http.StatusRequestEntityTooLarge, codeBodyTooLarge, "request body too large")
 		return
 	}
 
 	detail := errorDetail{Reason: reasonInvalidValue}
+
 	var semantic *json.SemanticError
 	var syntactic *jsontext.SyntacticError
+
 	switch {
 	case errors.As(err, &semantic):
 		detail.Field = string(semantic.JSONPointer)
@@ -195,13 +209,15 @@ func writeDecodeError(w http.ResponseWriter, err error) {
 		detail.Field = string(syntactic.JSONPointer)
 		detail.Reason = reasonSyntax
 	}
+
 	switch {
 	case errors.Is(err, json.ErrUnknownName):
 		detail.Reason = reasonUnknownField
 	case errors.Is(err, jsontext.ErrDuplicateName):
 		detail.Reason = reasonDuplicateField
 	}
-	writeError(w, http.StatusBadRequest, codeMalformedBody, "malformed request body", []errorDetail{detail})
+
+	writeError(w, r, http.StatusBadRequest, codeMalformedBody, "malformed request body", detail)
 }
 
 func writeValidationError(w http.ResponseWriter, r *http.Request, err error) {
@@ -210,47 +226,58 @@ func writeValidationError(w http.ResponseWriter, r *http.Request, err error) {
 		writeInternalError(w, r, err)
 		return
 	}
+
 	details := make([]errorDetail, len(fields))
 	for i, fe := range fields {
 		reason := fe.Tag()
 		if fe.Param() != "" {
 			reason += ruleParamSep + fe.Param()
 		}
+
 		details[i] = errorDetail{Field: jsonPointerRoot + fe.Field(), Reason: reason}
 	}
-	writeError(w, http.StatusUnprocessableEntity, codeValidationFailed, "request body failed validation", details)
+
+	writeError(w, r, http.StatusUnprocessableEntity, codeValidationFailed, "request body failed validation", details...)
 }
 
-func writeInvalidID(w http.ResponseWriter) {
-	writeError(w, http.StatusBadRequest, codeInvalidID, "invalid id", nil)
+func writeInvalidID(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusBadRequest, codeInvalidID, "invalid id")
 }
 
 func writeRepoError(w http.ResponseWriter, r *http.Request, err error) {
 	for sentinel, re := range repoErrors {
 		if errors.Is(err, sentinel) {
-			writeError(w, re.status, re.code, sentinel.Error(), nil)
+			writeError(w, r, re.status, re.code, sentinel.Error())
 			return
 		}
 	}
+
 	writeInternalError(w, r, err)
 }
 
 func writeInternalError(w http.ResponseWriter, r *http.Request, err error) {
 	slog.ErrorContext(r.Context(), "failed to handle request", "method", r.Method, "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusInternalServerError, codeInternal, http.StatusText(http.StatusInternalServerError), nil)
+	writeError(w, r, http.StatusInternalServerError, codeInternal, http.StatusText(http.StatusInternalServerError))
 }
 
 func valueOr[T any](p *T, def T) T {
 	if p == nil {
 		return def
 	}
+
 	return *p
 }
 
-const (
-	defaultLimit = 50
-	maxLimit     = 200
-)
+// pathID parses the {id} path segment and answers 400 when it is malformed.
+func pathID[T any](w http.ResponseWriter, r *http.Request, parse func(string) (T, error)) (T, bool) {
+	id, err := parse(r.PathValue(pathParamID))
+	if err != nil {
+		writeInvalidID(w, r)
+		return id, false
+	}
+
+	return id, true
+}
 
 type listQuery struct {
 	values  url.Values
@@ -269,6 +296,7 @@ func newListQuery(r *http.Request, keys ...string) *listQuery {
 			q.details = append(q.details, errorDetail{Field: key, Reason: reasonDuplicateField})
 		}
 	}
+
 	return q
 }
 
@@ -283,10 +311,12 @@ func (q *listQuery) limit() int {
 	if v == "" {
 		return defaultLimit
 	}
+
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		q.invalid(queryLimit)
 	}
+
 	return min(n, maxLimit)
 }
 
@@ -295,11 +325,37 @@ func (q *listQuery) offset() int {
 	if v == "" {
 		return 0
 	}
+
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 0 {
 		q.invalid(queryOffset)
 	}
+
 	return n
+}
+
+func (q *listQuery) dir() blog.SortDir {
+	d, ok := blog.ParseSortDir(q.values.Get(queryDir))
+	if !ok {
+		q.invalid(queryDir)
+	}
+
+	return d
+}
+
+// queryValue returns nil when key is absent, so the filter is not applied.
+func queryValue[T any](q *listQuery, key string, parse func(string) (T, error)) *T {
+	if !q.values.Has(key) {
+		return nil
+	}
+
+	v, err := parse(q.values.Get(key))
+	if err != nil {
+		q.invalid(key)
+		return nil
+	}
+
+	return &v
 }
 
 // queryCursorValue returns nil when ?cursor= is absent, so the first page is
@@ -308,15 +364,19 @@ func queryCursorValue[C any](q *listQuery) *C {
 	if !q.values.Has(queryCursor) {
 		return nil
 	}
+
 	var c C
+
 	raw, err := base64.RawURLEncoding.DecodeString(q.values.Get(queryCursor))
 	if err == nil {
 		err = json.Unmarshal(raw, &c, json.RejectUnknownMembers(true))
 	}
+
 	if err != nil {
 		q.invalid(queryCursor)
 		return nil
 	}
+
 	return &c
 }
 
@@ -325,15 +385,8 @@ func encodeCursor(c any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode cursor: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
 
-func (q *listQuery) dir() blog.SortDir {
-	d, ok := blog.ParseSortDir(q.values.Get(queryDir))
-	if !ok {
-		q.invalid(queryDir)
-	}
-	return d
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // trimPage drops the extra row fetched past limit, which only tells whether
@@ -342,29 +395,12 @@ func trimPage[T any](items []T, limit int) ([]T, bool) {
 	if len(items) > limit {
 		return items[:limit], true
 	}
-	return items, false
-}
 
-// queryValue returns nil when key is absent, so the filter is not applied.
-func queryValue[T any](q *listQuery, key string, parse func(string) (T, error)) *T {
-	if !q.values.Has(key) {
-		return nil
-	}
-	v, err := parse(q.values.Get(key))
-	if err != nil {
-		q.invalid(key)
-		return nil
-	}
-	return &v
+	return items, false
 }
 
 func parseString(s string) (string, error) {
 	return s, nil
-}
-
-func parseInt32(s string) (int32, error) {
-	n, err := strconv.ParseInt(s, 10, 32)
-	return int32(n), err
 }
 
 func parseInt64(s string) (int64, error) {
@@ -377,5 +413,6 @@ func parseText[T any, P interface {
 }](s string) (T, error) {
 	var v T
 	err := P(&v).UnmarshalText([]byte(s))
+
 	return v, err
 }

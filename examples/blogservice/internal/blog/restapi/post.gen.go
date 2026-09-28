@@ -15,6 +15,11 @@ const (
 	queryPostAuthor    = "author"
 )
 
+const (
+	defaultPostPublished = false
+	defaultPostViews     = 0
+)
+
 type postCursor struct {
 	Dir   blog.SortDir    `json:"dir"`
 	After blog.PostCursor `json:"after"`
@@ -62,18 +67,20 @@ func RegisterPostRoutes(mux *http.ServeMux, h *PostHandler) {
 func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreatePostRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+		writeDecodeError(w, r, err)
 		return
 	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := blog.Post{
 		Title:     req.Title,
 		Body:      req.Body,
-		Published: valueOr(req.Published, false),
-		Views:     valueOr(req.Views, 0),
+		Published: valueOr(req.Published, defaultPostPublished),
+		Views:     valueOr(req.Views, defaultPostViews),
 		Metadata:  req.Metadata,
 		Author:    req.Author,
 	}
@@ -81,21 +88,23 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusCreated, m)
+
+	writeBody(w, r, http.StatusCreated, m)
 }
 
 func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue(pathParamID))
-	if err != nil {
-		writeInvalidID(w)
+	id, ok := pathID(w, r, parseText[uuid.UUID])
+	if !ok {
 		return
 	}
+
 	m, err := h.repo.Get(r.Context(), id)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -107,23 +116,29 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 		Dir:       q.dir(),
 		Limit:     limit + 1,
 	}
+
 	if c := queryCursorValue[postCursor](q); c != nil {
 		if c.Dir != p.Dir {
 			q.invalid(queryCursor)
 		}
+
 		p.After = &c.After
 	}
+
 	if q.details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
+		writeError(w, r, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details...)
 		return
 	}
+
 	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	items, more := trimPage(items, limit)
 	page := cursorPage[blog.Post]{Items: items}
+
 	if more {
 		last := items[len(items)-1]
 		c := postCursor{
@@ -133,35 +148,39 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 				ID:        last.ID,
 			},
 		}
+
 		if page.NextCursor, err = encodeCursor(c); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 	}
-	writeBody(w, http.StatusOK, page)
+
+	writeBody(w, r, http.StatusOK, page)
 }
 
 func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue(pathParamID))
-	if err != nil {
-		writeInvalidID(w)
+	id, ok := pathID(w, r, parseText[uuid.UUID])
+	if !ok {
 		return
 	}
+
 	var req UpdatePostRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+		writeDecodeError(w, r, err)
 		return
 	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := blog.Post{
 		ID:        id,
 		Title:     req.Title,
 		Body:      req.Body,
-		Published: valueOr(req.Published, false),
-		Views:     valueOr(req.Views, 0),
+		Published: valueOr(req.Published, defaultPostPublished),
+		Views:     valueOr(req.Views, defaultPostViews),
 		Metadata:  req.Metadata,
 		Author:    req.Author,
 	}
@@ -169,18 +188,20 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *PostHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue(pathParamID))
-	if err != nil {
-		writeInvalidID(w)
+	id, ok := pathID(w, r, parseText[uuid.UUID])
+	if !ok {
 		return
 	}
+
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

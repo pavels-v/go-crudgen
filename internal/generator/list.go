@@ -16,7 +16,7 @@ const (
 const (
 	exprWhereEqual = "%s = ?"
 	exprOrderDesc  = "%s DESC"
-	exprParseText  = "parseText[%s]"
+	exprParseText  = parseText + "[%s]"
 	exprAfterKey   = "%s %s ?"
 	exprAfterPair  = "(%s, %s) %s (?, ?)"
 	exprAfterField = "p.After.%s"
@@ -28,6 +28,7 @@ const (
 	parseString = "parseString"
 	parseInt32  = "parseInt32"
 	parseInt64  = "parseInt64"
+	parseText   = "parseText"
 	parseBool   = "strconv.ParseBool"
 )
 

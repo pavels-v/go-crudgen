@@ -58,9 +58,11 @@ var _ blog.TagRepository = (*TagRepository)(nil)
 
 func (r *TagRepository) Create(ctx context.Context, m *blog.Tag) error {
 	row := newTagRow(m)
+
 	if _, err := r.db.ExecContext(ctx, `INSERT INTO tags (slug, label, color, weight) VALUES ($1, $2, $3, $4)`, row.Slug, row.Label, row.Color, row.Weight); err != nil {
 		return fmt.Errorf("create tag: %w", mapWriteError(err))
 	}
+
 	return nil
 }
 
@@ -72,7 +74,9 @@ func (r *TagRepository) Get(ctx context.Context, id string) (*blog.Tag, error) {
 		}
 		return nil, fmt.Errorf("get tag: %w", err)
 	}
+
 	m := row.toModel()
+
 	return &m, nil
 }
 
@@ -82,31 +86,38 @@ func (r *TagRepository) List(ctx context.Context, p blog.TagListParams) ([]blog.
 		order = `slug DESC`
 	}
 
-	var rows []tagRow
 	q := `SELECT slug, label, color, weight FROM tags ORDER BY ` + order + ` LIMIT $1 OFFSET $2`
+
+	var rows []tagRow
 	if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset); err != nil {
 		return nil, fmt.Errorf("list tag: %w", err)
 	}
+
 	out := make([]blog.Tag, len(rows))
 	for i := range rows {
 		out[i] = rows[i].toModel()
 	}
+
 	return out, nil
 }
 
 func (r *TagRepository) Update(ctx context.Context, m *blog.Tag) error {
 	row := newTagRow(m)
+
 	res, err := r.db.ExecContext(ctx, `UPDATE tags SET label = $1, color = $2, weight = $3 WHERE slug = $4`, row.Label, row.Color, row.Weight, row.Slug)
 	if err != nil {
 		return fmt.Errorf("update tag: %w", mapWriteError(err))
 	}
+
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update tag: %w", err)
 	}
+
 	if n == 0 {
 		return blog.ErrNotFound
 	}
+
 	return nil
 }
 
@@ -115,12 +126,15 @@ func (r *TagRepository) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", mapDeleteError(err))
 	}
+
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", err)
 	}
+
 	if n == 0 {
 		return blog.ErrNotFound
 	}
+
 	return nil
 }

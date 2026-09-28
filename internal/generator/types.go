@@ -26,7 +26,7 @@ func (gt goType) outside(s *spec.Spec) goType {
 }
 
 // Go type expressions emitted for spec field types. scalarType produces these and
-// pkParser matches against them, so sharing the constants keeps the two in sync.
+// pathAddressable matches against them, so sharing the constants keeps the two in sync.
 const (
 	goString  = "string"
 	goInt32   = "int32"
@@ -164,37 +164,15 @@ func scalarType(t string) (goType, bool) {
 
 const exprQualified = "%s.%s"
 
-const (
-	exprPathValue = "r.PathValue(pathParamID)"
-	exprParseInt  = "strconv.ParseInt(%s, 10, %d)"
-	exprParseUUID = "uuid.Parse(%s)"
-)
-
-// pkParse describes how a primary key of the given Go type is parsed from the
-// `{id}` path segment inside a handler.
-type pkParse struct {
-	expr     string // expression yielding the id (and an error when needsErr)
-	needsErr bool   // false for string, which needs no parsing
-	imp      string // import the parse expression needs ("" for none)
-	cast     string // Go type to convert the parsed value to ("" when expr already yields the PK type)
-}
-
-// pkParser returns how to parse a path id into the given Go primary-key type.
-// ok is false for types we do not generate handlers for (decimal, time, json).
-func pkParser(goExpr string) (pkParse, bool) {
-	id := exprPathValue
+// pathAddressable reports whether a primary key of the given Go type can be
+// parsed from the {id} path segment.
+func pathAddressable(goExpr string) bool {
 	switch goExpr {
-	case goString:
-		return pkParse{expr: id}, true
-	case goInt32:
-		// strconv has no parse-to-int32, so parse with a 32-bit size and cast.
-		return pkParse{expr: fmt.Sprintf(exprParseInt, id, 32), needsErr: true, imp: importStrconv, cast: goInt32}, true
-	case goInt64:
-		return pkParse{expr: fmt.Sprintf(exprParseInt, id, 64), needsErr: true, imp: importStrconv}, true
-	case goUUID:
-		return pkParse{expr: fmt.Sprintf(exprParseUUID, id), needsErr: true, imp: importUUID}, true
+	case goString, goInt32, goInt64, goUUID:
+		return true
 	}
-	return pkParse{}, false
+
+	return false
 }
 
 // fieldType resolves a field's Go type. For references it derives the type from

@@ -26,7 +26,7 @@ func dbInfo(s *spec.Spec, driverName, driverImp string) dbData {
 			importSQLx:   {},
 			driverImp:    {},
 			s.Module:     {},
-		}, s.Module),
+		}, s.Module, s.Package),
 		Domain:       s.Package,
 		DriverName:   driverName,
 		DriverImport: driverImp,
@@ -185,7 +185,7 @@ type assign struct {
 
 // repoInfo builds the repository template data for an entity.
 func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (repoData, error) {
-	pk, gt, _, err := serveKey(e, byName)
+	pk, gt, err := serveKey(e, byName)
 	if err != nil {
 		return repoData{}, err
 	}
@@ -365,7 +365,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed
 	// context/database/sql/errors/fmt/sqlx packages.
-	imports := groupImports(impSet, s.Module)
+	imports := groupImports(impSet, s.Module, s.Package)
 
 	return repoData{
 		Package:         pkgPostgres,

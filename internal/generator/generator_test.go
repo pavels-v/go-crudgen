@@ -4,6 +4,7 @@ import (
 	"go/parser"
 	"go/token"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -324,7 +325,8 @@ func TestRenderModel_ClientKeyAndDefaults(t *testing.T) {
 		"type CreateTagRequest struct { Slug string `json:\"slug\" validate:\"required\"` Published *bool `json:\"published\"` }",
 		"type UpdateTagRequest struct { Published *bool `json:\"published\"` }",
 		"Slug: req.Slug,",
-		"Published: valueOr(req.Published, false),",
+		"defaultTagPublished = false",
+		"Published: valueOr(req.Published, defaultTagPublished),",
 	} {
 		wantContains(t, handler, want)
 	}
@@ -379,23 +381,22 @@ func TestRenderHandler_RoutesAndStatusCodes(t *testing.T) {
 		`"example.com/blog"`,
 		"repo blog.PostRepository",
 		"m := blog.Post{",
-		"id, err := uuid.Parse(r.PathValue(pathParamID))",
-		"writeDecodeError(w, err)",
+		"id, ok := pathID(w, r, parseText[uuid.UUID]) if !ok { return }",
+		"writeDecodeError(w, r, err)",
 		"writeValidationError(w, r, err)",
-		"writeInvalidID(w)",
-		"writeBody(w, http.StatusCreated, m)",
+		"writeBody(w, r, http.StatusCreated, m)",
 		"q := newListQuery(r, queryOffset) limit := q.limit() p := blog.PostListParams{ Dir: q.dir(), Limit: limit + 1, Offset: q.offset(), }",
 		"items, err := h.repo.List(r.Context(), p)",
 		"items, more := trimPage(items, limit)",
-		"writeBody(w, http.StatusOK, offsetPage[blog.Post]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})",
-		"writeError(w, http.StatusBadRequest, codeInvalidQuery,",
+		"writeBody(w, r, http.StatusOK, offsetPage[blog.Post]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})",
+		"writeError(w, r, http.StatusBadRequest, codeInvalidQuery, \"invalid query parameters\", q.details...)",
 		"w.WriteHeader(http.StatusNoContent)",
 	} {
 		wantContains(t, got, want)
 	}
 }
 
-func TestRenderHandler_StringPKNeedsNoParse(t *testing.T) {
+func TestRenderHandler_StringPKUsesParseString(t *testing.T) {
 	t.Parallel()
 
 	s := &spec.Spec{
@@ -408,14 +409,12 @@ func TestRenderHandler_StringPKNeedsNoParse(t *testing.T) {
 	}
 
 	got := renderHandlerSrc(t, s, "Tag")
-	wantContains(t, got, `id := r.PathValue(pathParamID)`)
+	wantContains(t, got, "id, ok := pathID(w, r, parseString)")
 }
 
-func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
+func TestRenderHandler_Int32PKUsesParseInt32(t *testing.T) {
 	t.Parallel()
 
-	// int32 has no single-expression strconv parser: the handler parses with a
-	// 32-bit size and casts the int64 result down to the int32 key type.
 	s := &spec.Spec{
 		Package: "shop",
 		Module:  "example.com/shop",
@@ -425,13 +424,7 @@ func TestRenderHandler_Int32PKParsesAndCasts(t *testing.T) {
 		}},
 	}
 
-	got := renderHandlerSrc(t, s, "Widget")
-	for _, want := range []string{
-		`idRaw, err := strconv.ParseInt(r.PathValue(pathParamID), 10, 32)`,
-		"id := int32(idRaw)",
-	} {
-		wantContains(t, got, want)
-	}
+	wantContains(t, renderHandlerSrc(t, s, "Widget"), "id, ok := pathID(w, r, parseInt32)")
 
 	wantContains(t, render(t, s, "Widget"), "Get(ctx context.Context, id int32) (*Widget, error)")
 }
@@ -538,7 +531,7 @@ func TestRenderRepo_WithoutTimestamps(t *testing.T) {
 	for _, want := range []string{
 		"SELECT id, name FROM accounts WHERE id = $1",
 		"order := `id` if p.Dir == app.SortDesc { order = `id DESC` }",
-		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
+		"q := `SELECT id, name FROM accounts ORDER BY ` + order + ` LIMIT $1 OFFSET $2` var rows []accountRow if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset)",
 		"DELETE FROM accounts WHERE id = $1",
 		// no timestamps -> Exec + RowsAffected for the not-found check
 		"res.RowsAffected()",
@@ -614,7 +607,7 @@ func TestRenderList_FiltersAndOrder(t *testing.T) {
 				"q := `SELECT id, title, author, published_on, views, published FROM posts`",
 				"q += ` WHERE ` + strings.Join(where, ` AND `)",
 				"order := `title, id` if p.Dir == blog.SortDesc { order = `title DESC, id DESC` }",
-				"q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?` args = append(args, p.Limit, p.Offset)",
+				"args = append(args, p.Limit, p.Offset) q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`",
 				"r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...)",
 				`"strings"`,
 			},
@@ -699,7 +692,7 @@ func TestRenderList_CursorPagination(t *testing.T) {
 			want: []string{
 				"order, after := `created_at, id`, `(created_at, id) > (?, ?)` if p.Dir == blog.SortDesc { order, after = `created_at DESC, id DESC`, `(created_at, id) < (?, ?)` }",
 				"if p.After != nil { where = append(where, after) args = append(args, p.After.CreatedAt, p.After.ID) }",
-				"q += ` ORDER BY ` + order + ` LIMIT ?` args = append(args, p.Limit)",
+				"args = append(args, p.Limit) q += ` ORDER BY ` + order + ` LIMIT ?`",
 			},
 			absent: []string{"OFFSET"},
 		},
@@ -747,8 +740,8 @@ func TestRenderList_CursorPagination(t *testing.T) {
 func TestRenderRouter_PaginationHelpers(t *testing.T) {
 	t.Parallel()
 
-	offset := []string{"const queryOffset", "type offsetPage[T any]", "func (q *listQuery) offset() int"}
-	cursor := []string{"const queryCursor", "type cursorPage[T any]", "func queryCursorValue[C any]", "func encodeCursor(", `"encoding/base64"`}
+	offset := []string{`queryOffset = "offset"`, "type offsetPage[T any]", "func (q *listQuery) offset() int"}
+	cursor := []string{`queryCursor = "cursor"`, "type cursorPage[T any]", "func queryCursorValue[C any]", "func encodeCursor(", `"encoding/base64"`}
 	cases := []struct {
 		name   string
 		shared sharedFiles
@@ -775,6 +768,51 @@ func TestRenderRouter_PaginationHelpers(t *testing.T) {
 
 			for _, absent := range tc.absent {
 				require.NotContains(t, got, absent)
+			}
+		})
+	}
+}
+
+func TestRenderRouter_ParseHelpers(t *testing.T) {
+	t.Parallel()
+
+	helpers := map[string]string{
+		parseString: "func parseString(",
+		parseInt32:  "func parseInt32(",
+		parseInt64:  "func parseInt64(",
+		parseText:   "func parseText[",
+	}
+	cases := []struct {
+		name    string
+		parsers map[string]bool
+	}{
+		{name: "none", parsers: map[string]bool{}},
+		{name: "string only", parsers: map[string]bool{parseString: true}},
+		{name: "ints", parsers: map[string]bool{parseInt32: true, parseInt64: true}},
+		{name: "text", parsers: map[string]bool{parseText: true}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			src, err := renderRouter(routerInfo(&spec.Spec{Package: "blog", Module: "example.com/blog"}, sharedFiles{Offset: true, Parsers: tc.parsers}))
+			require.NoError(t, err)
+			requireParses(t, src)
+
+			got := string(src)
+			for helper, decl := range helpers {
+				if tc.parsers[helper] {
+					wantContains(t, got, decl)
+				} else {
+					require.NotContains(t, got, decl)
+				}
+			}
+
+			if tc.parsers[parseText] {
+				wantContains(t, got, `"encoding"`)
+			} else {
+				require.NotContains(t, got, `"encoding"`)
 			}
 		})
 	}
@@ -1204,10 +1242,10 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 	for _, want := range []string{
 		"package restapi",
 		`"example.com/blog"`,
-		"blog.ErrNotFound: {http.StatusNotFound, codeNotFound},",
-		"blog.ErrAlreadyExists: {http.StatusConflict, codeAlreadyExists},",
-		"blog.ErrReferenceNotFound: {http.StatusUnprocessableEntity, codeReferenceNotFound},",
-		"blog.ErrStillReferenced: {http.StatusConflict, codeStillReferenced},",
+		"blog.ErrNotFound: {status: http.StatusNotFound, code: codeNotFound},",
+		"blog.ErrAlreadyExists: {status: http.StatusConflict, code: codeAlreadyExists},",
+		"blog.ErrReferenceNotFound: {status: http.StatusUnprocessableEntity, code: codeReferenceNotFound},",
+		"blog.ErrStillReferenced: {status: http.StatusConflict, code: codeStillReferenced},",
 		`codeValidationFailed = "validation_failed"`,
 		"type bodyResponse[T any] struct { Body T `json:\"body\"` }",
 		"type errorResponse struct { Error apiError `json:\"error\"` }",
@@ -1215,8 +1253,9 @@ func TestRenderRouter_WiresEntities(t *testing.T) {
 		"type offsetPage[T any] struct { Items []T `json:\"items\"` Limit int `json:\"limit\"` Offset int `json:\"offset\"` HasMore bool `json:\"has_more\"` }",
 		"func (q *listQuery) dir() blog.SortDir { d, ok := blog.ParseSortDir(q.values.Get(queryDir)) if !ok { q.invalid(queryDir) } return d }",
 		"func trimPage[T any](items []T, limit int) ([]T, bool) {",
-		"writeError(w, http.StatusUnprocessableEntity, codeValidationFailed,",
-		"writeError(w, http.StatusInternalServerError, codeInternal, http.StatusText(http.StatusInternalServerError), nil)",
+		"writeError(w, r, http.StatusUnprocessableEntity, codeValidationFailed, \"request body failed validation\", details...)",
+		"writeError(w, r, http.StatusInternalServerError, codeInternal, http.StatusText(http.StatusInternalServerError))",
+		"if err := json.MarshalWrite(w, v); err != nil {",
 		"func valueOr[T any](p *T, def T) T",
 		"json.UnmarshalRead(http.MaxBytesReader(w, r.Body, maxBodyBytes), v, json.RejectUnknownMembers(true))",
 		"func NewRouter(deps Deps) http.Handler {",
@@ -1303,11 +1342,15 @@ func TestSnakeCase(t *testing.T) {
 func TestGroupImports(t *testing.T) {
 	t.Parallel()
 
-	const testModule = "example.com/blog"
+	const (
+		testModule  = "example.com/blog"
+		testPackage = "blog"
+	)
 
 	cases := []struct {
 		name   string
 		module string
+		pkg    string
 		in     []string
 		want   []string
 	}{
@@ -1335,6 +1378,12 @@ func TestGroupImports(t *testing.T) {
 			in:     []string{importNetHTTP, "blogservice/internal/blog", importUUID},
 			want:   []string{importNetHTTP, "", importUUID, "", "blogservice/internal/blog"},
 		},
+		{
+			name: "own module aliased when its name differs from the path",
+			pkg:  "shop",
+			in:   []string{importNetHTTP, testModule},
+			want: []string{importNetHTTP, "", `shop "example.com/blog"`},
+		},
 	}
 
 	for _, tc := range cases {
@@ -1351,7 +1400,25 @@ func TestGroupImports(t *testing.T) {
 				module = testModule
 			}
 
-			require.Equal(t, tc.want, groupImports(set, module))
+			pkg := tc.pkg
+			if pkg == "" {
+				pkg = testPackage
+			}
+
+			want := make([]string, len(tc.want))
+			for i, w := range tc.want {
+				if w != "" && !strings.Contains(w, `"`) {
+					w = strconv.Quote(w)
+				}
+
+				want[i] = w
+			}
+
+			if tc.want == nil {
+				want = nil
+			}
+
+			require.Equal(t, want, groupImports(set, module, pkg))
 		})
 	}
 }

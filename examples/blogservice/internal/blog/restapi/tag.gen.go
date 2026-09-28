@@ -6,6 +6,11 @@ import (
 	"example.com/blogservice/internal/blog"
 )
 
+const (
+	defaultTagColor  = "gray"
+	defaultTagWeight = 1
+)
+
 // CreateTagRequest is the request body for creating the tag entity.
 type CreateTagRequest struct {
 	Slug   string   `json:"slug" validate:"required"`
@@ -43,34 +48,42 @@ func RegisterTagRoutes(mux *http.ServeMux, h *TagHandler) {
 func (h *TagHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateTagRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+		writeDecodeError(w, r, err)
 		return
 	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := blog.Tag{
 		Slug:   req.Slug,
 		Label:  req.Label,
-		Color:  valueOr(req.Color, "gray"),
-		Weight: valueOr(req.Weight, 1),
+		Color:  valueOr(req.Color, defaultTagColor),
+		Weight: valueOr(req.Weight, defaultTagWeight),
 	}
 	if err := h.repo.Create(r.Context(), &m); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusCreated, m)
+
+	writeBody(w, r, http.StatusCreated, m)
 }
 
 func (h *TagHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue(pathParamID)
+	id, ok := pathID(w, r, parseString)
+	if !ok {
+		return
+	}
+
 	m, err := h.repo.Get(r.Context(), id)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *TagHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -81,48 +94,63 @@ func (h *TagHandler) List(w http.ResponseWriter, r *http.Request) {
 		Limit:  limit + 1,
 		Offset: q.offset(),
 	}
+
 	if q.details != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details)
+		writeError(w, r, http.StatusBadRequest, codeInvalidQuery, "invalid query parameters", q.details...)
 		return
 	}
+
 	items, err := h.repo.List(r.Context(), p)
 	if err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	items, more := trimPage(items, limit)
-	writeBody(w, http.StatusOK, offsetPage[blog.Tag]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
+	writeBody(w, r, http.StatusOK, offsetPage[blog.Tag]{Items: items, Limit: limit, Offset: p.Offset, HasMore: more})
 }
 
 func (h *TagHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue(pathParamID)
-	var req UpdateTagRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeDecodeError(w, err)
+	id, ok := pathID(w, r, parseString)
+	if !ok {
 		return
 	}
+
+	var req UpdateTagRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, r, err)
+		return
+	}
+
 	if err := validate.Struct(req); err != nil {
 		writeValidationError(w, r, err)
 		return
 	}
+
 	m := blog.Tag{
 		Slug:   id,
 		Label:  req.Label,
-		Color:  valueOr(req.Color, "gray"),
-		Weight: valueOr(req.Weight, 1),
+		Color:  valueOr(req.Color, defaultTagColor),
+		Weight: valueOr(req.Weight, defaultTagWeight),
 	}
 	if err := h.repo.Update(r.Context(), &m); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
-	writeBody(w, http.StatusOK, m)
+
+	writeBody(w, r, http.StatusOK, m)
 }
 
 func (h *TagHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue(pathParamID)
+	id, ok := pathID(w, r, parseString)
+	if !ok {
+		return
+	}
+
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		writeRepoError(w, r, err)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
