@@ -48,6 +48,7 @@ go-crudgen generate --spec ./api.yaml --out ./internal/api                      
 go-crudgen generate --spec ./api.yaml --out ./internal/api --driver pq
 go-crudgen generate --spec ./api.yaml --out ./internal/api --main ./cmd/api      # main.go elsewhere than cmd/<package>
 go-crudgen generate --spec ./api.yaml --out ./internal/api --no-router --no-main # wire the service yourself
+go-crudgen generate --spec ./api.yaml --out ./internal/api --no-tests            # skip the handler tests
 cd ./internal/api && go mod tidy
 ```
 
@@ -79,6 +80,7 @@ Developer tasks: `make help`.
 - `restapi/request.go`, `response.go`, `query.go` - request decoding, response envelope, List query parsing.
 - `restapi/routes.go` - `WithRouteErrors`: the JSON envelope for unmatched routes.
 - `restapi/router.go` - `NewRouter` and `Deps` wiring every entity, unless `--no-router`.
+- `restapi/<entity>_test.go` and `restapi/fake_test.go`, unless `--no-tests`: table-driven handler tests over an in-memory fake repository, with request fixtures picked to pass each field's `validate` rules.
 - `postgres/<entity>.go` - `sqlx` PostgreSQL repository.
 - `postgres/db.go` - `NewDB` with the driver blank-imported (`pgx` default, `pq` via `--driver`).
 - `postgres/nulls.go` - `sql.Null[T]` helpers, emitted when any column is nullable.
@@ -149,7 +151,7 @@ entities:
 - [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, `NewRouter` unless `--no-router`
 - [x] Reject `validate` rules the validator ignores or misapplies (`min`/`max` on `date` and `datetime`, rules on `decimal`, length rules on `uuid`)
 - [x] Service entry point: `main.go` with config, `NewDB`, migrations, routes and graceful shutdown, unless `--no-main`
-- [ ] Handler test scaffold: `restapi/<entity>_test.go` with a fake repository and table-driven tests
+- [x] Handler test scaffold: `restapi/<entity>_test.go` with a fake repository and table-driven tests
 
 ## License
 

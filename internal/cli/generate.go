@@ -20,6 +20,7 @@ const (
 	flagNoRouter = "no-router"
 	flagMain     = "main"
 	flagNoMain   = "no-main"
+	flagNoTests  = "no-tests"
 )
 
 const envSourceDateEpoch = "SOURCE_DATE_EPOCH"
@@ -33,6 +34,7 @@ func runGenerate(args []string) int {
 	noRouter := fs.Bool(flagNoRouter, false, "skip restapi.NewRouter and Deps; wire the routes yourself")
 	mainDir := fs.String(flagMain, "", "directory for main.go (default: cmd/<package> next to the nearest go.mod)")
 	noMain := fs.Bool(flagNoMain, false, "skip main.go and migrations/embed.go")
+	noTests := fs.Bool(flagNoTests, false, "skip restapi handler tests and their fake repository")
 
 	if err := fs.Parse(args); err != nil {
 		// An explicit -h/--help is a success, not a usage error; flag has
@@ -70,7 +72,7 @@ func runGenerate(args []string) int {
 		return exitUsage
 	}
 
-	opts := generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: !*noRouter, Main: !*noMain, MainDir: *mainDir, MigrationTime: migrationTime}
+	opts := generator.Options{OutDir: *outDir, DryRun: *dryRun, Driver: *driver, Router: !*noRouter, Main: !*noMain, MainDir: *mainDir, Tests: !*noTests, MigrationTime: migrationTime}
 	if err := generator.Generate(s, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to generate: %v\n", err)
 		return exitError

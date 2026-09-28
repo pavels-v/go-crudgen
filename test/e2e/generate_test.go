@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,7 +47,7 @@ func clean(t *testing.T, dir string) {
 		require.NoError(t, err, "glob %s", pattern)
 
 		for _, m := range matches {
-			if strings.HasSuffix(m, "_test.go") {
+			if filepath.Base(m) == "api_test.go" {
 				continue
 			}
 
@@ -92,6 +91,11 @@ func TestGenerateBlogExample(t *testing.T) {
 		filepath.Join("restapi", "query.go"),
 		filepath.Join("restapi", "routes.go"),
 		filepath.Join("restapi", "router.go"),
+		filepath.Join("restapi", "fake_test.go"),
+		filepath.Join("restapi", "post_test.go"),
+		filepath.Join("restapi", "author_test.go"),
+		filepath.Join("restapi", "comment_test.go"),
+		filepath.Join("restapi", "tag_test.go"),
 		filepath.Join("postgres", "post.go"),
 		filepath.Join("postgres", "author.go"),
 		filepath.Join("postgres", "comment.go"),

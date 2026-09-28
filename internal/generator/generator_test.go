@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/require"
 
 	"go-crudgen/internal/spec"
@@ -1456,6 +1457,122 @@ func TestMainFiles(t *testing.T) {
 			}, tc.want...) {
 				wantContains(t, got, want)
 			}
+		})
+	}
+}
+
+func TestRenderHandlerTest_Keys(t *testing.T) {
+	t.Parallel()
+
+	category := spec.Entity{Name: "Category", Fields: []spec.Field{{Name: "id", Type: spec.TypeInt32, Primary: true}}}
+	cases := []struct {
+		name   string
+		entity spec.Entity
+		want   []string
+		absent []string
+	}{
+		{
+			name:   "generated uuid key",
+			entity: spec.Entity{Name: "Post", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
+			want:   []string{"return &m.ID }, uuid.New)", "id: seeded.ID.String()", "id: uuid.NewString()", `id: "not-an-id"`},
+		},
+		{
+			name:   "generated int32 key",
+			entity: category,
+			want:   []string{"var seq int32", "id: strconv.FormatInt(int64(seeded.ID), 10)", "id: strconv.FormatInt(int64(seeded.ID)+1, 10)"},
+		},
+		{
+			name:   "client string key",
+			entity: spec.Entity{Name: "Tag", Fields: []spec.Field{{Name: "slug", Type: spec.TypeString, Primary: true}}},
+			want:   []string{"return &m.Slug }, nil)", `m := domain.Tag{Slug: "sample"}`, "id: seeded.Slug", `id: "missing"`, `Slug: "sample",`},
+			absent: []string{"not-an-id"},
+		},
+		{
+			name:   "client key referencing an int32 key",
+			entity: spec.Entity{Name: "Stock", Fields: []spec.Field{{Name: "category", Type: spec.TypeReferences, Target: "Category", Primary: true}}},
+			want:   []string{"m := domain.Stock{Category: int32(1)}", "Category: new(int32(1)),"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{Package: "blog", Module: "example.com/blog", Entities: []spec.Entity{category, tc.entity}}
+			src, err := renderHandlerTest(s, &s.Entities[1], entitiesByName(s), validator.New())
+			require.NoError(t, err)
+			requireParses(t, src)
+
+			got := string(src)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
+	}
+}
+
+func TestPickSample(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		fieldType string
+		validate  string
+		want      string
+	}{
+		{name: "no rules", fieldType: spec.TypeString, want: `"sample"`},
+		{name: "email", fieldType: spec.TypeString, validate: "required,email", want: `"user@example.com"`},
+		{name: "url", fieldType: spec.TypeText, validate: "url", want: `"https://example.com"`},
+		{name: "exact length", fieldType: spec.TypeString, validate: "len=3", want: `"aaa"`},
+		{name: "short maximum", fieldType: spec.TypeString, validate: "max=2", want: `"a"`},
+		{name: "number range", fieldType: spec.TypeInt64, validate: "gte=5,lte=200", want: "int64(100)"},
+		{name: "float above one", fieldType: spec.TypeFloat, validate: "gt=1", want: "1.5"},
+		{name: "unsatisfiable falls back", fieldType: spec.TypeInt32, validate: "gt=1000", want: "int32(1)"},
+	}
+
+	v := validator.New()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tc.want, pickSample(v, samples(tc.fieldType, tc.validate), tc.validate).expr)
+		})
+	}
+}
+
+func TestRenderFiles_Tests(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{Package: "blog", Module: "example.com/blog", Entities: []spec.Entity{
+		{Name: "Post", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
+	}}
+
+	cases := []struct {
+		name  string
+		tests bool
+	}{
+		{name: "without tests"},
+		{name: "with tests", tests: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, Options{Tests: tc.tests})
+			require.NoError(t, err)
+
+			paths := make([]string, len(files))
+			for i, f := range files {
+				paths[i] = f.Path
+			}
+
+			require.Equal(t, tc.tests, slices.Contains(paths, "restapi/post_test.go"))
+			require.Equal(t, tc.tests, slices.Contains(paths, fileFakeTest))
 		})
 	}
 }

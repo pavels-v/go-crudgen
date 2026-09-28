@@ -18,6 +18,8 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/go-playground/validator/v10"
+
 	"go-crudgen/internal/spec"
 )
 
@@ -128,6 +130,7 @@ type Options struct {
 
 	MigrationTime time.Time // version of the first migration, the next ones follow a second apart; zero means now
 	Main          bool      // emit main.go and migrations/embed.go
+	Tests         bool      // emit restapi handler tests with a fake repository
 	MainDir       string    // directory for main.go; empty means cmd/<package> next to the nearest go.mod
 }
 
@@ -325,6 +328,7 @@ func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, drive
 
 	files := make([]genFile, 0, len(s.Entities)*filesPerEntity)
 	shared := sharedFiles{Parsers: make(map[string]bool), Router: opts.Router}
+	v := validator.New()
 
 	for i := range s.Entities {
 		e := &s.Entities[i]
@@ -335,6 +339,15 @@ func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, drive
 		}
 
 		files = append(files, ef...)
+
+		if opts.Tests {
+			tsrc, err := renderHandlerTest(s, e, byName, v)
+			if err != nil {
+				return nil, fmt.Errorf("generate handler tests for %q: %w", e.Name, err)
+			}
+
+			files = append(files, genFile{Path: fmt.Sprintf(fileHandlerTest, snakeCase(e.Name)), Src: tsrc})
+		}
 
 		shared.Nullable = shared.Nullable || rd.HasNullable
 		shared.Date = shared.Date || hasFieldType(e, spec.TypeDate)
@@ -354,6 +367,15 @@ func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, drive
 			RepoCtor:  fmt.Sprintf(nameRepoCtor, hd.Struct),
 			DepsField: pascalCase(hd.Plural),
 		})
+	}
+
+	if opts.Tests {
+		fsrc, err := renderFakeTest(s)
+		if err != nil {
+			return nil, fmt.Errorf("generate fake repository: %w", err)
+		}
+
+		files = append(files, genFile{Path: fileFakeTest, Src: fsrc})
 	}
 
 	if opts.Main {
