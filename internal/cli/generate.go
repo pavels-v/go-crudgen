@@ -68,8 +68,6 @@ func runGenerate(args []string) int {
 	return exitOK
 }
 
-// sourceDateEpoch pins migration versions to SOURCE_DATE_EPOCH when it is set,
-// so repeated generations produce the same file names.
 func sourceDateEpoch() (time.Time, error) {
 	v, ok := os.LookupEnv(envSourceDateEpoch)
 	if !ok {

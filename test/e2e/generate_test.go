@@ -38,11 +38,8 @@ func run(t *testing.T, dir, name string, args ...string) {
 	t.Logf("%s %v:\n%s", name, args, out)
 }
 
-// exampleEpoch pins the example's migration versions to 2026-01-01 00:00:00 UTC.
 const exampleEpoch = "1767225600"
 
-// clean removes the previous generator output, keeping hand-written tests,
-// since the generator refuses to write over it.
 func clean(t *testing.T, dir string) {
 	t.Helper()
 
@@ -108,7 +105,6 @@ func TestGenerateBlogExample(t *testing.T) {
 		require.FileExists(t, filepath.Join(outDir, f), "expected generated file")
 	}
 
-	// A second generation into the same directory must refuse to write.
 	again := exec.Command("go", "run", "./cmd/go-crudgen", "generate",
 		"--spec", "examples/blog.yaml", "--out", "examples/blogservice/internal/blog", "--router")
 	again.Dir = root
