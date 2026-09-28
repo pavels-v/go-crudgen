@@ -4,15 +4,19 @@ package generator
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"go/format"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"go-crudgen/internal/spec"
 )
@@ -44,20 +48,20 @@ const (
 )
 
 const (
-	fileModel     = "%s.gen.go"
-	fileErrors    = "errors.gen.go"
-	fileDate      = "date.gen.go"
-	fileSort      = "sort.gen.go"
-	fileHandler   = pkgREST + "/%s.gen.go"
-	fileRequest   = pkgREST + "/request.gen.go"
-	fileResponse  = pkgREST + "/response.gen.go"
-	fileQuery     = pkgREST + "/query.gen.go"
-	fileRoutes    = pkgREST + "/routes.gen.go"
-	fileRouter    = pkgREST + "/router.gen.go"
-	fileRepo      = pkgPostgres + "/%s.gen.go"
-	fileDB        = pkgPostgres + "/db.gen.go"
-	fileNulls     = pkgPostgres + "/nulls.gen.go"
-	fileMigration = "migrations/%05d_create_%s.sql"
+	fileModel     = "%s.go"
+	fileErrors    = "errors.go"
+	fileDate      = "date.go"
+	fileSort      = "sort.go"
+	fileHandler   = pkgREST + "/%s.go"
+	fileRequest   = pkgREST + "/request.go"
+	fileResponse  = pkgREST + "/response.go"
+	fileQuery     = pkgREST + "/query.go"
+	fileRoutes    = pkgREST + "/routes.go"
+	fileRouter    = pkgREST + "/router.go"
+	fileRepo      = pkgPostgres + "/%s.go"
+	fileDB        = pkgPostgres + "/db.go"
+	fileNulls     = pkgPostgres + "/nulls.go"
+	fileMigration = dirMigrations + "/%s_create_%s.sql"
 )
 
 const (
@@ -82,6 +86,14 @@ const (
 )
 
 const (
+	dirMigrations          = "migrations"
+	migrationVersionLayout = "20060102150405"
+	globGo                 = "*.go"
+	globAny                = "*"
+	suffixTest             = "_test.go"
+)
+
+const (
 	ruleRequired = "required"
 	ruleOmitNil  = "omitnil"
 	ruleSep      = ","
@@ -102,6 +114,8 @@ type Options struct {
 	DryRun bool
 	Driver string // database driver for the connection constructor: "pgx" (default) or "pq"
 	Router bool   // also emit restapi.NewRouter and Deps
+
+	MigrationTime time.Time // version of the first migration, the next ones follow a second apart; zero means now
 }
 
 type genFile struct {
@@ -152,13 +166,23 @@ func Generate(s *spec.Spec, opts Options) error {
 		return nil
 	}
 
-	files, err := renderFiles(s, byName, driverName, driverImp, opts.Router)
+	if opts.MigrationTime.IsZero() {
+		opts.MigrationTime = time.Now()
+	}
+
+	files, err := renderFiles(s, byName, driverName, driverImp, opts)
 	if err != nil {
 		return err
 	}
 
 	if err := checkCollisions(files); err != nil {
 		return err
+	}
+
+	if !toStdout {
+		if err := checkOutDir(opts.OutDir, files); err != nil {
+			return err
+		}
 	}
 
 	for _, f := range files {
@@ -201,6 +225,49 @@ func emit(outDir string, f genFile) error {
 	return nil
 }
 
+// checkOutDir refuses a directory where any file to be written exists, where
+// restapi/ or postgres/ hold code other than tests, or where migrations/ is not
+// empty, so a second run never overwrites or mixes with the first.
+func checkOutDir(dir string, files []genFile) error {
+	for _, f := range files {
+		target := filepath.Join(dir, filepath.FromSlash(f.Path))
+
+		_, err := os.Stat(target)
+		if err == nil {
+			return outDirTaken(dir, target)
+		}
+
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("check output directory: %w", err)
+		}
+	}
+
+	patterns := []string{
+		path.Join(pkgREST, globGo),
+		path.Join(pkgPostgres, globGo),
+		path.Join(dirMigrations, globAny),
+	}
+
+	for _, p := range patterns {
+		matches, err := filepath.Glob(filepath.Join(dir, filepath.FromSlash(p)))
+		if err != nil {
+			return fmt.Errorf("check output directory: %w", err)
+		}
+
+		for _, m := range matches {
+			if !strings.HasSuffix(m, suffixTest) {
+				return outDirTaken(dir, m)
+			}
+		}
+	}
+
+	return nil
+}
+
+func outDirTaken(dir, file string) error {
+	return fmt.Errorf("output directory %s already has generated code or migrations (%s): generate into a clean directory", dir, file)
+}
+
 func entitiesByName(s *spec.Spec) map[string]*spec.Entity {
 	byName := make(map[string]*spec.Entity, len(s.Entities))
 	for i := range s.Entities {
@@ -222,26 +289,28 @@ type sharedFiles struct {
 	Cursor   bool
 }
 
-func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, driverImp string, router bool) ([]genFile, error) {
-	// Migrations are numbered so that a referenced table is created before the
+func renderFiles(s *spec.Spec, byName map[string]*spec.Entity, driverName, driverImp string, opts Options) ([]genFile, error) {
+	// Migrations are versioned so that a referenced table is created before the
 	// table whose foreign key points at it, regardless of declaration order.
 	order, err := migrationOrder(s.Entities, byName)
 	if err != nil {
 		return nil, err
 	}
 
-	migNum := make(map[string]int, len(order))
+	base := opts.MigrationTime.UTC()
+
+	migVersion := make(map[string]string, len(order))
 	for i, e := range order {
-		migNum[e.Name] = i + 1
+		migVersion[e.Name] = base.Add(time.Duration(i) * time.Second).Format(migrationVersionLayout)
 	}
 
 	files := make([]genFile, 0, len(s.Entities)*filesPerEntity)
-	shared := sharedFiles{Parsers: make(map[string]bool), Router: router}
+	shared := sharedFiles{Parsers: make(map[string]bool), Router: opts.Router}
 
 	for i := range s.Entities {
 		e := &s.Entities[i]
 
-		ef, hd, rd, err := renderEntity(s, e, byName, migNum[e.Name])
+		ef, hd, rd, err := renderEntity(s, e, byName, migVersion[e.Name])
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +395,7 @@ func appendShared(files []genFile, s *spec.Spec, driverName, driverImp string, s
 	return files, nil
 }
 
-func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, migNum int) ([]genFile, handlerData, repoData, error) {
+func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, migVersion string) ([]genFile, handlerData, repoData, error) {
 	base := snakeCase(e.Name)
 
 	src, err := renderModel(s, e, byName)
@@ -366,7 +435,7 @@ func renderEntity(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity, 
 
 	files := []genFile{
 		{Path: fmt.Sprintf(fileModel, base), Src: src},
-		{Path: fmt.Sprintf(fileMigration, migNum, plural(e.Name, e.Plural)), Src: msrc},
+		{Path: fmt.Sprintf(fileMigration, migVersion, plural(e.Name, e.Plural)), Src: msrc},
 		{Path: fmt.Sprintf(fileHandler, base), Src: hsrc},
 		{Path: fmt.Sprintf(fileRepo, base), Src: rsrc},
 	}
@@ -420,7 +489,7 @@ type handlerData struct {
 	CursorType   string   // qualified domain cursor, e.g. "domain.PostCursor"
 	CursorFields []string // Go names copied from the last item into the next cursor
 	Defaults     []defaultConst
-	parsers      []string // request.gen.go parse helpers the handlers call
+	parsers      []string // request.go parse helpers the handlers call
 	usesValueOr  bool
 }
 

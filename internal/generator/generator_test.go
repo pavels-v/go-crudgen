@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -1008,6 +1011,78 @@ func TestRenderMigration_ColumnsConstraintsAndOptions(t *testing.T) {
 	require.True(t, strings.HasPrefix(got, "-- +goose Up"), "migration starts with the goose Up annotation")
 }
 
+func TestRenderFiles_MigrationVersions(t *testing.T) {
+	t.Parallel()
+
+	uuidKey := spec.Field{Name: "id", Type: spec.TypeUUID, Primary: true}
+	s := &spec.Spec{Package: "blog", Module: "example.com/blog", Entities: []spec.Entity{
+		{Name: "Post", Fields: []spec.Field{uuidKey, {Name: "author", Type: spec.TypeReferences, Target: "Author"}}},
+		{Name: "Author", Fields: []spec.Field{uuidKey}},
+	}}
+
+	files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, Options{MigrationTime: time.Date(2026, 1, 2, 3, 4, 59, 0, time.UTC)})
+	require.NoError(t, err)
+
+	var got []string
+	for _, f := range files {
+		if strings.HasPrefix(f.Path, dirMigrations+"/") {
+			got = append(got, f.Path)
+		}
+	}
+
+	slices.Sort(got)
+	require.Equal(t, []string{
+		"migrations/20260102030459_create_authors.sql",
+		"migrations/20260102030500_create_posts.sql",
+	}, got)
+}
+
+func TestCheckOutDir(t *testing.T) {
+	t.Parallel()
+
+	targets := []genFile{{Path: "post.go"}, {Path: "restapi/post.go"}, {Path: "postgres/post.go"}}
+	cases := []struct {
+		name    string
+		files   []string
+		wantErr bool
+	}{
+		{name: "empty"},
+		{name: "hand-written files only", files: []string{"go.mod", "service.go", "cmd/main.go", "restapi/api_test.go", "postgres/post_test.go"}},
+		{name: "target in the root", files: []string{"post.go"}, wantErr: true},
+		{name: "target in a subpackage", files: []string{"restapi/post.go"}, wantErr: true},
+		{name: "other restapi code", files: []string{"restapi/middleware.go"}, wantErr: true},
+		{name: "other postgres code", files: []string{"postgres/tx.go"}, wantErr: true},
+		{name: "any migration", files: []string{"migrations/20260101000000_add_index.sql"}, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for _, f := range tc.files {
+				p := filepath.Join(dir, filepath.FromSlash(f))
+				require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+				require.NoError(t, os.WriteFile(p, nil, 0o600))
+			}
+
+			err := checkOutDir(dir, targets)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("missing directory", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, checkOutDir(filepath.Join(t.TempDir(), "absent"), targets))
+	})
+}
+
 func TestMigrationOrder(t *testing.T) {
 	t.Parallel()
 
@@ -1703,31 +1778,31 @@ func TestCheckCollisions(t *testing.T) {
 		wantErr bool
 	}{
 		{"distinct names", []genFile{
-			goFile("a.gen.go", "package blog\ntype A struct{}"),
-			goFile("b.gen.go", "package blog\ntype B struct{}"),
+			goFile("a.go", "package blog\ntype A struct{}"),
+			goFile("b.go", "package blog\ntype B struct{}"),
 		}, false},
 		{"same name in different packages", []genFile{
-			goFile("post.gen.go", "package blog\ntype PostRepository interface{}"),
-			goFile("postgres/post.gen.go", "package postgres\ntype PostRepository struct{}"),
+			goFile("post.go", "package blog\ntype PostRepository interface{}"),
+			goFile("postgres/post.go", "package postgres\ntype PostRepository struct{}"),
 		}, false},
 		{"methods and blank identifiers are not declarations", []genFile{
-			goFile("a.gen.go", "package blog\ntype A struct{}\nfunc (A) M() {}\nvar _ = 1"),
-			goFile("b.gen.go", "package blog\ntype B struct{}\nfunc (B) M() {}\nvar _ = 2"),
+			goFile("a.go", "package blog\ntype A struct{}\nfunc (A) M() {}\nvar _ = 1"),
+			goFile("b.go", "package blog\ntype B struct{}\nfunc (B) M() {}\nvar _ = 2"),
 		}, false},
 		{"non-Go files are not parsed", []genFile{
 			goFile("migrations/00001_create_dates.sql", "CREATE TABLE dates ();"),
 		}, false},
 		{"duplicate type in one package", []genFile{
-			goFile("date.gen.go", "package blog\ntype Date struct{}"),
-			goFile("calendar_date.gen.go", "package blog\ntype Date int"),
+			goFile("date.go", "package blog\ntype Date struct{}"),
+			goFile("calendar_date.go", "package blog\ntype Date int"),
 		}, true},
 		{"duplicate func and var in one package", []genFile{
-			goFile("postgres/a.gen.go", "package postgres\nfunc NewDB() {}"),
-			goFile("postgres/b.gen.go", "package postgres\nvar NewDB = 1"),
+			goFile("postgres/a.go", "package postgres\nfunc NewDB() {}"),
+			goFile("postgres/b.go", "package postgres\nvar NewDB = 1"),
 		}, true},
 		{"duplicate path", []genFile{
-			goFile("date.gen.go", "package blog\ntype Date struct{}"),
-			goFile("date.gen.go", "package blog\ntype Other struct{}"),
+			goFile("date.go", "package blog\ntype Date struct{}"),
+			goFile("date.go", "package blog\ntype Other struct{}"),
 		}, true},
 		{"paths differing only in case", []genFile{
 			goFile("migrations/00001_create_Posts.sql", ""),
@@ -1782,7 +1857,7 @@ func TestRenderFiles_EntityNamesCollideWithGeneratedCode(t *testing.T) {
 			t.Parallel()
 
 			s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: tc.entities}
-			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, tc.router)
+			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, Options{Router: tc.router})
 			require.NoError(t, err)
 
 			err = checkCollisions(files)
