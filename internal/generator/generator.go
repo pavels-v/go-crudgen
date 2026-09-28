@@ -420,7 +420,7 @@ type handlerData struct {
 	CursorType   string   // qualified domain cursor, e.g. "domain.PostCursor"
 	CursorFields []string // Go names copied from the last item into the next cursor
 	Defaults     []defaultConst
-	parsers      []string // router parse helpers the handlers call
+	parsers      []string // request.gen.go parse helpers the handlers call
 	usesValueOr  bool
 }
 
