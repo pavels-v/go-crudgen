@@ -3,7 +3,7 @@ package generator
 import (
 	"strconv"
 
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 var reservedSQL = map[string]struct{}{ //nolint:gochecknoglobals // read-only lookup table

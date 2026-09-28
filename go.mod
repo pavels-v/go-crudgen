@@ -1,10 +1,11 @@
-module go-crudgen
+module github.com/pavels-v/go-crudgen
 
 go 1.27.0
 
 require (
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/mod v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

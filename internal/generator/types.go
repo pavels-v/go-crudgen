@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 // Go type expressions emitted for spec field types. scalarType produces these and

@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	"go-crudgen/internal/spec"
+	"github.com/pavels-v/go-crudgen/internal/spec"
 )
 
 func checkRules(e *spec.Entity, byName map[string]*spec.Entity) error {
