@@ -181,6 +181,9 @@ func TestRenderHandler_DTOs(t *testing.T) {
 			Fields: []spec.Field{
 				{Name: "id", Type: spec.TypeUUID, Primary: true},
 				{Name: "title", Type: spec.TypeString, Required: true},
+				{Name: "slug", Type: spec.TypeString, Required: true, Validate: "min=3"},
+				{Name: "bio", Type: spec.TypeText, Validate: "max=500"},
+				{Name: "views", Type: spec.TypeInt64, Default: 0, Validate: "gte=0"},
 				{Name: "created_at", Type: spec.TypeDatetime, Generate: spec.GenerateOnCreate},
 			},
 		}},
@@ -192,6 +195,9 @@ func TestRenderHandler_DTOs(t *testing.T) {
 		"type UpdatePostRequest struct {",
 		"Title string",
 		`json:"title" validate:"required"`,
+		`json:"slug" validate:"required,min=3"`,
+		"Bio *string `json:\"bio,omitzero\" validate:\"omitnil,max=500\"`",
+		"Views *int64 `json:\"views\" validate:\"omitnil,gte=0\"`",
 	} {
 		wantContains(t, got, want)
 	}
@@ -1266,6 +1272,44 @@ func TestCheckColumns(t *testing.T) {
 			t.Parallel()
 
 			err := checkColumns(&spec.Entity{Name: "Post", Fields: tc.fields})
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestCheckRules(t *testing.T) {
+	t.Parallel()
+
+	author := spec.Entity{Name: "Author", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}}
+	cases := []struct {
+		name    string
+		field   spec.Field
+		wantErr bool
+	}{
+		{"string length", spec.Field{Name: "title", Type: spec.TypeString, Validate: "min=1,max=200"}, false},
+		{"alternatives", spec.Field{Name: "contact", Type: spec.TypeString, Validate: "omitempty,email|url"}, false},
+		{"number range", spec.Field{Name: "likes", Type: spec.TypeInt32, Validate: "gte=0,lte=10"}, false},
+		{"json length", spec.Field{Name: "meta", Type: spec.TypeJSON, Validate: "max=1024"}, false},
+		{"reference key", spec.Field{Name: "author", Type: spec.TypeReferences, Target: "Author", Validate: "required"}, false},
+		{"unknown rule", spec.Field{Name: "email", Type: spec.TypeString, Validate: "emial"}, true},
+		{"unknown alternative", spec.Field{Name: "contact", Type: spec.TypeString, Validate: "email|urll"}, true},
+		{"bad param after required", spec.Field{Name: "title", Type: spec.TypeString, Validate: "required,min=abc"}, true},
+		{"bad param after omitempty", spec.Field{Name: "title", Type: spec.TypeString, Validate: "omitempty,max=abc"}, true},
+		{"empty rule", spec.Field{Name: "title", Type: spec.TypeString, Validate: "min=1,,max=2"}, true},
+		{"length on bool", spec.Field{Name: "published", Type: spec.TypeBool, Validate: "min=1"}, true},
+		{"dive on string", spec.Field{Name: "title", Type: spec.TypeString, Validate: "dive"}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			e := spec.Entity{Name: "Post", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}, tc.field}}
+			err := checkRules(&e, map[string]*spec.Entity{author.Name: &author, e.Name: &e})
 			if tc.wantErr {
 				require.Error(t, err)
 				return

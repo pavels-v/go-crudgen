@@ -15,14 +15,14 @@ const (
 // CreateAuthorRequest is the request body for creating the author entity.
 type CreateAuthorRequest struct {
 	Email  string     `json:"email" validate:"required,email"`
-	Name   *string    `json:"name,omitzero"`
+	Name   *string    `json:"name,omitzero" validate:"omitnil,max=100"`
 	BornOn *blog.Date `json:"born_on,omitzero"`
 }
 
 // UpdateAuthorRequest is the request body for replacing the author entity.
 type UpdateAuthorRequest struct {
 	Email  string     `json:"email" validate:"required,email"`
-	Name   *string    `json:"name,omitzero"`
+	Name   *string    `json:"name,omitzero" validate:"omitnil,max=100"`
 	BornOn *blog.Date `json:"born_on,omitzero"`
 }
 

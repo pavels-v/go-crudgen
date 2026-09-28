@@ -49,6 +49,7 @@ entities:
         filter: true
       - name: name
         type: string
+        validate: "max=100"  # checked only when present
       - name: born_on
         type: date
 
