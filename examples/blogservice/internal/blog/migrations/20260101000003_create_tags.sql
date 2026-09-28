@@ -4,8 +4,12 @@ CREATE TABLE tags (
     slug TEXT NOT NULL PRIMARY KEY,
     label TEXT NOT NULL,
     color TEXT NOT NULL DEFAULT 'gray',
-    weight DOUBLE PRECISION NOT NULL DEFAULT 1
+    weight DOUBLE PRECISION NOT NULL DEFAULT 1,
+    "group" TEXT NOT NULL DEFAULT 'general'
 );
+-- +goose StatementEnd
+-- +goose StatementBegin
+CREATE INDEX idx_tags_group ON tags ("group");
 -- +goose StatementEnd
 
 -- +goose Down

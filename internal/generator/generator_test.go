@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/require"
 
 	"go-crudgen/internal/spec"
@@ -1460,6 +1461,131 @@ func TestMainFiles(t *testing.T) {
 	}
 }
 
+func TestRenderHandlerTest_Keys(t *testing.T) {
+	t.Parallel()
+
+	category := spec.Entity{Name: "Category", Fields: []spec.Field{{Name: "id", Type: spec.TypeInt32, Primary: true}}}
+	cases := []struct {
+		name   string
+		entity spec.Entity
+		want   []string
+		absent []string
+	}{
+		{
+			name:   "generated uuid key",
+			entity: spec.Entity{Name: "Post", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
+			want:   []string{"return &m.ID }, uuid.New)", "id: seeded.ID.String()", "id: uuid.NewString()", `id: "not-an-id"`},
+		},
+		{
+			name:   "generated int32 key",
+			entity: category,
+			want:   []string{"var seq int32", "id: strconv.FormatInt(int64(seeded.ID), 10)", "id: strconv.FormatInt(int64(seeded.ID)+1, 10)"},
+		},
+		{
+			name:   "client string key",
+			entity: spec.Entity{Name: "Tag", Fields: []spec.Field{{Name: "slug", Type: spec.TypeString, Primary: true}}},
+			want:   []string{"return &m.Slug }, nil)", `m := domain.Tag{Slug: "sample"}`, "id: seeded.Slug", `id: "missing"`, `Slug: "sample",`},
+			absent: []string{"not-an-id"},
+		},
+		{
+			name:   "client key referencing an int32 key",
+			entity: spec.Entity{Name: "Stock", Fields: []spec.Field{{Name: "category", Type: spec.TypeReferences, Target: "Category", Primary: true}}},
+			want:   []string{"m := domain.Stock{Category: int32(1)}", "Category: new(int32(1)),"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &spec.Spec{Package: "blog", Module: "example.com/blog", Entities: []spec.Entity{category, tc.entity}}
+			src, err := renderHandlerTest(s, &s.Entities[1], entitiesByName(s), validator.New())
+			require.NoError(t, err)
+			requireParses(t, src)
+
+			got := string(src)
+			for _, want := range tc.want {
+				wantContains(t, got, want)
+			}
+
+			for _, absent := range tc.absent {
+				require.NotContains(t, got, absent)
+			}
+		})
+	}
+}
+
+func TestPickSample(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		fieldType string
+		validate  string
+		want      string
+		wantOK    bool
+	}{
+		{name: "no rules", fieldType: spec.TypeString, want: `"sample"`, wantOK: true},
+		{name: "email", fieldType: spec.TypeString, validate: "required,email", want: `"user@example.com"`, wantOK: true},
+		{name: "url", fieldType: spec.TypeText, validate: "url", want: `"https://example.com"`, wantOK: true},
+		{name: "e164", fieldType: spec.TypeString, validate: "e164", want: `"+14155552671"`, wantOK: true},
+		{name: "exact length", fieldType: spec.TypeString, validate: "len=3", want: `"aaa"`, wantOK: true},
+		{name: "short maximum", fieldType: spec.TypeString, validate: "max=2", want: `"a"`, wantOK: true},
+		{name: "string enum", fieldType: spec.TypeString, validate: "oneof=red green", want: `"red"`, wantOK: true},
+		{name: "number range", fieldType: spec.TypeInt64, validate: "gte=5,lte=200", want: "int64(100)", wantOK: true},
+		{name: "range from params", fieldType: spec.TypeInt32, validate: "min=18,max=65", want: "int32(18)", wantOK: true},
+		{name: "exclusive bound", fieldType: spec.TypeInt32, validate: "gt=1000", want: "int32(1001)", wantOK: true},
+		{name: "number enum", fieldType: spec.TypeInt64, validate: "oneof=7 9", want: "int64(7)", wantOK: true},
+		{name: "float above one", fieldType: spec.TypeFloat, validate: "gt=1", want: "1.5", wantOK: true},
+		{name: "float below param", fieldType: spec.TypeFloat, validate: "lt=-3", want: "-3.5", wantOK: true},
+		{name: "nothing fits", fieldType: spec.TypeString, validate: "hexcolor"},
+	}
+
+	v := validator.New()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := pickSample(v, samples(tc.fieldType, tc.validate), tc.validate)
+			require.Equal(t, tc.wantOK, ok)
+			require.Equal(t, tc.want, got.expr)
+		})
+	}
+}
+
+func TestRenderFiles_Tests(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{Package: "blog", Module: "example.com/blog", Entities: []spec.Entity{
+		{Name: "Post", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
+	}}
+
+	cases := []struct {
+		name  string
+		tests bool
+	}{
+		{name: "without tests"},
+		{name: "with tests", tests: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			files, err := renderFiles(s, entitiesByName(s), sqlDriverPgx, importDriverPgx, Options{Tests: tc.tests})
+			require.NoError(t, err)
+
+			paths := make([]string, len(files))
+			for i, f := range files {
+				paths[i] = f.Path
+			}
+
+			require.Equal(t, tc.tests, slices.Contains(paths, "restapi/post_test.go"))
+			require.Equal(t, tc.tests, slices.Contains(paths, fileFakeTest))
+		})
+	}
+}
+
 func TestRenderRouter_WiresEntities(t *testing.T) {
 	t.Parallel()
 
@@ -1638,6 +1764,101 @@ func TestGroupImports(t *testing.T) {
 	}
 }
 
+func TestCheckTables(t *testing.T) {
+	t.Parallel()
+
+	id := spec.Field{Name: "id", Type: spec.TypeUUID, Primary: true}
+	cases := []struct {
+		name     string
+		entities []spec.Entity
+		wantErr  bool
+	}{
+		{name: "distinct", entities: []spec.Entity{{Name: "Person", Fields: []spec.Field{id}}, {Name: "Member", Fields: []spec.Field{id}}}},
+		{
+			name:     "same plural",
+			entities: []spec.Entity{{Name: "Person", Plural: "people", Fields: []spec.Field{id}}, {Name: "Member", Plural: "people", Fields: []spec.Field{id}}},
+			wantErr:  true,
+		},
+		{
+			name:     "same table after snake case",
+			entities: []spec.Entity{{Name: "BlogPost", Fields: []spec.Field{id}}, {Name: "Entry", Plural: "blog-posts", Fields: []spec.Field{id}}},
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := checkTables(&spec.Spec{Entities: tc.entities})
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestRenderReservedIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{
+		Package: "blog",
+		Module:  "example.com/blog",
+		Entities: []spec.Entity{
+			{Name: "User", Fields: []spec.Field{{Name: "id", Type: spec.TypeUUID, Primary: true}}},
+			{Name: "Order", Plural: "order", Order: "group", Fields: []spec.Field{
+				{Name: "id", Type: spec.TypeUUID, Primary: true},
+				{Name: "user", Type: spec.TypeReferences, Target: "User", Filter: true, Index: true},
+				{Name: "group", Type: spec.TypeString, Required: true},
+			}},
+		},
+	}
+
+	migration := renderMigrationSrc(t, s, "Order")
+	for _, want := range []string{
+		`CREATE TABLE "order" (`,
+		`"user" UUID REFERENCES users (id)`,
+		`"group" TEXT NOT NULL`,
+		`CREATE INDEX idx_order_user ON "order" ("user");`,
+		`DROP TABLE "order";`,
+	} {
+		wantContains(t, migration, want)
+	}
+
+	repo := renderRepoSrc(t, s, "Order")
+	for _, want := range []string{
+		`INSERT INTO "order" (id, "user", "group") VALUES ($1, $2, $3)`,
+		`where = append(where, ` + "`" + `"user" = ?` + "`" + `)`,
+		`order := ` + "`" + `"group", id` + "`",
+		`UPDATE "order" SET "user" = $1, "group" = $2 WHERE id = $3`,
+		`DELETE FROM "order" WHERE id = $1`,
+		"`db:\"user\"`",
+	} {
+		wantContains(t, repo, want)
+	}
+}
+
+func TestRenderRepo_KeyOnlyEntityInsertsDefaults(t *testing.T) {
+	t.Parallel()
+
+	s := &spec.Spec{Package: "app", Module: "example.com/app", Entities: []spec.Entity{{
+		Name:   "Counter",
+		Fields: []spec.Field{{Name: "myId", Type: spec.TypeInt64, Primary: true}},
+	}}}
+
+	got := renderRepoSrc(t, s, "Counter")
+	wantContains(t, got, "`INSERT INTO counters DEFAULT VALUES RETURNING my_id`).Scan(&m.MyId)")
+
+	_, create, ok := strings.Cut(got, "func (r *CounterRepository) Create(")
+	require.True(t, ok)
+
+	create, _, _ = strings.Cut(create, "func (r *CounterRepository) Get(")
+	require.NotContains(t, create, "row :=")
+}
+
 func TestCheckColumns(t *testing.T) {
 	t.Parallel()
 
@@ -1651,6 +1872,10 @@ func TestCheckColumns(t *testing.T) {
 		{"duplicate name", []spec.Field{id, {Name: "title", Type: spec.TypeString}, {Name: "title", Type: spec.TypeText}}, true},
 		{"same column", []spec.Field{id, {Name: "authorName", Type: spec.TypeString}, {Name: "author_name", Type: spec.TypeString}}, true},
 		{"same go field", []spec.Field{id, {Name: "Id", Type: spec.TypeString}}, true},
+		{"not an identifier", []spec.Field{id, {Name: "2fa", Type: spec.TypeBool}}, true},
+		{"filter named like the cursor field", []spec.Field{id, {Name: "after", Type: spec.TypeString, Filter: true}}, true},
+		{"filter named like the limit field", []spec.Field{id, {Name: "Limit", Type: spec.TypeInt32, Filter: true}}, true},
+		{"non-filter named after", []spec.Field{id, {Name: "after", Type: spec.TypeString}}, false},
 	}
 
 	for _, tc := range cases {

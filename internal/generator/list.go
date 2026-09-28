@@ -76,7 +76,7 @@ func listOrder(e *spec.Entity) ordering {
 }
 
 func keyOrder(pk spec.Field) ordering {
-	col := snakeCase(pk.Name)
+	col := sqlIdent(snakeCase(pk.Name))
 
 	return ordering{
 		Asc:       col,
@@ -88,7 +88,7 @@ func keyOrder(pk spec.Field) ordering {
 }
 
 func fieldOrder(f, pk spec.Field) ordering {
-	col, pkCol := snakeCase(f.Name), snakeCase(pk.Name)
+	col, pkCol := sqlIdent(snakeCase(f.Name)), sqlIdent(snakeCase(pk.Name))
 
 	return ordering{
 		Asc:       col + listSep + pkCol,

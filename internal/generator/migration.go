@@ -111,7 +111,8 @@ func migrationOrder(entities []spec.Entity, byName map[string]*spec.Entity) ([]*
 // repositories, a migration is generated for every entity, even one whose
 // primary-key type is not HTTP-serveable still needs its table.
 func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationData, error) {
-	table := plural(e.Name, e.Plural)
+	rawTable := tableName(e)
+	table := sqlIdent(rawTable)
 
 	lines := make([]string, 0, len(e.Fields))
 
@@ -130,7 +131,8 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 			}
 		}
 
-		col := snakeCase(f.Name)
+		rawCol := snakeCase(f.Name)
+		col := sqlIdent(rawCol)
 
 		parts := []string{col, st}
 		if !isNullable(f) {
@@ -157,7 +159,7 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 			target := byName[f.Target]
 
 			parts = append(parts, fmt.Sprintf("REFERENCES %s (%s)",
-				plural(target.Name, target.Plural), snakeCase(target.PrimaryKey()[0].Name)))
+				sqlIdent(tableName(target)), sqlIdent(snakeCase(target.PrimaryKey()[0].Name))))
 			if f.OnDelete == spec.OnDeleteCascade {
 				parts = append(parts, "ON DELETE CASCADE")
 			}
@@ -166,13 +168,13 @@ func migrationInfo(e *spec.Entity, byName map[string]*spec.Entity) (migrationDat
 		lines = append(lines, "    "+strings.Join(parts, " "))
 
 		if f.Index && !f.Primary {
-			indexes = append(indexes, col)
+			indexes = append(indexes, rawCol)
 		}
 	}
 
 	up := []string{fmt.Sprintf("CREATE TABLE %s (\n%s\n);", table, strings.Join(lines, ",\n"))}
 	for _, idx := range indexes {
-		up = append(up, fmt.Sprintf("CREATE INDEX idx_%s_%s ON %s (%s);", table, idx, table, idx))
+		up = append(up, fmt.Sprintf("CREATE INDEX idx_%s_%s ON %s (%s);", rawTable, idx, table, sqlIdent(idx)))
 	}
 
 	return migrationData{

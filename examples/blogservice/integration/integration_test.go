@@ -265,13 +265,17 @@ func TestIntegration(t *testing.T) {
 
 		var created blog.Tag
 		do(t, srv, http.MethodPost, "/tags", restapi.CreateTagRequest{Slug: slug, Label: "Postgres"}, &created, http.StatusCreated)
-		require.Equal(t, blog.Tag{Slug: slug, Label: "Postgres", Color: "gray", Weight: 1}, created)
+		require.Equal(t, blog.Tag{Slug: slug, Label: "Postgres", Color: "gray", Weight: 1, Group: "general"}, created)
 
 		do(t, srv, http.MethodPost, "/tags", restapi.CreateTagRequest{Slug: slug, Label: "Again"}, nil, http.StatusConflict)
 
 		var got blog.Tag
 		do(t, srv, http.MethodGet, "/tags/"+slug, nil, &got, http.StatusOK)
 		require.Equal(t, created, got)
+
+		var list offsetPage[blog.Tag]
+		do(t, srv, http.MethodGet, "/tags?group=general&dir=desc", nil, &list, http.StatusOK)
+		require.Equal(t, []blog.Tag{created}, list.Items)
 	})
 
 	t.Run("down migrations drop the tables", func(t *testing.T) {

@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,10 @@ func TestValidate_OK(t *testing.T) {
 	t.Parallel()
 
 	require.NoError(t, validSpec().Validate())
+
+	s := validSpec()
+	s.Entities[1].Plural = "blog-posts"
+	require.NoError(t, s.Validate())
 }
 
 func TestValidate_OrderByNotNullFields(t *testing.T) {
@@ -100,6 +105,17 @@ func TestValidate_Errors(t *testing.T) {
 		mutate func(*Spec)
 	}{
 		{"missing package", func(s *Spec) { s.Package = "" }},
+		{"plural with a slash", func(s *Spec) { s.Entities[0].Plural = "authors/v2" }},
+		{"int32 default out of range", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "n", Type: TypeInt32, Default: math.MaxInt32 + 1})
+		}},
+		{"infinite float default", func(s *Spec) {
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "f", Type: TypeFloat, Default: math.Inf(1)})
+		}},
+		{"reference to a reference key", func(s *Spec) {
+			s.Entities = append(s.Entities, Entity{Name: "Profile", Fields: []Field{{Name: "author", Type: TypeReferences, Target: "Author", Primary: true}}})
+			s.Entities[1].Fields = append(s.Entities[1].Fields, Field{Name: "profile", Type: TypeReferences, Target: "Profile"})
+		}},
 		{"keyword package", func(s *Spec) { s.Package = "type" }},
 		{"package with a dash", func(s *Spec) { s.Package = "my-blog" }},
 		{"main package", func(s *Spec) { s.Package = pkgMain }},

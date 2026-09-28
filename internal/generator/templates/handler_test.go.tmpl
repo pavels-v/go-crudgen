@@ -1,0 +1,188 @@
+package {{ .Package }}
+
+import (
+{{- range .Imports }}
+	{{ . }}
+{{- end }}
+)
+
+func new{{ .Struct }}TestHandler() (http.Handler, *fakeRepository[{{ .KeyType }}, {{ .Model }}, {{ .ListParams }}]) {
+{{- if .GenInt }}
+	var seq {{ .KeyType }}
+
+	repo := newFakeRepository[{{ .KeyType }}, {{ .Model }}, {{ .ListParams }}](func(m *{{ .Model }}) *{{ .KeyType }} { return &m.{{ .PKGoName }} }, func() {{ .KeyType }} {
+		seq++
+
+		return seq
+	})
+{{- else if .GenUUID }}
+	repo := newFakeRepository[{{ .KeyType }}, {{ .Model }}, {{ .ListParams }}](func(m *{{ .Model }}) *{{ .KeyType }} { return &m.{{ .PKGoName }} }, uuid.New)
+{{- else }}
+	repo := newFakeRepository[{{ .KeyType }}, {{ .Model }}, {{ .ListParams }}](func(m *{{ .Model }}) *{{ .KeyType }} { return &m.{{ .PKGoName }} }, nil)
+{{- end }}
+	mux := http.NewServeMux()
+	New{{ .Struct }}Handler(repo).RegisterRoutes(mux)
+
+	return WithRouteErrors(mux), repo
+}
+
+func seed{{ .Struct }}(t *testing.T, repo *fakeRepository[{{ .KeyType }}, {{ .Model }}, {{ .ListParams }}]) {{ .Model }} {
+	t.Helper()
+
+	m := {{ .Model }}{ {{- if .SeedKey }}{{ .PKGoName }}: {{ .SeedKey }}{{ end -}} }
+	require.NoError(t, repo.Create(t.Context(), &m))
+
+	return m
+}
+
+func validCreate{{ .Struct }}Request() Create{{ .Struct }}Request {
+	return Create{{ .Struct }}Request{
+{{- range .CreateFixture }}
+		{{ .Field }}: {{ .Expr }},
+{{- end }}
+	}
+}
+
+func validUpdate{{ .Struct }}Request() Update{{ .Struct }}Request {
+	return Update{{ .Struct }}Request{
+{{- range .UpdateFixture }}
+		{{ .Field }}: {{ .Expr }},
+{{- end }}
+	}
+}
+
+func Test{{ .Struct }}Handler_Create(t *testing.T) {
+	t.Parallel()
+
+	valid, err := json.Marshal(validCreate{{ .Struct }}Request())
+	require.NoError(t, err)
+
+	cases := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{name: "valid", body: string(valid), wantStatus: http.StatusCreated},
+		{name: "malformed body", body: "{", wantStatus: http.StatusBadRequest},
+		{name: "unknown field", body: `{"unknown_field":1}`, wantStatus: http.StatusBadRequest},
+{{- if .HasRequired }}
+		{name: "missing required fields", body: "{}", wantStatus: http.StatusUnprocessableEntity},
+{{- end }}
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			h, _ := new{{ .Struct }}TestHandler()
+
+			rec := serve(t, h, http.MethodPost, "/{{ .Plural }}", tc.body)
+			require.Equal(t, tc.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func Test{{ .Struct }}Handler_Get(t *testing.T) {
+	t.Parallel()
+
+	h, repo := new{{ .Struct }}TestHandler()
+	seeded := seed{{ .Struct }}(t, repo)
+
+	cases := []struct {
+		name       string
+		id         string
+		wantStatus int
+	}{
+		{name: "existing", id: {{ .SeededID }}, wantStatus: http.StatusOK},
+		{name: "missing", id: {{ .MissingID }}, wantStatus: http.StatusNotFound},
+{{- if .ParsedKey }}
+		{name: "invalid id", id: "not-an-id", wantStatus: http.StatusBadRequest},
+{{- end }}
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := serve(t, h, http.MethodGet, "/{{ .Plural }}/"+tc.id, "")
+			require.Equal(t, tc.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func Test{{ .Struct }}Handler_List(t *testing.T) {
+	t.Parallel()
+
+	h, repo := new{{ .Struct }}TestHandler()
+	seed{{ .Struct }}(t, repo)
+
+	rec := serve(t, h, http.MethodGet, "/{{ .Plural }}", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var page struct {
+		Body struct {
+			Items []jsontext.Value `json:"items"`
+		} `json:"body"`
+	}
+
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page))
+	require.Len(t, page.Body.Items, 1)
+
+	rec = serve(t, h, http.MethodGet, "/{{ .Plural }}?limit=0", "")
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+}
+
+func Test{{ .Struct }}Handler_Update(t *testing.T) {
+	t.Parallel()
+
+	h, repo := new{{ .Struct }}TestHandler()
+	seeded := seed{{ .Struct }}(t, repo)
+
+	valid, err := json.Marshal(validUpdate{{ .Struct }}Request())
+	require.NoError(t, err)
+
+	cases := []struct {
+		name       string
+		id         string
+		body       string
+		wantStatus int
+	}{
+		{name: "existing", id: {{ .SeededID }}, body: string(valid), wantStatus: http.StatusOK},
+		{name: "missing", id: {{ .MissingID }}, body: string(valid), wantStatus: http.StatusNotFound},
+		{name: "malformed body", id: {{ .SeededID }}, body: "{", wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := serve(t, h, http.MethodPut, "/{{ .Plural }}/"+tc.id, tc.body)
+			require.Equal(t, tc.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func Test{{ .Struct }}Handler_Delete(t *testing.T) {
+	t.Parallel()
+
+	h, repo := new{{ .Struct }}TestHandler()
+	seeded := seed{{ .Struct }}(t, repo)
+
+	cases := []struct {
+		name       string
+		id         string
+		wantStatus int
+	}{
+		{name: "existing", id: {{ .SeededID }}, wantStatus: http.StatusNoContent},
+		{name: "missing", id: {{ .MissingID }}, wantStatus: http.StatusNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := serve(t, h, http.MethodDelete, "/{{ .Plural }}/"+tc.id, "")
+			require.Equal(t, tc.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
+}

@@ -52,7 +52,9 @@ func (r *{{ .Receiver }}) Create(ctx context.Context, m *{{ .Model }}) error {
 {{- if .GenerateUUID }}
 	m.{{ .PKGoName }} = uuid.New()
 {{- end }}
+{{- if .InsertArgs }}
 	row := {{ .NewRowFunc }}(m)
+{{- end }}
 
 {{- if .CreateScan }}
 

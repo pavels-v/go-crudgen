@@ -10,9 +10,11 @@ type Tag struct {
 	Label  string  `json:"label"`
 	Color  string  `json:"color"`
 	Weight float64 `json:"weight"`
+	Group  string  `json:"group"`
 }
 
 type TagListParams struct {
+	Group  *string
 	Dir    SortDir
 	Limit  int
 	Offset int

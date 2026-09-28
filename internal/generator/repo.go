@@ -119,10 +119,10 @@ func driverInfo(driver string) (name, imp string, ok bool) {
 // scanList renders the scan-target list for a set of columns, e.g. ["created_at"]
 // -> "&m.CreatedAt". It shares the column list with the SQL builder so a
 // RETURNING clause and its Scan targets can never drift in arity or order.
-func scanList(cols []string) string {
-	out := make([]string, len(cols))
-	for i, c := range cols {
-		out[i] = fmt.Sprintf(exprScanTarget, pascalCase(c))
+func scanList(goNames []string) string {
+	out := make([]string, len(goNames))
+	for i, n := range goNames {
+		out[i] = fmt.Sprintf(exprScanTarget, n)
 	}
 
 	return strings.Join(out, listSep)
@@ -202,8 +202,9 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 
 	name := pascalCase(e.Name)
-	table := plural(e.Name, e.Plural)
+	table := sqlIdent(tableName(e))
 	pkCol := snakeCase(pk.Name)
+	pkSQL := sqlIdent(pkCol)
 	pkGoName := pascalCase(pk.Name)
 
 	impSet := map[string]struct{}{
@@ -217,6 +218,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	// from the model.
 	type col struct {
 		Column   string
+		SQL      string
 		GoName   string
 		Generate string
 	}
@@ -229,6 +231,7 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 
 	for _, f := range e.Fields {
 		c := col{Column: snakeCase(f.Name), GoName: pascalCase(f.Name), Generate: f.Generate}
+		c.SQL = sqlIdent(c.Column)
 
 		specCols = append(specCols, c) // the primary key is supplied by the caller
 		if !f.Primary && f.Generate == "" {
@@ -265,12 +268,13 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	}
 
 	selectCols := make([]string, 0, len(specCols))
-	var generated []string
+	var generated, generatedGo []string
 
 	for _, c := range specCols {
-		selectCols = append(selectCols, c.Column)
+		selectCols = append(selectCols, c.SQL)
 		if c.Generate != "" {
-			generated = append(generated, c.Column)
+			generated = append(generated, c.SQL)
+			generatedGo = append(generatedGo, c.GoName)
 		}
 	}
 
@@ -282,40 +286,47 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	insCols := make([]string, 0, len(specCols))
 	insPh := make([]string, 0, len(specCols))
 	insArgs := make([]string, 0, len(specCols))
-	var ret []string
+	var ret, retGo []string
 
 	for _, c := range specCols {
 		switch {
 		case pkInDB && c.Column == pkCol:
-			ret = append(ret, c.Column)
+			ret = append(ret, c.SQL)
+			retGo = append(retGo, c.GoName)
+
 			continue
 		case c.Generate != "":
-			insCols = append(insCols, c.Column)
+			insCols = append(insCols, c.SQL)
 			insPh = append(insPh, sqlNow)
-			ret = append(ret, c.Column)
+			ret = append(ret, c.SQL)
+			retGo = append(retGo, c.GoName)
+
 			continue
 		}
 
-		insCols = append(insCols, c.Column)
+		insCols = append(insCols, c.SQL)
 		insPh = append(insPh, fmt.Sprintf("$%d", len(insArgs)+1))
 		insArgs = append(insArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
 
 	createSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		table, strings.Join(insCols, listSep), strings.Join(insPh, listSep))
+	if len(insCols) == 0 {
+		createSQL = fmt.Sprintf("INSERT INTO %s DEFAULT VALUES", table)
+	}
 
 	var createScan string
 	if len(ret) > 0 {
 		createSQL += fmt.Sprintf(clauseReturning, strings.Join(ret, listSep))
-		createScan = scanList(ret)
+		createScan = scanList(retGo)
 	}
 
 	getSQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1",
-		strings.Join(selectCols, listSep), table, pkCol)
+		strings.Join(selectCols, listSep), table, pkSQL)
 
 	var listFilterData []repoFilter
 	for _, lf := range filters {
-		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, snakeCase(lf.Field.Name))})
+		listFilterData = append(listFilterData, repoFilter{GoName: lf.GoName, Clause: fmt.Sprintf(exprWhereEqual, sqlIdent(snakeCase(lf.Field.Name)))})
 	}
 
 	listDynamic := len(listFilterData) > 0 || e.CursorPagination()
@@ -333,13 +344,13 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 	updArgs := make([]string, 0, len(update)+1)
 
 	for i, c := range update {
-		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.Column, i+1))
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", c.SQL, i+1))
 		updArgs = append(updArgs, fmt.Sprintf(exprRowField, c.GoName))
 	}
 
 	for _, c := range specCols {
 		if c.Generate == spec.GenerateOnWrite {
-			setClauses = append(setClauses, fmt.Sprintf(exprSetNow, c.Column))
+			setClauses = append(setClauses, fmt.Sprintf(exprSetNow, c.SQL))
 		}
 	}
 
@@ -353,22 +364,22 @@ func repoInfo(s *spec.Spec, e *spec.Entity, byName map[string]*spec.Entity) (rep
 		// Nothing writable (a primary-key-only entity): an empty SET would be
 		// invalid SQL, so Update degrades to an existence check by primary key
 		// that still returns ErrNotFound for a missing row.
-		updateSQL = fmt.Sprintf("SELECT 1 FROM %s WHERE %s = $1", table, pkCol)
+		updateSQL = fmt.Sprintf("SELECT 1 FROM %s WHERE %s = $1", table, pkSQL)
 	case len(setClauses) == 0:
 		// Only on_create columns besides the key: nothing to write, but the
 		// response still needs their stored values.
-		updateSQL = fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", strings.Join(generated, listSep), table, pkCol)
-		updateScan = scanList(generated)
+		updateSQL = fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1", strings.Join(generated, listSep), table, pkSQL)
+		updateScan = scanList(generatedGo)
 	default:
 		updateSQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s = $%d",
-			table, strings.Join(setClauses, listSep), pkCol, len(update)+1)
+			table, strings.Join(setClauses, listSep), pkSQL, len(update)+1)
 		if len(generated) > 0 {
 			updateSQL += fmt.Sprintf(clauseReturning, strings.Join(generated, listSep))
-			updateScan = scanList(generated)
+			updateScan = scanList(generatedGo)
 		}
 	}
 
-	deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", table, pkCol)
+	deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = $1", table, pkSQL)
 
 	// Imports were gathered from every row-field type above (the primary-key type
 	// among them, for the Get/Delete signatures) alongside the always-needed

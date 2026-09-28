@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 
@@ -19,6 +20,7 @@ type tagRow struct {
 	Label  string  `db:"label"`
 	Color  string  `db:"color"`
 	Weight float64 `db:"weight"`
+	Group  string  `db:"group"`
 }
 
 // newTagRow builds the row written by Create and Update. Generated
@@ -29,6 +31,7 @@ func newTagRow(m *domain.Tag) tagRow {
 		Label:  m.Label,
 		Color:  m.Color,
 		Weight: m.Weight,
+		Group:  m.Group,
 	}
 }
 
@@ -39,6 +42,7 @@ func (row tagRow) toModel() domain.Tag {
 		Label:  row.Label,
 		Color:  row.Color,
 		Weight: row.Weight,
+		Group:  row.Group,
 	}
 }
 
@@ -59,7 +63,7 @@ var _ domain.TagRepository = (*TagRepository)(nil)
 func (r *TagRepository) Create(ctx context.Context, m *domain.Tag) error {
 	row := newTagRow(m)
 
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO tags (slug, label, color, weight) VALUES ($1, $2, $3, $4)`, row.Slug, row.Label, row.Color, row.Weight); err != nil {
+	if _, err := r.db.ExecContext(ctx, `INSERT INTO tags (slug, label, color, weight, "group") VALUES ($1, $2, $3, $4, $5)`, row.Slug, row.Label, row.Color, row.Weight, row.Group); err != nil {
 		return fmt.Errorf("create tag: %w", mapWriteError(err))
 	}
 
@@ -68,7 +72,7 @@ func (r *TagRepository) Create(ctx context.Context, m *domain.Tag) error {
 
 func (r *TagRepository) Get(ctx context.Context, id string) (*domain.Tag, error) {
 	var row tagRow
-	if err := r.db.GetContext(ctx, &row, `SELECT slug, label, color, weight FROM tags WHERE slug = $1`, id); err != nil {
+	if err := r.db.GetContext(ctx, &row, `SELECT slug, label, color, weight, "group" FROM tags WHERE slug = $1`, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
@@ -82,15 +86,31 @@ func (r *TagRepository) Get(ctx context.Context, id string) (*domain.Tag, error)
 }
 
 func (r *TagRepository) List(ctx context.Context, p domain.TagListParams) ([]domain.Tag, error) {
-	order := `slug`
+	order := `"group", slug`
 	if p.Dir == domain.SortDesc {
-		order = `slug DESC`
+		order = `"group" DESC, slug DESC`
 	}
 
-	q := `SELECT slug, label, color, weight FROM tags ORDER BY ` + order + ` LIMIT $1 OFFSET $2`
+	var (
+		where []string
+		args  []any
+	)
+
+	if p.Group != nil {
+		where = append(where, `"group" = ?`)
+		args = append(args, *p.Group)
+	}
+
+	q := `SELECT slug, label, color, weight, "group" FROM tags`
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+
+	args = append(args, p.Limit, p.Offset)
+	q += ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 
 	var rows []tagRow
-	if err := r.db.SelectContext(ctx, &rows, q, p.Limit, p.Offset); err != nil {
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q), args...); err != nil {
 		return nil, fmt.Errorf("list tag: %w", err)
 	}
 
@@ -105,7 +125,7 @@ func (r *TagRepository) List(ctx context.Context, p domain.TagListParams) ([]dom
 func (r *TagRepository) Update(ctx context.Context, m *domain.Tag) error {
 	row := newTagRow(m)
 
-	res, err := r.db.ExecContext(ctx, `UPDATE tags SET label = $1, color = $2, weight = $3 WHERE slug = $4`, row.Label, row.Color, row.Weight, row.Slug)
+	res, err := r.db.ExecContext(ctx, `UPDATE tags SET label = $1, color = $2, weight = $3, "group" = $4 WHERE slug = $5`, row.Label, row.Color, row.Weight, row.Group, row.Slug)
 	if err != nil {
 		return fmt.Errorf("update tag: %w", mapWriteError(err))
 	}
