@@ -169,25 +169,6 @@ entities:
 - Entity and field names must map to Go identifiers (`2fa` does not).
 - `references` becomes a column typed from the target's key with a `REFERENCES` constraint; self-references work, reference cycles between entities are rejected.
 
-## Roadmap
-
-- [x] YAML spec parser and validation
-- [x] Model + struct-tag generation
-- [x] CRUD handler generation (`net/http`)
-- [x] PostgreSQL repository (`sqlx` / `database/sql`)
-- [x] Migrations (goose SQL schema per entity)
-- [x] List endpoint: pagination (`?limit` / `?offset`)
-- [x] List endpoint: cursor pagination (`?cursor`)
-- [x] List endpoint: filtering (equality)
-- [x] List endpoint: ordering (`order` + `?dir`)
-- [x] Relations (`belongs_to` / `has_many`)
-  - [x] `belongs_to` via `references` fields
-  - [x] `has_many` via `filter: true` on the reference field
-- [x] Router composition: `RegisterRoutes`, `WithRouteErrors`, `NewRouter` unless `--no-router`
-- [x] Reject `validate` rules the validator ignores or misapplies (anything but presence rules on `date`, `datetime`, `decimal`; anything but presence and `uuid*` rules on `uuid`)
-- [x] Service entry point: `main.go` with config, `NewDB`, migrations, routes and graceful shutdown, unless `--no-main`
-- [x] Handler test scaffold: `restapi/<entity>_test.go` with a fake repository and table-driven tests
-
 ## License
 
 [MIT](LICENSE) © Pavel Sizikov
