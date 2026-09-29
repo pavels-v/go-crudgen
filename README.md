@@ -1,5 +1,11 @@
 # go-crudgen
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/pavels-v/go-crudgen.svg)](https://pkg.go.dev/github.com/pavels-v/go-crudgen)
+[![Go Report Card](https://goreportcard.com/badge/github.com/pavels-v/go-crudgen)](https://goreportcard.com/report/github.com/pavels-v/go-crudgen)
+[![Release](https://img.shields.io/github/v/release/pavels-v/go-crudgen)](https://github.com/pavels-v/go-crudgen/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/pavels-v/go-crudgen)](go.mod)
+[![License](https://img.shields.io/github/license/pavels-v/go-crudgen)](LICENSE)
+
 Generates a RESTful Go service (models, DTOs, handlers, router, PostgreSQL repositories, goose migrations) from a YAML entity spec.
 
 ## Why
